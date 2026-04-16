@@ -517,6 +517,12 @@ def render_gsc_card() -> str:
           <input type="text" name="site_name" value="">
         </label>
         <p class="field-help">Nom lisible du site ou du client, juste pour rendre les sorties plus propres.</p>
+        <label>Niche stopwords
+          <input type="text" name="niche_stopwords" value="" placeholder="padel,tennis,mutuelle">
+        </label>
+        <p class="field-help">Ajoute ici les mots de niche que tu veux ignorer dans la détection de chevauchement page / requête.</p>
+        <label class="checkbox-line"><input type="checkbox" name="auto_niche_stopwords"> Auto niche stopwords</label>
+        <p class="field-help">Ajoute automatiquement les mots présents dans au moins 60% des URLs analysées.</p>
         <div class="inline-fields">
           <label>Output CSV
             <input type="text" name="output_csv" value="reports/gsc_report.csv">

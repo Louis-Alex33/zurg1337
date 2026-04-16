@@ -185,6 +185,8 @@ def run_gsc_job(job_id: str) -> None:
     output_json = (job.params.get("output_json") or "reports/gsc_report.json").strip()
     output_html = (job.params.get("output_html") or "reports/gsc_report.html").strip()
     site_name = (job.params.get("site_name") or "").strip()
+    niche_stopwords = parse_csv_list((job.params.get("niche_stopwords") or "").strip())
+    auto_niche_stopwords = job.params.get("auto_niche_stopwords") == "on"
     announce_job_outputs(job, [output_csv, output_json, output_html])
 
     def action() -> tuple[list[str], list[str]]:
@@ -196,6 +198,8 @@ def run_gsc_job(job_id: str) -> None:
             output_html=output_html,
             output_json=output_json,
             site_name=site_name,
+            niche_stopwords=niche_stopwords,
+            auto_niche_stopwords=auto_niche_stopwords,
         )
         summary = [
             f"{len(results)} pages GSC analysees",
