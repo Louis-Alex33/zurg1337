@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+repo_git/
+reports/**/*.json
+reports/**/*.csv
+reports/**/*.html
+data/domains_raw.csv
+data/domains_scored.csv
+data/*.json

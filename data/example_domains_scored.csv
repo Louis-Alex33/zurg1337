@@ -1,0 +1,3 @@
+score,domain,cms,estimated_pages,has_blog,has_dated_content,dated_urls_count,contact_found,social_links,issues,title,notes,sitemap_available,source_query,source_provider,first_seen
+72,example-padel.fr,WordPress,142,yes,yes,12,contact@example-padel.fr,instagram | youtube,Homepage sans meta description,Example Padel,,yes,padel,static,2026-04-13T10:00:00+00:00
+48,studio-yoga-lyon.fr,Wix,34,yes,,0,Page contact detectee,facebook | instagram,Pas de donnees structurees visibles sur la homepage,Studio Yoga Lyon,,yes,yoga conseils,static,2026-04-13T10:00:00+00:00
