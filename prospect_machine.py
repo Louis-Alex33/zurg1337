@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from audit import audit_domains
+from compare_audits import compare_audit_reports
 from config import (
     AUDIT_MODE_CONFIGS,
     DEFAULT_AUDIT_MODE,
@@ -13,6 +15,7 @@ from config import (
     QUALIFY_MODE_CONFIGS,
 )
 from discover import discover_domains, discovery_to_console_rows, import_domains_from_file
+from doctor import format_doctor_results, run_doctor
 from gsc import run_gsc_analysis
 from qualify import qualify_domains
 from utils import CLIError, parse_csv_list
@@ -25,10 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python prospect_machine.py discover --niches \"padel,yoga,velo\" --limit 100 --output data/domains_raw.csv\n"
-            "  python prospect_machine.py qualify data/domains_raw.csv --output data/domains_scored.csv\n"
-            "  python prospect_machine.py audit data/domains_scored.csv --top 20 --output-dir reports/audits\n"
-            "  python prospect_machine.py gsc exports/pages_recent.csv exports/pages_old.csv -q exports/queries.csv "
+            "  python3 prospect_machine.py discover --niches \"padel,yoga,velo\" --limit 100 --output data/domains_raw.csv\n"
+            "  python3 prospect_machine.py qualify data/domains_raw.csv --output data/domains_scored.csv\n"
+            "  python3 prospect_machine.py audit data/domains_scored.csv --top 20 --output-dir reports/audits\n"
+            "  python3 prospect_machine.py compare-audits reports/audits/old.json reports/audits/new.json\n"
+            "  python3 prospect_machine.py gsc exports/pages_recent.csv exports/pages_old.csv -q exports/queries.csv "
             "--html reports/client.html --output reports/client.csv --json reports/client.json\n"
         ),
     )
@@ -102,6 +106,29 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--overlap", action="store_true", dest="overlap_enabled", default=None, help="Force overlap analysis on")
     audit_parser.add_argument("--skip-overlap", action="store_false", dest="overlap_enabled", help="Disable overlap analysis")
     audit_parser.add_argument("--overlap-max-pages", type=int, help="Maximum pages considered for overlap analysis")
+    audit_parser.add_argument(
+        "--crawl-source",
+        default="home",
+        choices=["home", "sitemap", "mixed"],
+        help="Seed crawl from homepage, sitemap URLs, or both",
+    )
+    audit_parser.add_argument("--sitemap-max-urls", type=int, help="Maximum sitemap URLs used as crawl seeds")
+    audit_parser.add_argument("--skip-robots", action="store_true", help="Do not check robots.txt before crawling URLs")
+    audit_parser.add_argument("--html", dest="html_output", help="Optional standalone HTML audit report path")
+    audit_parser.add_argument("--no-history", action="store_true", help="Do not write dated JSON history copies")
+    audit_parser.add_argument("--sqlite-index", help="Optional SQLite index path for audit history")
+    audit_parser.add_argument("--cache", action="store_true", help="Enable local HTTP cache for audit requests")
+    audit_parser.add_argument("--cache-dir", default=".cache/prospect_machine/http", help="HTTP cache directory")
+    audit_parser.add_argument("--cache-ttl-seconds", type=int, default=604_800, help="HTTP cache TTL in seconds")
+
+    compare_parser = subparsers.add_parser("compare-audits", help="Compare two audit JSON reports")
+    compare_parser.add_argument("old_report", help="Older audit JSON path")
+    compare_parser.add_argument("new_report", help="Newer audit JSON path")
+    compare_parser.add_argument("--output", help="Optional CSV output with page-level changes")
+    compare_parser.add_argument("--json", dest="json_output", help="Optional JSON comparison output")
+
+    doctor_parser = subparsers.add_parser("doctor", help="Check local setup and writable output folders")
+    doctor_parser.add_argument("--json", dest="json_output", help="Optional JSON output path")
 
     gsc_parser = subparsers.add_parser("gsc", help="Analyze GSC page exports")
     gsc_parser.add_argument("current", help="Current pages export CSV")
@@ -193,6 +220,15 @@ def main(argv: list[str] | None = None) -> int:
                 max_total_seconds_per_domain=args.max_total_seconds_per_domain,
                 overlap_enabled=args.overlap_enabled,
                 overlap_max_pages=args.overlap_max_pages,
+                crawl_source=args.crawl_source,
+                sitemap_max_urls=args.sitemap_max_urls,
+                respect_robots=not args.skip_robots,
+                html_output=args.html_output,
+                history=not args.no_history,
+                sqlite_index=args.sqlite_index,
+                cache_enabled=args.cache,
+                cache_dir=args.cache_dir,
+                cache_ttl_seconds=args.cache_ttl_seconds,
                 site=args.site,
             )
             print(f"{len(reports)} audits ecrits dans {args.output_dir}")
@@ -202,6 +238,31 @@ def main(argv: list[str] | None = None) -> int:
                     f"findings={len(report.critical_findings)}"
                 )
             return 0
+
+        if args.command == "compare-audits":
+            comparison = compare_audit_reports(
+                old_report_path=args.old_report,
+                new_report_path=args.new_report,
+                output_csv=args.output,
+                output_json=args.json_output,
+            )
+            print(
+                "Comparaison terminee | "
+                f"score {comparison['old_observed_health_score']} -> {comparison['new_observed_health_score']} "
+                f"(delta={comparison['observed_health_delta']}) | "
+                f"improved={len(comparison['improved_pages'])} | "
+                f"regressed={len(comparison['regressed_pages'])}"
+            )
+            return 0
+
+        if args.command == "doctor":
+            checks = run_doctor()
+            for line in format_doctor_results(checks):
+                print(line)
+            if args.json_output:
+                with open(args.json_output, "w", encoding="utf-8") as handle:
+                    json.dump(checks, handle, ensure_ascii=False, indent=2)
+            return 0 if all(check.get("ok") for check in checks) else 1
 
         if args.command == "gsc":
             results = run_gsc_analysis(

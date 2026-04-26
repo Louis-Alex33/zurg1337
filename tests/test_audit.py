@@ -8,12 +8,15 @@ from unittest.mock import patch
 
 from audit import (
     build_report,
+    classify_page_type,
     compute_observed_health_score,
     crawl_page,
     crawl_site,
     detect_possible_overlap,
     detect_probable_orphans,
     find_dated_references,
+    parse_robots_txt,
+    robots_can_fetch,
     should_crawl,
 )
 from models import AuditPage
@@ -306,6 +309,79 @@ class AuditHeuristicsTests(unittest.TestCase):
 
         self.assertIsNotNone(page)
         self.assertEqual(mock_parser.call_count, 1)
+
+    def test_crawl_page_extracts_indexation_and_page_score_signals(self) -> None:
+        html = """
+        <html>
+          <head>
+            <title>Guide SEO complet pour WordPress</title>
+            <meta name="description" content="Un guide SEO complet pour améliorer les pages WordPress avec des exemples concrets.">
+            <meta name="robots" content="noindex,follow">
+            <link rel="canonical" href="https://other.example/guide-seo">
+          </head>
+          <body>
+            <main>
+              <h1>Guide SEO complet</h1>
+              <p>{copy}</p>
+              <a href="/blog/a">Lire plus</a>
+              <a href="/blog/b">Lire plus</a>
+              <a href="/blog/c">Lire plus</a>
+              <a href="/blog/d">Lire plus</a>
+              <a href="/blog/e">Lire plus</a>
+            </main>
+          </body>
+        </html>
+        """.format(copy="mot " * 500)
+        limited_response = SimpleNamespace(
+            url="https://example.com/blog/guide-seo",
+            request_url="https://example.com/blog/guide-seo",
+            status_code=200,
+            skip_reason="",
+            text=html,
+            redirect_count=1,
+        )
+
+        with patch("audit.fetch_limited_html", return_value=limited_response):
+            page = crawl_page(
+                "https://example.com/blog/guide-seo",
+                session=object(),  # type: ignore[arg-type]
+                timeout=4,
+                max_html_bytes=100_000,
+                max_links_per_page=10,
+                max_redirects=4,
+            )
+
+        self.assertIsNotNone(page)
+        assert page is not None
+        self.assertTrue(page.is_noindex)
+        self.assertEqual(page.canonical_status, "cross_domain")
+        self.assertEqual(page.page_type, "article")
+        self.assertEqual(page.generic_internal_anchor_count, 5)
+
+        report = build_report([page], domain="example.com")
+
+        self.assertEqual(report.summary["noindex_pages"], 1)
+        self.assertEqual(report.summary["canonical_cross_domain_pages"], 1)
+        self.assertLess(report.pages[0]["page_health_score"], 100)
+
+    def test_robots_parser_blocks_disallowed_paths(self) -> None:
+        rules = parse_robots_txt(
+            """
+            User-agent: *
+            Disallow: /private
+            Sitemap: https://example.com/sitemap.xml
+            """
+        )
+
+        self.assertEqual(rules["sitemaps"], ["https://example.com/sitemap.xml"])
+        self.assertFalse(robots_can_fetch({"disallow": rules["disallow"]}, "https://example.com/private/page"))
+        self.assertTrue(robots_can_fetch({"disallow": rules["disallow"]}, "https://example.com/blog/page"))
+
+    def test_classify_page_type_uses_url_and_heading_hints(self) -> None:
+        self.assertEqual(classify_page_type("https://example.com/"), "homepage")
+        self.assertEqual(classify_page_type("https://example.com/blog/test"), "article")
+        self.assertEqual(classify_page_type("https://example.com/product/test"), "product")
+        self.assertEqual(classify_page_type("https://example.com/any", title="Guide complet"), "article")
 
     def test_find_dated_references_ignores_current_year_but_flags_older_dates(self) -> None:
         references = find_dated_references(

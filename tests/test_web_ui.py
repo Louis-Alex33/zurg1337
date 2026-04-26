@@ -116,6 +116,10 @@ class WebUITests(unittest.TestCase):
             mode="audit_light",
             max_pages=20,
             delay=0.2,
+            crawl_source="home",
+            respect_robots=True,
+            html_output=None,
+            cache_enabled=False,
             site="eversportzone.com",
             cancel_callback=mock_audit_domains.call_args.kwargs["cancel_callback"],
         )
@@ -568,6 +572,34 @@ class WebUITests(unittest.TestCase):
             headers={
                 "Content-Length": "0",
                 "Origin": "http://127.0.0.1:8787",
+            },
+        )
+
+        handler.do_POST()
+
+        self.assertTrue(errors)
+        self.assertNotEqual(errors[0][0], HTTPStatus.FORBIDDEN)
+
+    def test_post_accepts_localhost_when_server_is_bound_to_loopback(self) -> None:
+        handler, errors = self._make_post_handler(
+            "/unknown",
+            headers={
+                "Content-Length": "0",
+                "Origin": "http://localhost:8787",
+            },
+        )
+
+        handler.do_POST()
+
+        self.assertTrue(errors)
+        self.assertNotEqual(errors[0][0], HTTPStatus.FORBIDDEN)
+
+    def test_post_referer_accepts_loopback_alias(self) -> None:
+        handler, errors = self._make_post_handler(
+            "/unknown",
+            headers={
+                "Content-Length": "0",
+                "Referer": "http://localhost:8787/?flash=ok",
             },
         )
 

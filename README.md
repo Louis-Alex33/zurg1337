@@ -12,7 +12,7 @@ Son objectif est de t'aider a:
 
 Le projet reste volontairement leger:
 
-- une seule entree CLI: `python prospect_machine.py ...`
+- une seule entree CLI: `python3 prospect_machine.py ...`
 - pas de framework lourd
 - sorties locales en `CSV` et `JSON`
 - architecture lisible et testable
@@ -140,6 +140,13 @@ Important:
 |- gsc.py
 |- scoring.py
 |- web_ui.py
+|- web_ui/
+|  |- __init__.py
+|  |- server.py
+|  |- jobs.py
+|  |- fs_ops.py
+|  |- rendering.py
+|  `- styles.py
 |- utils.py
 |- io_helpers.py
 |- models.py
@@ -326,18 +333,46 @@ Audit direct d'un seul site:
 python3 prospect_machine.py audit --site example.com --max-pages 80
 ```
 
+Audit direct avec crawl mixte home + sitemap et rapport HTML autonome:
+
+```bash
+python3 prospect_machine.py audit \
+  --site example.com \
+  --crawl-source mixed \
+  --max-pages 80 \
+  --html reports/audits/example.html
+```
+
+Comparer deux audits d'un meme site:
+
+```bash
+python3 prospect_machine.py compare-audits \
+  reports/audits/example.com/2026-04-20T10-00-00.json \
+  reports/audits/example.com/2026-04-26T10-00-00.json \
+  --output reports/audits/example_delta.csv
+```
+
 Ce que l'audit produit dans la V2:
 
 - un `observed_health_score` borne entre `0` et `100`
+- un `page_health_score` pour chaque page analysee
+- un `page_type` indicatif: homepage, article, product, service, taxonomy, legal, etc.
 - des `critical_findings` prudents
 - des `business_priority_signals`
+- des `technical_checks`: noindex, canonical, robots.txt, redirections, ancres generiques
+- des `internal_linking_opportunities`
 - une liste `top_pages_to_rework`
 - des `confidence_notes`
+- une copie datee dans `reports/audits/<domain>/<timestamp>.json`
+- un index local SQLite dans `reports/audits/audit_index.sqlite`
 
 Important:
 
 - le crawl reste volontairement simple
 - `audit_light` est le mode par defaut
+- `--crawl-source home` part de la homepage, `sitemap` part des URLs sitemap, `mixed` combine les deux
+- `robots.txt` est verifie par defaut; utilise `--skip-robots` seulement pour un test local ponctuel
+- `--cache` active un cache HTTP local utile quand tu relances souvent le meme audit
 - le systeme prefere un audit incomplet mais rapide a un crawl trop couteux
 - le crawl applique des budgets de pages, profondeur, requetes, liens et temps par domaine
 - les pages HTML trop lourdes sont ignorees plutot que parsees integralement
@@ -359,6 +394,28 @@ python3 prospect_machine.py gsc \
   --output reports/client.csv \
   --json reports/client.json \
   --site "Client Example"
+```
+
+Exemple avec stopwords de niche explicites:
+
+```bash
+python3 prospect_machine.py gsc \
+  exports/pages_recent.csv \
+  exports/pages_old.csv \
+  -q exports/queries.csv \
+  --niche-stopwords "padel,tennis" \
+  --output reports/gsc_report.csv
+```
+
+Exemple avec détection automatique des stopwords de niche:
+
+```bash
+python3 prospect_machine.py gsc \
+  exports/pages_recent.csv \
+  exports/pages_old.csv \
+  -q exports/queries.csv \
+  --auto-niche-stopwords \
+  --output reports/gsc_report.csv
 ```
 
 Le module GSC est utile quand tu veux:
@@ -585,6 +642,17 @@ Chaque case de la card `GSC`:
   Exemple: `Client Example` ou `Magazine Yoga FR`.
   Ce champ sert surtout pour rendre les rapports plus propres a partager.
 
+- `Niche stopwords`
+  Role: ignorer explicitement des mots de niche dans la detection de chevauchement page / requete.
+  Quoi mettre: une liste separee par des virgules.
+  Exemple: `padel,tennis,mutuelle`.
+  Bon a savoir: ces mots s'ajoutent au set generique deja integre dans le module.
+
+- `Auto niche stopwords`
+  Role: detecter automatiquement les mots trop frequents dans le corpus d'URLs analyse.
+  Quoi mettre: coche la case si tu veux activer ce mode.
+  Effet: les tokens presents dans au moins 60% des URLs sont ignores pour la detection de chevauchement.
+
 - `Output CSV`
   Role: definir ou ecrire le rapport tabulaire genere par le module GSC.
   Quoi mettre: un chemin de fichier CSV.
@@ -633,6 +701,9 @@ data/domains_scored.csv
 data/domains_scored.json
 reports/audits/audit_summary.csv
 reports/audits/<domain>.json
+reports/audits/<domain>/<timestamp>.json
+reports/audits/audit_index.sqlite
+reports/audits/<domain>.html
 reports/gsc_report.csv
 reports/gsc_report.json
 reports/gsc_report.html
@@ -651,8 +722,19 @@ python3 prospect_machine.py --help
 Afficher l'aide d'un sous-module:
 
 ```bash
+python3 prospect_machine.py discover --help
 python3 prospect_machine.py qualify --help
 python3 prospect_machine.py audit --help
+python3 prospect_machine.py compare-audits --help
+python3 prospect_machine.py gsc --help
+python3 prospect_machine.py doctor --help
+python3 prospect_machine.py ui --help
+```
+
+Verifier l'installation locale:
+
+```bash
+python3 prospect_machine.py doctor
 ```
 
 Lancer les tests:
@@ -682,7 +764,11 @@ Il cherche a produire une priorisation raisonnable pour la prospection:
 - `qualify.py` separe collecte des signaux et qualification
 - `scoring.py` centralise les ponderations
 - `audit.py` gere crawl, heuristiques et rapport
-- `web_ui.py` fournit une UI locale tres legere
+- `audit_store.py` persiste un index SQLite local des audits
+- `compare_audits.py` compare deux rapports JSON d'audit
+- `doctor.py` verifie l'installation locale
+- `web_ui.py` reste un shim de compatibilite vers le package `web_ui/`
+- `web_ui/` fournit une UI locale tres legere, decoupee en sous-modules (`server`, `jobs`, `fs_ops`, `rendering`)
 
 ## Compatibilite legacy
 

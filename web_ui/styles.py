@@ -822,6 +822,15 @@ PAGE_STYLE = """
       border: 1px solid rgba(217,211,195,0.9);
       background: rgba(255,255,255,0.68);
     }
+    .table-filter-row {
+      margin: 0 0 10px;
+      max-width: 360px;
+    }
+    .table-filter-input {
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.92rem;
+    }
     table {
       width: 100%;
       border-collapse: collapse;

@@ -144,12 +144,19 @@ def run_audit_job(job_id: str) -> None:
     site = (job.params.get("site") or "").strip()
     input_csv = (job.params.get("input_csv") or "data/domains_scored.csv").strip()
     output_dir = (job.params.get("output_dir") or "reports/audits").strip()
+    html_output = (job.params.get("html_output") or "").strip()
     mode = (job.params.get("mode") or DEFAULT_AUDIT_MODE).strip() or DEFAULT_AUDIT_MODE
+    crawl_source = (job.params.get("crawl_source") or "home").strip() or "home"
     top_raw = (job.params.get("top") or "").strip()
     min_score_raw = (job.params.get("min_score") or "").strip()
     max_pages = int(job.params.get("max_pages") or str(DEFAULT_MAX_PAGES))
     delay = float(job.params.get("delay") or str(DEFAULT_DELAY))
-    announce_job_outputs(job, [str(Path(output_dir) / "audit_summary.csv")])
+    respect_robots = job.params.get("skip_robots") != "on"
+    cache_enabled = job.params.get("cache_enabled") == "on"
+    announced_outputs = [str(Path(output_dir) / "audit_summary.csv"), str(Path(output_dir) / "audit_index.sqlite")]
+    if html_output:
+        announced_outputs.append(html_output)
+    announce_job_outputs(job, announced_outputs)
 
     def action() -> tuple[list[str], list[str]]:
         reports = _audit_domains()(
@@ -160,17 +167,25 @@ def run_audit_job(job_id: str) -> None:
             mode=mode,
             max_pages=max_pages,
             delay=delay,
+            crawl_source=crawl_source,
+            respect_robots=respect_robots,
+            html_output=html_output or None,
+            cache_enabled=cache_enabled,
             site=site or None,
             cancel_callback=job_cancel_callback(job),
         )
         summary = [
             f"{len(reports)} audits termines",
             f"Mode: {mode}",
+            f"Crawl source: {crawl_source}",
             f"Site direct: {site}" if site else f"Input CSV: {input_csv}",
             f"Summary CSV: {output_dir}/audit_summary.csv",
         ]
-        outputs = [str(Path(output_dir) / "audit_summary.csv")]
+        outputs = [str(Path(output_dir) / "audit_summary.csv"), str(Path(output_dir) / "audit_index.sqlite")]
+        if html_output:
+            outputs.append(html_output)
         outputs.extend(str(Path(output_dir) / f"{report.domain}.json") for report in reports[:5])
+        outputs.extend(report.html_path for report in reports[:5] if report.html_path and report.html_path not in outputs)
         return outputs, summary
 
     execute_job(job, action)

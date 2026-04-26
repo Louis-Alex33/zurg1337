@@ -467,6 +467,13 @@ def render_audit_card() -> str:
           <label>Mode
             <select name="mode">{mode_options}</select>
           </label>
+          <label>Crawl source
+            <select name="crawl_source">
+              <option value="home" selected>home</option>
+              <option value="sitemap">sitemap</option>
+              <option value="mixed">mixed</option>
+            </select>
+          </label>
           <label>Top
             <input type="number" name="top" value="3" min="1">
           </label>
@@ -487,7 +494,15 @@ def render_audit_card() -> str:
         <label>Output dir
           <input type="text" name="output_dir" value="reports/audits">
         </label>
-        <p class="field-help">Regarde ensuite `reports/audits/audit_summary.csv`, puis le JSON du domaine pour le detail.</p>
+        <label>Output HTML
+          <input type="text" name="html_output" value="" placeholder="reports/audits/audit.html">
+        </label>
+        <div class="inline-fields">
+          <label class="checkbox-line"><input type="checkbox" name="cache_enabled"> Cache HTTP</label>
+          <label class="checkbox-line"><input type="checkbox" name="skip_robots"> Ignorer robots.txt</label>
+        </div>
+        <p class="field-help">`mixed` part de la home et du sitemap. Le HTML autonome est pratique pour relire un audit sans passer par l'UI. Le cache aide surtout quand tu itères plusieurs fois sur le même site.</p>
+        <p class="field-help">Regarde ensuite `reports/audits/audit_summary.csv`, le JSON du domaine, le HTML si demandé, et `reports/audits/audit_index.sqlite` pour l'historique local.</p>
         <button class="button" type="submit">3. Sortir Un Mini Audit Exploitable</button>
       </form>
     </section>
@@ -719,6 +734,27 @@ def render_file_page(path: Path, variant: str = "full") -> str:
         </section>
         """
         return page_shell(f"JSON - {relative_path}", content)
+
+    if path.suffix in {".sqlite", ".db"}:
+        content = f"""
+        <section class="panel file-shell">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">SQLite Index</p>
+              <h1>{html.escape(str(relative_path))}</h1>
+              <p class="lede">Base locale d'historique des audits. Elle est prévue pour les scripts, exports et comparaisons futures.</p>
+            </div>
+            <div class="panel-actions">
+              <a class="button secondary" href="/">Retour home</a>
+            </div>
+          </div>
+          <div class="meta-grid file-meta">
+            <div><strong>Type</strong><span>SQLite</span></div>
+            <div><strong>Taille</strong><span>{html.escape(file_size)}</span></div>
+          </div>
+        </section>
+        """
+        return page_shell(f"SQLite - {relative_path}", content)
 
     payload = html.escape(path.read_text("utf-8", errors="ignore"))
     content = f"""
@@ -1150,6 +1186,8 @@ def render_top_pages_to_rework(items: list[dict[str, object]], pages_by_url: dic
         priority_label = priority_score_label(item.get("priority_score"))
         page_depth_label = depth_label(item.get("depth"))
         display_url = format_url_display(str(item.get("url") or ""), max_length=72)
+        health_score = str(item.get("page_health_score") or page_details.get("page_health_score") or "-")
+        page_type = str(item.get("page_type") or page_details.get("page_type") or "-")
         chips = "".join(
             f"<span class='priority-chip'>{html.escape(client_reason_label(str(reason)))}</span>"
             for reason in reasons
@@ -1158,6 +1196,8 @@ def render_top_pages_to_rework(items: list[dict[str, object]], pages_by_url: dic
             "<article class='page-priority-card'>"
             f"<a class='page-url' href='{html.escape(str(item.get('url') or '#'))}' target='_blank' rel='noreferrer'>{html.escape(display_url)}</a>"
             f"<div class='page-priority-meta'><span class='audit-pages-pill'>{html.escape(priority_label)}</span>"
+            f"<span class='audit-pages-pill'>score page {html.escape(health_score)}/100</span>"
+            f"<span class='audit-pages-pill'>{html.escape(page_type)}</span>"
             f"<span class='audit-pages-pill'>{html.escape(str(item.get('word_count') or 0))} mots</span>"
             f"<span class='audit-pages-pill'>{html.escape(page_depth_label)}</span>"
             f"<span class='audit-pages-pill'>{html.escape(confidence)}</span></div>"
@@ -1269,6 +1309,9 @@ def render_summary_key_figures(summary: dict[str, object]) -> str:
         ("pages_with_errors", "Pages en erreur"),
         ("missing_meta_descriptions", "Descriptions Google manquantes"),
         ("missing_h1", "Titres principaux manquants"),
+        ("avg_page_health_score", "Score moyen page"),
+        ("noindex_pages", "Pages noindex"),
+        ("canonical_to_other_url_pages", "Canonicals à vérifier"),
         ("weak_internal_linking_pages", "Pages peu reliées"),
         ("possible_content_overlap_pairs", "Sujets trop proches"),
         ("dated_content_signals", "Dates visibles à vérifier"),
@@ -1444,6 +1487,10 @@ def render_full_csv_table(path: Path) -> tuple[dict[str, int], str]:
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
     body = "".join(body_rows) or f"<tr><td colspan='{len(fieldnames)}'>Aucune ligne.</td></tr>"
     table = (
+        "<div class='table-filter-row'>"
+        "<input class='table-filter-input' type='search' placeholder='Filtrer ce tableau' "
+        "oninput='filterCsvTable(this)'>"
+        "</div>"
         "<div class='table-wrap file-table'>"
         "<table>"
         f"<thead><tr>{headers}</tr></thead>"
@@ -1469,5 +1516,15 @@ def page_shell(title: str, content: str) -> str:
   <main class="page">
     {content}
   </main>
+  <script>
+    function filterCsvTable(input) {{
+      const wrapper = input.closest('.table-filter-row').nextElementSibling;
+      if (!wrapper) return;
+      const query = input.value.toLowerCase();
+      wrapper.querySelectorAll('tbody tr').forEach((row) => {{
+        row.style.display = row.innerText.toLowerCase().includes(query) ? '' : 'none';
+      }});
+    }}
+  </script>
 </body>
 </html>"""

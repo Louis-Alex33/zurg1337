@@ -90,12 +90,15 @@ class QualifiedDomain:
 @dataclass(slots=True)
 class AuditPage:
     url: str
+    requested_url: str = ""
     status_code: int = 0
     title: str = ""
     meta_description: str = ""
     h1: list[str] = field(default_factory=list)
     word_count: int = 0
     internal_links_out: list[str] = field(default_factory=list)
+    generic_internal_anchor_count: int = 0
+    empty_internal_anchor_count: int = 0
     images_total: int = 0
     images_without_alt: int = 0
     depth: int = 0
@@ -103,7 +106,14 @@ class AuditPage:
     issues: list[str] = field(default_factory=list)
     dated_references: list[str] = field(default_factory=list)
     canonical: str = ""
+    canonical_status: str = ""
+    meta_robots: str = ""
+    is_noindex: bool = False
+    robots_allowed: bool = True
+    redirect_count: int = 0
     has_structured_data: bool = False
+    page_type: str = ""
+    page_health_score: int = 100
     content_like: bool = False
     meaningful_h1_count: int = 0
     overlap_fingerprint: str = ""
@@ -126,6 +136,11 @@ class AuditReport:
     business_priority_signals: list[dict[str, Any]] = field(default_factory=list)
     top_pages_to_rework: list[dict[str, Any]] = field(default_factory=list)
     confidence_notes: list[str] = field(default_factory=list)
+    technical_checks: dict[str, Any] = field(default_factory=dict)
+    internal_linking_opportunities: list[dict[str, Any]] = field(default_factory=list)
+    crawl_metadata: dict[str, Any] = field(default_factory=dict)
+    history_path: str = ""
+    html_path: str = ""
     pages: list[dict[str, Any]] = field(default_factory=list)
 
 

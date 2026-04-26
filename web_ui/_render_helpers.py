@@ -147,6 +147,10 @@ def build_client_actions(
     top_pages: list[dict[str, object]],
 ) -> list[str]:
     actions: list[str] = []
+    if int(summary.get("noindex_pages", 0) or 0):
+        actions.append("Vérifier les pages de contenu marquées noindex avant toute reprise éditoriale.")
+    if int(summary.get("canonical_to_other_url_pages", 0) or 0) or int(summary.get("canonical_cross_domain_pages", 0) or 0):
+        actions.append("Contrôler les canonicals qui pointent vers une autre URL.")
     if int(summary.get("dated_content_signals", 0) or 0):
         actions.append("Vérifier que les dates visibles correspondent bien à l’état réel des contenus importants.")
     if int(summary.get("thin_content_pages", 0) or 0):
@@ -171,6 +175,10 @@ def build_primary_rationale(
         lines.append(
             f"Le rapport fait ressortir en priorité : {client_signal_label(str(business_signals[0].get('key') or ''), str(business_signals[0].get('signal') or '')).lower()}."
         )
+    if int(summary.get("noindex_pages", 0) or 0):
+        lines.append("Certaines pages de contenu sont marquées noindex, ce qui peut empêcher leur présence dans Google.")
+    if int(summary.get("canonical_to_other_url_pages", 0) or 0) or int(summary.get("canonical_cross_domain_pages", 0) or 0):
+        lines.append("Des canonicals demandent une vérification car elles peuvent déplacer le signal vers une autre URL.")
     if int(summary.get("weak_internal_linking_pages", 0) or 0):
         lines.append("Certaines pages semblent peu soutenues par les liens internes, ce qui limite leur visibilité dans le site.")
     if int(summary.get("possible_content_overlap_pairs", 0) or 0):
@@ -214,6 +222,10 @@ def client_signal_label(signal_key: str, fallback: str) -> str:
         "weak_internal_linking_pages": "Pages peu soutenues par les liens internes",
         "deep_pages_detected": "Pages éloignées de l’accueil",
         "possible_content_overlap_pairs": "Contenus trop proches sur le même sujet",
+        "noindex_pages": "Pages importantes marquées noindex",
+        "canonical_to_other_url_pages": "Canonicals à vérifier",
+        "canonical_cross_domain_pages": "Canonicals externes à vérifier",
+        "robots_blocked_pages": "Pages bloquées par robots.txt",
     }
     return labels.get(signal_key, fallback or "Aucune priorité nette")
 
@@ -227,6 +239,9 @@ def client_reason_label(reason: str) -> str:
         "page trop éloignée de l'accueil": "page assez loin de l’accueil",
         "description Google absente": "description Google absente",
         "titre Google absent": "titre Google absent",
+        "page marquée noindex": "page noindex",
+        "canonical à vérifier": "canonical à vérifier",
+        "ancres internes trop génériques": "ancres internes génériques",
     }
     return labels.get(reason, reason)
 
@@ -254,6 +269,10 @@ def signal_helper_text(signal_key: str) -> str:
         "weak_internal_linking_pages": "Certaines pages reçoivent trop peu de liens internes pour être bien soutenues.",
         "deep_pages_detected": "Certaines pages paraissent trop éloignées de la page d'accueil.",
         "possible_content_overlap_pairs": "Certaines pages semblent répondre au même besoin et peuvent se concurrencer.",
+        "noindex_pages": "Certaines pages de contenu sont explicitement écartées de l'indexation.",
+        "canonical_to_other_url_pages": "Certaines pages indiquent une URL canonique différente.",
+        "canonical_cross_domain_pages": "Certaines pages indiquent une URL canonique sur un autre domaine.",
+        "robots_blocked_pages": "Certaines URLs sont bloquées par les règles robots.txt observées.",
     }
     return helpers.get(signal_key, "Ce signal mérite une vérification manuelle dans le contexte du site.")
 
@@ -278,11 +297,13 @@ def build_signal_examples(signal_key: str, payload: dict[str, object]) -> list[s
         ]
     if signal_key == "probable_orphan_pages":
         return [format_url_display(str(url)) for url in probable_orphans[:5]]
-    if signal_key in {"thin_content_pages", "weak_internal_linking_pages", "deep_pages_detected"}:
+    if signal_key in {"thin_content_pages", "weak_internal_linking_pages", "deep_pages_detected", "noindex_pages", "canonical_to_other_url_pages"}:
         reason_map = {
             "thin_content_pages": "contenu à enrichir pour mieux répondre à la recherche",
             "weak_internal_linking_pages": "peu de liens internes vers cette page",
             "deep_pages_detected": "page trop éloignée de l'accueil",
+            "noindex_pages": "page marquée noindex",
+            "canonical_to_other_url_pages": "canonical à vérifier",
         }
         reason = reason_map[signal_key]
         return [
@@ -392,6 +413,9 @@ def compute_audit_summary_metrics(rows: list[dict[str, str]]) -> dict[str, int]:
 
 def build_priority_labels(row: dict[str, str], limit: int = 4) -> list[str]:
     mapping = [
+        ("noindex_pages", "pages noindex"),
+        ("canonical_to_other_url_pages", "canonicals à vérifier"),
+        ("robots_blocked_pages", "bloquées robots.txt"),
         ("thin_content_pages", "contenus à enrichir"),
         ("duplicate_title_groups", "titres Google répétés"),
         ("duplicate_meta_description_groups", "descriptions Google répétées"),

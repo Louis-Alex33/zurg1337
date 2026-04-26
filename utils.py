@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import re
+import base64
+import hashlib
+import json
+import time
 from dataclasses import dataclass
 from collections.abc import Iterable
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
@@ -66,6 +72,106 @@ def make_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(REQUEST_HEADERS)
     return session
+
+
+class CachedResponse:
+    def __init__(
+        self,
+        url: str,
+        request_url: str,
+        status_code: int,
+        headers: dict[str, str],
+        content: bytes,
+        history_urls: list[str],
+        encoding: str | None = None,
+    ) -> None:
+        self.url = url
+        self.request = SimpleNamespace(url=request_url)
+        self.status_code = status_code
+        self.headers = headers
+        self.content = content
+        self.text = content.decode(encoding or "utf-8", errors="replace")
+        self.history = [SimpleNamespace(url=item) for item in history_urls]
+        self.encoding = encoding or "utf-8"
+
+    def __enter__(self) -> "CachedResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:  # type: ignore[no-untyped-def]
+        return None
+
+    def iter_content(self, chunk_size: int = 16_384):  # type: ignore[no-untyped-def]
+        for index in range(0, len(self.content), chunk_size):
+            yield self.content[index : index + chunk_size]
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Error for url: {self.url}")
+
+
+class CachedSession:
+    def __init__(self, cache_dir: str | Path, ttl_seconds: int = 604_800) -> None:
+        self.session = make_session()
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.ttl_seconds = ttl_seconds
+        self.headers = self.session.headers
+
+    def get(self, url: str, **kwargs):  # type: ignore[no-untyped-def]
+        return self._request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs):  # type: ignore[no-untyped-def]
+        return self.session.post(url, **kwargs)
+
+    def _request(self, method: str, url: str, **kwargs):  # type: ignore[no-untyped-def]
+        cache_key = hashlib.sha256(f"{method}:{url}:{kwargs.get('params') or ''}".encode("utf-8")).hexdigest()
+        cache_path = self.cache_dir / f"{cache_key}.json"
+        now = time.time()
+        if cache_path.exists():
+            try:
+                payload = json.loads(cache_path.read_text(encoding="utf-8"))
+                if now - float(payload.get("stored_at", 0)) <= self.ttl_seconds:
+                    return CachedResponse(
+                        url=str(payload.get("url") or url),
+                        request_url=str(payload.get("request_url") or url),
+                        status_code=int(payload.get("status_code") or 0),
+                        headers={str(k): str(v) for k, v in dict(payload.get("headers") or {}).items()},
+                        content=base64.b64decode(str(payload.get("content") or "")),
+                        history_urls=[str(item) for item in payload.get("history_urls") or []],
+                        encoding=str(payload.get("encoding") or "utf-8"),
+                    )
+            except Exception:
+                pass
+
+        response = self.session.request(method, url, **kwargs)
+        content = response.content
+        payload = {
+            "stored_at": now,
+            "url": response.url,
+            "request_url": response.request.url if response.request is not None else url,
+            "status_code": response.status_code,
+            "headers": dict(response.headers),
+            "content": base64.b64encode(content).decode("ascii"),
+            "history_urls": [item.url for item in response.history],
+            "encoding": response.encoding or "utf-8",
+        }
+        try:
+            cache_path.write_text(json.dumps(payload), encoding="utf-8")
+        except OSError:
+            pass
+        return CachedResponse(
+            url=response.url,
+            request_url=payload["request_url"],
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            content=content,
+            history_urls=payload["history_urls"],
+            encoding=response.encoding or "utf-8",
+        )
+
+
+def make_cached_session(cache_dir: str, ttl_seconds: int = 604_800) -> CachedSession:
+    return CachedSession(cache_dir=cache_dir, ttl_seconds=ttl_seconds)
 
 
 def is_big_site(domain: str) -> bool:

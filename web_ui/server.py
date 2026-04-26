@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -126,12 +127,17 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
         if not source:
             return False
         parsed = urlparse(source)
-        if not parsed.scheme or not parsed.netloc:
+        if not parsed.scheme or not parsed.netloc or parsed.hostname is None:
             return False
         host, port = self.server.server_address[:2]
-        expected_origin = f"http://{host}:{port}"
-        request_origin = f"{parsed.scheme}://{parsed.netloc}"
-        return request_origin == expected_origin
+        if parsed.scheme != "http":
+            return False
+        request_port = parsed.port or (80 if parsed.scheme == "http" else None)
+        if request_port != port:
+            return False
+        return parsed.hostname == host or (
+            _is_loopback_host(parsed.hostname) and _is_loopback_host(str(host))
+        )
 
     def _send_html(self, content: str, status: int = 200) -> None:
         body = content.encode("utf-8")
@@ -233,3 +239,12 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
         else:
             message = f"{deleted} job(s) supprime(s) de l'historique."
         self._redirect(f"/?flash={quote(message)}")
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False

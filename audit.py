@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import time
+import xml.etree.ElementTree as ET
+import html as html_lib
 from collections import defaultdict, deque
 from dataclasses import asdict
 from datetime import datetime
@@ -13,6 +15,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from audit_store import record_audit_report
 from config import (
     AUDIT_MODE_CONFIGS,
     CONTENT_PATH_HINTS,
@@ -27,7 +30,7 @@ from config import (
 )
 from io_helpers import read_scored_csv, write_csv_rows, write_json_file
 from models import AuditPage, AuditReport, QualifiedDomain
-from utils import CLIError, clean_domain, contains_year_reference, fetch_limited_html, make_session, normalize_url
+from utils import CLIError, clean_domain, contains_year_reference, fetch_limited_html, make_cached_session, make_session, normalize_url
 
 DATED_PATTERNS = [
     re.compile(r"\b20(?:1[8-9]|2[0-9])\b"),
@@ -36,6 +39,23 @@ DATED_PATTERNS = [
         re.I,
     ),
 ]
+
+CRAWL_SOURCES = {"home", "sitemap", "mixed"}
+GENERIC_ANCHOR_TEXTS = {
+    "cliquez ici",
+    "continuer",
+    "decouvrir",
+    "découvrir",
+    "en savoir plus",
+    "ici",
+    "lire",
+    "lire la suite",
+    "lire plus",
+    "more",
+    "read more",
+    "voir",
+    "voir plus",
+}
 
 
 def audit_domains(
@@ -52,6 +72,15 @@ def audit_domains(
     max_total_seconds_per_domain: float | None = None,
     overlap_enabled: bool | None = None,
     overlap_max_pages: int | None = None,
+    crawl_source: str = "home",
+    sitemap_max_urls: int | None = None,
+    respect_robots: bool = True,
+    html_output: str | None = None,
+    history: bool = True,
+    sqlite_index: str | None = None,
+    cache_enabled: bool = False,
+    cache_dir: str = ".cache/prospect_machine/http",
+    cache_ttl_seconds: int = 604_800,
     mode: str = DEFAULT_AUDIT_MODE,
     site: str | None = None,
     session: requests.Session | None = None,
@@ -59,13 +88,20 @@ def audit_domains(
     cancel_callback: Callable[[], None] | None = None,
 ) -> list[AuditReport]:
     mode_config = get_audit_mode_config(mode)
+    if crawl_source not in CRAWL_SOURCES:
+        raise CLIError(f"Source de crawl inconnue: {crawl_source}. Valeurs: home, sitemap, mixed.")
     selected = select_domains(input_csv=input_csv, top=top, min_score=min_score, site=site)
     if not selected:
         raise CLIError("Aucun domaine a auditer apres application des filtres.")
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-    client = session or make_session()
+    if session is not None:
+        client = session
+    elif cache_enabled:
+        client = make_cached_session(cache_dir=cache_dir, ttl_seconds=cache_ttl_seconds)
+    else:
+        client = make_session()
 
     reports: list[AuditReport] = []
     resolved_max_pages = max_pages or mode_config.max_pages or DEFAULT_MAX_PAGES
@@ -84,6 +120,7 @@ def audit_domains(
     )
     resolved_overlap_enabled = mode_config.overlap_enabled if overlap_enabled is None else overlap_enabled
     resolved_overlap_max_pages = overlap_max_pages if overlap_max_pages is not None else mode_config.overlap_max_pages
+    resolved_sitemap_max_urls = sitemap_max_urls if sitemap_max_urls is not None else max(resolved_max_pages * 4, 40)
     summary_rows: list[dict[str, int | str]] = []
     summary_fieldnames = [
         "domain",
@@ -100,6 +137,12 @@ def audit_domains(
         "weak_internal_linking_pages",
         "deep_pages_detected",
         "dated_content_signals",
+        "avg_page_health_score",
+        "min_page_health_score",
+        "noindex_pages",
+        "canonical_missing_pages",
+        "canonical_to_other_url_pages",
+        "robots_blocked_pages",
     ]
     total = len(selected)
     print(
@@ -111,6 +154,7 @@ def audit_domains(
             cancel_callback()
         print(f"\n[{index}/{total}] Audit de {item.domain} (score={item.score})")
         start_url = item.domain if item.domain.startswith("http") else f"https://{item.domain}"
+        crawl_metadata: dict[str, object] = {}
         pages = crawl_site(
             start_url,
             max_pages=resolved_max_pages,
@@ -123,10 +167,14 @@ def audit_domains(
             delay=delay,
             timeout=mode_config.timeout,
             max_redirects=mode_config.max_redirects,
+            crawl_source=crawl_source,
+            sitemap_max_urls=resolved_sitemap_max_urls,
+            respect_robots=respect_robots,
             session=client,
             progress_label=item.domain,
             excluded_path_prefixes=excluded_path_prefixes,
             cancel_callback=cancel_callback,
+            metadata=crawl_metadata,
         )
         if not pages:
             report = AuditReport(
@@ -138,6 +186,7 @@ def audit_domains(
                     "Aucune page HTML accessible n'a pu etre crawlee.",
                     "Ce resultat ne permet pas de conclure sur la qualite SEO du site.",
                 ],
+                crawl_metadata=crawl_metadata,
             )
         else:
             report = build_report(
@@ -145,10 +194,23 @@ def audit_domains(
                 clean_domain(item.domain),
                 overlap_enabled=resolved_overlap_enabled,
                 overlap_max_pages=resolved_overlap_max_pages,
+                crawl_metadata=crawl_metadata,
             )
 
         report_path = output_path / f"{report.domain}.json"
         write_json_file(report_path, asdict(report))
+        report.history_path = ""
+        if history:
+            history_path = write_audit_history_report(output_path, report)
+            report.history_path = str(history_path)
+            write_json_file(report_path, asdict(report))
+        if html_output:
+            html_path = resolve_audit_html_path(html_output, output_path, report, single_report=len(selected) == 1)
+            write_audit_html_report(report, html_path)
+            report.html_path = str(html_path)
+            write_json_file(report_path, asdict(report))
+        index_path = sqlite_index or str(output_path / "audit_index.sqlite")
+        record_audit_report(index_path, report)
         print(
             f"  -> {report.pages_crawled} pages crawllees | "
             f"observed_health_score={report.observed_health_score} | "
@@ -171,6 +233,12 @@ def audit_domains(
                 "weak_internal_linking_pages": report.summary.get("weak_internal_linking_pages", 0),
                 "deep_pages_detected": report.summary.get("deep_pages_detected", 0),
                 "dated_content_signals": report.summary.get("dated_content_signals", 0),
+                "avg_page_health_score": report.summary.get("avg_page_health_score", 0),
+                "min_page_health_score": report.summary.get("min_page_health_score", 0),
+                "noindex_pages": report.summary.get("noindex_pages", 0),
+                "canonical_missing_pages": report.summary.get("canonical_missing_pages", 0),
+                "canonical_to_other_url_pages": report.summary.get("canonical_to_other_url_pages", 0),
+                "robots_blocked_pages": report.summary.get("robots_blocked_pages", 0),
             }
         )
 
@@ -179,6 +247,9 @@ def audit_domains(
         summary_rows,
         fieldnames=summary_fieldnames,
     )
+    if html_output and len(reports) > 1:
+        index_path = Path(html_output)
+        write_audit_html_index(reports, index_path)
     if cancel_callback is not None:
         cancel_callback()
     return reports
@@ -204,6 +275,178 @@ def select_domains(
     return items
 
 
+def write_audit_history_report(output_path: Path, report: AuditReport) -> Path:
+    timestamp = report.audited_at.replace(":", "-")
+    history_path = output_path / report.domain / f"{timestamp}.json"
+    report.history_path = str(history_path)
+    write_json_file(history_path, asdict(report))
+    return history_path
+
+
+def resolve_audit_html_path(
+    html_output: str,
+    output_path: Path,
+    report: AuditReport,
+    single_report: bool,
+) -> Path:
+    requested = Path(html_output)
+    if single_report:
+        return requested
+    return output_path / "html" / f"{report.domain}.html"
+
+
+def write_audit_html_index(reports: list[AuditReport], output_path: Path) -> Path:
+    rows = []
+    for report in reports:
+        link = report.html_path or f"html/{report.domain}.html"
+        if report.html_path:
+            try:
+                link = str(Path(report.html_path).relative_to(output_path.parent))
+            except ValueError:
+                link = report.html_path
+        rows.append(
+            "<tr>"
+            f"<td>{html_lib.escape(report.domain)}</td>"
+            f"<td>{report.pages_crawled}</td>"
+            f"<td>{report.observed_health_score}/100</td>"
+            f"<td><a href='{html_lib.escape(link)}'>Rapport HTML</a></td>"
+            "</tr>"
+        )
+    body = "".join(rows) or "<tr><td colspan='4'>Aucun rapport.</td></tr>"
+    html = f"""<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audit SEO - index</title>
+  <style>{audit_html_styles()}</style>
+</head>
+<body>
+  <main>
+    <h1>Index des audits SEO</h1>
+    <table>
+      <thead><tr><th>Domaine</th><th>Pages</th><th>Score</th><th>Rapport</th></tr></thead>
+      <tbody>{body}</tbody>
+    </table>
+  </main>
+</body>
+</html>"""
+    output_file = write_text_file(output_path, html)
+    return output_file
+
+
+def write_audit_html_report(report: AuditReport, output_path: Path) -> Path:
+    summary = report.summary
+    top_pages = report.top_pages_to_rework[:8]
+    signals = report.business_priority_signals[:8]
+    technical = report.technical_checks
+    page_rows = []
+    for page in report.pages[:80]:
+        page_rows.append(
+            "<tr>"
+            f"<td><a href='{html_lib.escape(str(page.get('url') or '#'))}'>{html_lib.escape(short_url(str(page.get('url') or '')))}</a></td>"
+            f"<td>{html_lib.escape(str(page.get('page_type') or '-'))}</td>"
+            f"<td>{html_lib.escape(str(page.get('page_health_score') or 0))}/100</td>"
+            f"<td>{html_lib.escape(str(page.get('word_count') or 0))}</td>"
+            f"<td>{html_lib.escape(' | '.join(str(item) for item in (page.get('issues') or [])[:4]))}</td>"
+            "</tr>"
+        )
+    top_page_items = "".join(
+        f"<li><a href='{html_lib.escape(str(item.get('url') or '#'))}'>{html_lib.escape(short_url(str(item.get('url') or '')))}</a>"
+        f" <span>{html_lib.escape(str(item.get('page_health_score') or '-'))}/100</span></li>"
+        for item in top_pages
+    ) or "<li>Aucune page prioritaire nette.</li>"
+    signal_items = "".join(
+        f"<li><strong>{html_lib.escape(str(item.get('signal') or 'Signal'))}</strong> "
+        f"<span>{html_lib.escape(str(item.get('count') or 0))}</span></li>"
+        for item in signals
+    ) or "<li>Aucun signal prioritaire net.</li>"
+    technical_items = "".join(
+        f"<li><strong>{html_lib.escape(key.replace('_', ' '))}</strong> <span>{html_lib.escape(str(value))}</span></li>"
+        for key, value in technical.items()
+    ) or "<li>Aucun signal technique net.</li>"
+    metadata_items = "".join(
+        f"<li><strong>{html_lib.escape(str(key).replace('_', ' '))}</strong> <span>{html_lib.escape(str(value))}</span></li>"
+        for key, value in report.crawl_metadata.items()
+    ) or "<li>Métadonnées non disponibles.</li>"
+    html = f"""<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audit SEO - {html_lib.escape(report.domain)}</title>
+  <style>{audit_html_styles()}</style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <p>Audit SEO autonome</p>
+      <h1>{html_lib.escape(report.domain)}</h1>
+      <strong>{report.observed_health_score}/100</strong>
+      <span>{report.pages_crawled} pages crawlées · {html_lib.escape(report.audited_at)}</span>
+    </header>
+    <section class="grid">
+      <article><h2>Synthèse</h2><ul>
+        <li><strong>Pages de contenu</strong> <span>{summary.get('content_like_pages', 0)}</span></li>
+        <li><strong>Score moyen page</strong> <span>{summary.get('avg_page_health_score', 0)}/100</span></li>
+        <li><strong>Score page min</strong> <span>{summary.get('min_page_health_score', 0)}/100</span></li>
+        <li><strong>Pages légères</strong> <span>{summary.get('thin_content_pages', 0)}</span></li>
+      </ul></article>
+      <article><h2>Signaux prioritaires</h2><ul>{signal_items}</ul></article>
+      <article><h2>Technique</h2><ul>{technical_items}</ul></article>
+      <article><h2>Crawl</h2><ul>{metadata_items}</ul></article>
+    </section>
+    <section>
+      <h2>Pages à revoir en priorité</h2>
+      <ul class="top-pages">{top_page_items}</ul>
+    </section>
+    <section>
+      <h2>Pages analysées</h2>
+      <table>
+        <thead><tr><th>URL</th><th>Type</th><th>Score</th><th>Mots</th><th>Points relevés</th></tr></thead>
+        <tbody>{"".join(page_rows)}</tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>"""
+    output_file = write_text_file(output_path, html)
+    return output_file
+
+
+def write_text_file(path: Path, payload: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload, encoding="utf-8")
+    return path
+
+
+def audit_html_styles() -> str:
+    return """
+    body { margin: 0; font-family: Arial, sans-serif; color: #17212b; background: #f6f7f4; }
+    main { max-width: 1120px; margin: 0 auto; padding: 32px; }
+    .hero { padding: 28px; background: #17313e; color: white; border-radius: 8px; margin-bottom: 24px; }
+    .hero p { margin: 0 0 8px; text-transform: uppercase; letter-spacing: .08em; font-size: 12px; }
+    .hero h1 { margin: 0 0 12px; font-size: 34px; }
+    .hero strong { display: block; font-size: 42px; margin-bottom: 4px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    article, section { margin-bottom: 20px; }
+    article { background: white; border: 1px solid #dde3db; border-radius: 8px; padding: 16px; }
+    h2 { font-size: 18px; margin: 0 0 12px; }
+    ul { padding-left: 18px; }
+    li { margin: 7px 0; }
+    li span { color: #53605a; }
+    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #dde3db; }
+    th, td { padding: 10px; border-bottom: 1px solid #e8ece5; text-align: left; vertical-align: top; }
+    th { background: #eef2ea; }
+    a { color: #0b5c76; }
+    """
+
+
+def short_url(url: str, max_length: int = 78) -> str:
+    cleaned = url.replace("https://", "").replace("http://", "").rstrip("/")
+    return cleaned if len(cleaned) <= max_length else cleaned[: max_length - 1].rstrip("/") + "…"
+
+
 def crawl_site(
     start_url: str,
     max_pages: int = DEFAULT_MAX_PAGES,
@@ -216,10 +459,14 @@ def crawl_site(
     delay: float = DEFAULT_DELAY,
     timeout: int = 8,
     max_redirects: int = 5,
+    crawl_source: str = "home",
+    sitemap_max_urls: int = 120,
+    respect_robots: bool = True,
     session: requests.Session | None = None,
     progress_label: str = "",
     excluded_path_prefixes: set[str] | None = None,
     cancel_callback: Callable[[], None] | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> list[AuditPage]:
     if not start_url.startswith(("http://", "https://")):
         start_url = f"https://{start_url}"
@@ -227,9 +474,34 @@ def crawl_site(
     base_domain = clean_domain(start_url)
     client = session or make_session()
 
-    queue: deque[tuple[str, int]] = deque([(start_url, 0)])
+    robots_rules = fetch_robots_rules(start_url, client, timeout=timeout) if respect_robots else default_robots_rules()
+    sitemap_urls: list[str] = []
+    if crawl_source in {"sitemap", "mixed"}:
+        sitemap_urls = discover_sitemap_urls(
+            start_url,
+            session=client,
+            timeout=timeout,
+            max_urls=sitemap_max_urls,
+            max_redirects=max_redirects,
+            robots_rules=robots_rules,
+            excluded_path_prefixes=excluded_path_prefixes,
+        )
+    seed_urls = build_seed_urls(start_url, sitemap_urls=sitemap_urls, crawl_source=crawl_source)
+    if metadata is not None:
+        metadata.update(
+            {
+                "crawl_source": crawl_source,
+                "seed_urls_count": len(seed_urls),
+                "sitemap_urls_found": len(sitemap_urls),
+                "robots_txt_available": bool(robots_rules.get("available")),
+                "robots_txt_status": robots_rules.get("status_code", 0),
+                "robots_disallow_rules": len(robots_rules.get("disallow", [])),
+            }
+        )
+
+    queue: deque[tuple[str, int]] = deque((url, 0) for url in seed_urls)
     visited: set[str] = set()
-    seen_or_queued: set[str] = {start_url}
+    seen_or_queued: set[str] = set(seed_urls)
     pages: list[AuditPage] = []
     started_at = time.monotonic()
     total_requests = 0
@@ -250,6 +522,18 @@ def crawl_site(
         if current_url in visited:
             continue
         visited.add(current_url)
+        if respect_robots and not robots_can_fetch(robots_rules, current_url):
+            page = AuditPage(
+                url=current_url,
+                requested_url=current_url,
+                depth=depth,
+                robots_allowed=False,
+                page_type=classify_page_type(current_url),
+                page_health_score=0,
+                issues=["URL bloquée par robots.txt, non crawlée"],
+            )
+            pages.append(page)
+            continue
         total_requests += 1
         page = crawl_page(
             current_url,
@@ -296,6 +580,127 @@ def crawl_site(
     return pages
 
 
+def default_robots_rules() -> dict[str, object]:
+    return {"available": False, "status_code": 0, "disallow": [], "sitemaps": [], "error": ""}
+
+
+def fetch_robots_rules(start_url: str, session: requests.Session, timeout: int = 8) -> dict[str, object]:
+    parsed = urlparse(start_url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+    rules = default_robots_rules()
+    try:
+        response = session.get(robots_url, timeout=timeout, allow_redirects=True)
+    except Exception as exc:  # noqa: BLE001
+        rules["error"] = str(exc)[:120]
+        return rules
+    rules["status_code"] = response.status_code
+    if response.status_code >= 400:
+        return rules
+    rules["available"] = True
+    parsed_rules = parse_robots_txt(getattr(response, "text", ""))
+    rules["disallow"] = parsed_rules["disallow"]
+    rules["sitemaps"] = parsed_rules["sitemaps"]
+    return rules
+
+
+def parse_robots_txt(text: str) -> dict[str, list[str]]:
+    disallow: list[str] = []
+    sitemaps: list[str] = []
+    active_agents: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "user-agent":
+            active_agents = [item.strip().lower() for item in value.split(",") if item.strip()]
+            continue
+        if key == "sitemap" and value:
+            sitemaps.append(value)
+            continue
+        if key == "disallow" and ("*" in active_agents or not active_agents):
+            if value:
+                disallow.append(value)
+    return {"disallow": disallow, "sitemaps": sitemaps}
+
+
+def robots_can_fetch(rules: dict[str, object], url: str) -> bool:
+    disallow = [str(item).strip() for item in rules.get("disallow", []) if str(item).strip()]
+    if not disallow:
+        return True
+    path = urlparse(url).path or "/"
+    return not any(path.startswith(rule) for rule in disallow)
+
+
+def discover_sitemap_urls(
+    start_url: str,
+    session: requests.Session,
+    timeout: int,
+    max_urls: int,
+    max_redirects: int,
+    robots_rules: dict[str, object] | None = None,
+    excluded_path_prefixes: set[str] | None = None,
+) -> list[str]:
+    parsed = urlparse(start_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    base_domain = clean_domain(start_url)
+    candidates = [
+        str(item)
+        for item in (robots_rules or {}).get("sitemaps", [])
+        if str(item).startswith(("http://", "https://"))
+    ]
+    candidates.extend(f"{base}{path}" for path in ("/sitemap.xml", "/sitemap_index.xml", "/sitemap-index.xml"))
+    seen_sitemaps: set[str] = set()
+    discovered: list[str] = []
+    queue: deque[str] = deque(dict.fromkeys(candidates))
+
+    while queue and len(discovered) < max_urls:
+        sitemap_url = queue.popleft()
+        if sitemap_url in seen_sitemaps:
+            continue
+        seen_sitemaps.add(sitemap_url)
+        try:
+            response = session.get(sitemap_url, timeout=timeout, allow_redirects=True)
+        except Exception:  # noqa: BLE001
+            continue
+        if response.status_code >= 400 or len(getattr(response, "history", [])) > max_redirects:
+            continue
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError:
+            continue
+        locs = [node.text.strip() for node in root.findall(".//{*}loc") if node.text and node.text.strip()]
+        if root.tag.endswith("sitemapindex"):
+            for loc in locs:
+                if loc not in seen_sitemaps:
+                    queue.append(loc)
+            continue
+        for loc in locs:
+            normalized = normalize_url(loc)
+            if clean_domain(normalized) != base_domain:
+                continue
+            if not should_crawl(normalized, base_domain, excluded_path_prefixes=excluded_path_prefixes):
+                continue
+            if normalized not in discovered:
+                discovered.append(normalized)
+            if len(discovered) >= max_urls:
+                break
+    discovered.sort(key=lambda url: (-crawl_link_priority(url, base_domain), url))
+    return discovered[:max_urls]
+
+
+def build_seed_urls(start_url: str, sitemap_urls: list[str], crawl_source: str) -> list[str]:
+    if crawl_source == "home":
+        return [start_url]
+    if crawl_source == "sitemap":
+        return sitemap_urls or [start_url]
+    seeds = [start_url]
+    seeds.extend(url for url in sitemap_urls if url != start_url)
+    return seeds
+
+
 def crawl_page(
     url: str,
     session: requests.Session,
@@ -306,7 +711,7 @@ def crawl_page(
     excluded_path_prefixes: set[str] | None = None,
     cancel_callback: Callable[[], None] | None = None,
 ) -> AuditPage | None:
-    page = AuditPage(url=url)
+    page = AuditPage(url=url, requested_url=url)
     if cancel_callback is not None:
         cancel_callback()
     try:
@@ -320,6 +725,7 @@ def crawl_page(
         )
         page.load_time = round(time.time() - started_at, 2)
         page.status_code = response.status_code
+        page.redirect_count = getattr(response, "redirect_count", 0)
         if response.status_code >= 400:
             page.issues.append(f"HTTP {response.status_code} detecte sur la page")
             return page
@@ -345,10 +751,14 @@ def crawl_page(
     page.meta_description = extract_meta_description(soup)
     page.h1 = [node.get_text(" ", strip=True) for node in soup.find_all("h1")]
     page.has_structured_data = bool(soup.find("script", attrs={"type": "application/ld+json"}))
-    page.canonical = extract_canonical(soup)
+    page.canonical = normalize_canonical(extract_canonical(soup), page.url)
+    page.canonical_status = compute_canonical_status(page.url, page.canonical)
+    page.meta_robots = extract_meta_robots(soup)
+    page.is_noindex = "noindex" in page.meta_robots.lower()
     page.meaningful_h1_count = compute_meaningful_h1_count(page.h1)
     text = extract_text_content(soup)
     page.word_count = len(text.split())
+    page.page_type = classify_page_type(page.url, title=page.title, headings=page.h1)
     page.dated_references = find_dated_references(text=text, title=page.title, url=page.url)
     page.content_like = compute_content_like(
         url=page.url,
@@ -358,7 +768,8 @@ def crawl_page(
         word_count=page.word_count,
         dated_references=page.dated_references,
     )
-    page.overlap_fingerprint = build_overlap_fingerprint(page.title, page.h1)
+    h2 = [node.get_text(" ", strip=True) for node in soup.find_all("h2")[:5]]
+    page.overlap_fingerprint = build_overlap_fingerprint(page.title, page.h1 + h2, text_excerpt=text[:1200])
 
     images = soup.find_all("img")
     page.images_total = len(images)
@@ -372,6 +783,11 @@ def crawl_page(
             continue
         absolute = normalize_url(urljoin(page.url, href))
         if should_crawl(absolute, base_domain, excluded_path_prefixes=excluded_path_prefixes):
+            anchor_text = normalize_anchor_text(link.get_text(" ", strip=True))
+            if not anchor_text:
+                page.empty_internal_anchor_count += 1
+            elif anchor_text in GENERIC_ANCHOR_TEXTS:
+                page.generic_internal_anchor_count += 1
             priority = crawl_link_priority(absolute, base_domain)
             if priority < 0:
                 continue
@@ -417,6 +833,66 @@ def extract_meta_description(soup: BeautifulSoup) -> str:
 def extract_canonical(soup: BeautifulSoup) -> str:
     canonical = soup.find("link", attrs={"rel": "canonical"})
     return canonical.get("href", "").strip() if canonical else ""
+
+
+def normalize_canonical(canonical: str, page_url: str) -> str:
+    if not canonical:
+        return ""
+    return normalize_url(urljoin(page_url, canonical))
+
+
+def compute_canonical_status(page_url: str, canonical: str) -> str:
+    if not canonical:
+        return "missing"
+    normalized_page = normalize_url(page_url)
+    normalized_canonical = normalize_url(canonical)
+    if clean_domain(normalized_page) != clean_domain(normalized_canonical):
+        return "cross_domain"
+    if normalized_page == normalized_canonical:
+        return "self"
+    return "different_url"
+
+
+def extract_meta_robots(soup: BeautifulSoup) -> str:
+    directives: list[str] = []
+    for meta in soup.find_all("meta"):
+        name = (meta.get("name") or "").strip().lower()
+        if name not in {"robots", "googlebot", "bingbot"}:
+            continue
+        content = (meta.get("content") or "").strip()
+        if content:
+            directives.append(content)
+    return ", ".join(dict.fromkeys(directives))
+
+
+def normalize_anchor_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value.lower()).strip()
+
+
+def classify_page_type(url: str, title: str = "", headings: list[str] | None = None) -> str:
+    path = urlparse(url).path.lower().rstrip("/")
+    if path in {"", "/"}:
+        return "homepage"
+    if path_is_non_content(url):
+        if any(path.startswith(prefix) for prefix in ("/category", "/tag")):
+            return "taxonomy"
+        if path.startswith("/author"):
+            return "author"
+        if any(path.startswith(prefix) for prefix in ("/legal", "/mentions-legales", "/privacy", "/terms")):
+            return "legal"
+        if path.startswith("/contact"):
+            return "contact"
+        return "utility"
+    if any(path.startswith(prefix) for prefix in ("/product", "/products", "/produit", "/boutique", "/shop")):
+        return "product"
+    if any(path.startswith(prefix) for prefix in ("/service", "/services", "/offre", "/offres")):
+        return "service"
+    if path_looks_content_like(url) or contains_year_reference(path):
+        return "article"
+    heading = " ".join([title, *(headings or [])]).lower()
+    if any(word in heading for word in ("guide", "comparatif", "test", "avis", "conseil")):
+        return "article"
+    return "page"
 
 
 def extract_text_content(soup: BeautifulSoup) -> str:
@@ -514,9 +990,22 @@ def meaningful_h1_count(page: AuditPage) -> int:
 
 def analyze_page_issues(pages: list[AuditPage]) -> None:
     for page in pages:
+        if not page.robots_allowed:
+            page.page_health_score = 0
+            continue
         if page.status_code and page.status_code >= 400:
             continue
         content_like = is_content_like_page(page)
+        if page.redirect_count:
+            page.issues.append(f"{page.redirect_count} redirection(s) observée(s) avant la page finale")
+        if page.is_noindex and content_like:
+            page.issues.append("Page de contenu marquée noindex")
+        if content_like and page.canonical_status == "missing":
+            page.issues.append("Canonical absente sur cette page de contenu")
+        elif content_like and page.canonical_status == "cross_domain":
+            page.issues.append("Canonical vers un autre domaine")
+        elif content_like and page.canonical_status == "different_url":
+            page.issues.append("Canonical vers une autre URL du site")
         if not page.title:
             page.issues.append("Titre Google absent sur la page analysée")
         elif len(page.title) < 20:
@@ -552,6 +1041,8 @@ def analyze_page_issues(pages: list[AuditPage]) -> None:
             page.issues.append("Balisage enrichi non détecté sur cette page")
         if content_like and page.dated_references:
             page.issues.append("Date visible à actualiser")
+        if content_like and page.generic_internal_anchor_count >= 5:
+            page.issues.append(f"{page.generic_internal_anchor_count} ancres internes génériques repérées")
 
 
 def detect_duplicates(pages: list[AuditPage]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
@@ -664,6 +1155,11 @@ def compute_observed_health_score(
     missing_structured_data = sum(1 for page in content_pages if page.word_count > 1200 and not page.has_structured_data)
     deep_pages = sum(1 for page in content_pages if page.depth > 3)
     crawl_errors = sum(1 for page in pages if page.status_code and page.status_code >= 400)
+    noindex_pages = sum(1 for page in content_pages if page.is_noindex)
+    canonical_missing = sum(1 for page in content_pages if page.canonical_status == "missing")
+    canonical_to_other = sum(1 for page in content_pages if page.canonical_status in {"different_url", "cross_domain"})
+    robots_blocked = sum(1 for page in pages if not page.robots_allowed)
+    generic_anchor_pages = sum(1 for page in content_pages if page.generic_internal_anchor_count >= 5)
 
     score -= min(10, round(missing_titles / total * 18))
     score -= min(8, round(missing_metas / total * 14))
@@ -680,6 +1176,86 @@ def compute_observed_health_score(
     score -= min(12, len(weak_internal_linking) * 2)
     score -= min(12, deep_pages * 3)
     score -= min(10, crawl_errors * 2)
+    score -= min(18, noindex_pages * 6)
+    score -= min(8, canonical_missing * 2)
+    score -= min(16, canonical_to_other * 5)
+    score -= min(12, robots_blocked * 4)
+    score -= min(6, generic_anchor_pages * 2)
+    return max(0, min(100, score))
+
+
+def assign_page_health_scores(
+    pages: list[AuditPage],
+    incoming_links: dict[str, int],
+    probable_orphans: list[str],
+    weak_internal_linking: list[str],
+) -> None:
+    orphan_set = set(probable_orphans)
+    weak_set = set(weak_internal_linking)
+    for page in pages:
+        page.page_health_score = compute_page_health_score(
+            page,
+            incoming_links=incoming_links,
+            is_orphan=page.url in orphan_set,
+            is_weak=page.url in weak_set,
+        )
+
+
+def compute_page_health_score(
+    page: AuditPage,
+    incoming_links: dict[str, int],
+    is_orphan: bool = False,
+    is_weak: bool = False,
+) -> int:
+    if not page.robots_allowed:
+        return 0
+    if page.status_code and page.status_code >= 400:
+        return max(0, 55 - min(35, page.status_code - 400))
+
+    score = 100
+    content_like = is_content_like_page(page)
+    if not page.title:
+        score -= 14
+    elif len(page.title) < 20 or len(page.title) > 65:
+        score -= 5
+    if not page.meta_description:
+        score -= 12
+    elif len(page.meta_description) < 70 or len(page.meta_description) > 160:
+        score -= 4
+    if content_like and meaningful_h1_count(page) == 0:
+        score -= 8
+    elif content_like and meaningful_h1_count(page) > 2:
+        score -= 3
+    if content_like and page.word_count < 350:
+        score -= 18
+    if content_like and page.dated_references:
+        score -= 12
+    if content_like and page.is_noindex:
+        score -= 25
+    if content_like and page.canonical_status == "missing":
+        score -= 6
+    elif content_like and page.canonical_status == "different_url":
+        score -= 10
+    elif content_like and page.canonical_status == "cross_domain":
+        score -= 18
+    if content_like and is_orphan:
+        score -= 16
+    elif content_like and is_weak:
+        score -= 8
+    if content_like and incoming_links.get(page.url, 0) == 0 and page.depth > 0:
+        score -= 6
+    if content_like and page.depth > 3:
+        score -= 8
+    if content_like and page.images_without_alt >= 5:
+        score -= 3
+    if content_like and page.word_count > 1200 and not page.has_structured_data:
+        score -= 4
+    if page.load_time > 3:
+        score -= 4
+    if page.redirect_count:
+        score -= min(8, page.redirect_count * 3)
+    if content_like and page.generic_internal_anchor_count >= 5:
+        score -= min(6, page.generic_internal_anchor_count // 2)
     return max(0, min(100, score))
 
 
@@ -688,6 +1264,7 @@ def build_report(
     domain: str,
     overlap_enabled: bool = True,
     overlap_max_pages: int = 24,
+    crawl_metadata: dict[str, object] | None = None,
 ) -> AuditReport:
     analyze_page_issues(pages)
     duplicate_titles, duplicate_metas = detect_duplicates(pages)
@@ -697,6 +1274,7 @@ def build_report(
     incoming_links = count_incoming_links(pages)
     probable_orphans = detect_probable_orphans(pages)
     weak_internal_linking = detect_weak_internal_linking(pages, incoming_links)
+    assign_page_health_scores(pages, incoming_links, probable_orphans, weak_internal_linking)
     dated_content = [{"url": page.url, "references": page.dated_references} for page in pages if page.dated_references]
     observed_health_score = compute_observed_health_score(
         pages,
@@ -709,6 +1287,8 @@ def build_report(
 
     ok_pages = [page for page in pages if not page.status_code or page.status_code < 400]
     content_pages = [page for page in ok_pages if is_content_like_page(page)]
+    health_scores = [page.page_health_score for page in content_pages or ok_pages if page.robots_allowed]
+    technical_checks = build_technical_checks(pages, content_pages)
     summary = {
         "pages_crawled": len(pages),
         "pages_ok": len(ok_pages),
@@ -736,6 +1316,15 @@ def build_report(
         "weak_internal_linking_pages": len(weak_internal_linking),
         "possible_content_overlap_pairs": len(possible_overlap),
         "content_like_pages": len(content_pages),
+        "avg_page_health_score": round(sum(health_scores) / len(health_scores)) if health_scores else 0,
+        "min_page_health_score": min(health_scores) if health_scores else 0,
+        "noindex_pages": technical_checks["noindex_pages"],
+        "canonical_missing_pages": technical_checks["canonical_missing_pages"],
+        "canonical_to_other_url_pages": technical_checks["canonical_to_other_url_pages"],
+        "canonical_cross_domain_pages": technical_checks["canonical_cross_domain_pages"],
+        "redirected_pages": technical_checks["redirected_pages"],
+        "robots_blocked_pages": technical_checks["robots_blocked_pages"],
+        "generic_anchor_pages": technical_checks["generic_anchor_pages"],
     }
 
     critical_findings = build_critical_findings(summary)
@@ -745,6 +1334,11 @@ def build_report(
         incoming_links=incoming_links,
         probable_orphans=probable_orphans,
         weak_internal_linking=weak_internal_linking,
+    )
+    internal_linking_opportunities = build_internal_linking_opportunities(
+        content_pages,
+        weak_internal_linking=weak_internal_linking,
+        probable_orphans=probable_orphans,
     )
     confidence_notes = build_confidence_notes(summary, possible_overlap)
     notes = [
@@ -770,12 +1364,21 @@ def build_report(
         business_priority_signals=business_priority_signals,
         top_pages_to_rework=top_pages_to_rework,
         confidence_notes=confidence_notes,
+        technical_checks=technical_checks,
+        internal_linking_opportunities=internal_linking_opportunities,
+        crawl_metadata=crawl_metadata or {},
         pages=[serialize_audit_page(page) for page in pages],
     )
 
 
 def build_critical_findings(summary: dict[str, int]) -> list[str]:
     findings: list[str] = []
+    if summary.get("noindex_pages"):
+        findings.append(f"{summary['noindex_pages']} pages de contenu sont marquées noindex")
+    if summary.get("canonical_to_other_url_pages"):
+        findings.append(f"{summary['canonical_to_other_url_pages']} pages ont une canonical vers une autre URL")
+    if summary.get("robots_blocked_pages"):
+        findings.append(f"{summary['robots_blocked_pages']} URLs détectées sont bloquées par robots.txt")
     if summary["thin_content_pages"]:
         findings.append(
             f"{summary['thin_content_pages']} pages méritent d'être enrichies pour mieux répondre au sujet"
@@ -812,6 +1415,9 @@ def build_critical_findings(summary: dict[str, int]) -> list[str]:
 def build_business_priority_signals(summary: dict[str, int]) -> list[dict[str, str | int]]:
     signals: list[dict[str, str | int]] = []
     priority_map = [
+        ("noindex_pages", "HIGH", "Pages importantes marquées noindex"),
+        ("canonical_to_other_url_pages", "HIGH", "Canonicals à vérifier"),
+        ("robots_blocked_pages", "HIGH", "Pages bloquées par robots.txt"),
         ("thin_content_pages", "HIGH", "Pages à enrichir en priorité"),
         ("duplicate_title_groups", "HIGH", "Titres Google répétés sur plusieurs pages"),
         ("duplicate_meta_description_groups", "HIGH", "Descriptions Google répétées"),
@@ -826,6 +1432,18 @@ def build_business_priority_signals(summary: dict[str, int]) -> list[dict[str, s
         if value:
             signals.append({"key": key, "signal": label, "severity": severity, "count": value})
     return signals
+
+
+def build_technical_checks(pages: list[AuditPage], content_pages: list[AuditPage]) -> dict[str, int]:
+    return {
+        "noindex_pages": sum(1 for page in content_pages if page.is_noindex),
+        "canonical_missing_pages": sum(1 for page in content_pages if page.canonical_status == "missing"),
+        "canonical_to_other_url_pages": sum(1 for page in content_pages if page.canonical_status == "different_url"),
+        "canonical_cross_domain_pages": sum(1 for page in content_pages if page.canonical_status == "cross_domain"),
+        "redirected_pages": sum(1 for page in pages if page.redirect_count),
+        "robots_blocked_pages": sum(1 for page in pages if not page.robots_allowed),
+        "generic_anchor_pages": sum(1 for page in content_pages if page.generic_internal_anchor_count >= 5),
+    }
 
 
 def build_top_pages_to_rework(
@@ -861,6 +1479,15 @@ def build_top_pages_to_rework(
         if not page.title:
             priority += 2
             reasons.append("titre Google absent")
+        if page.is_noindex:
+            priority += 5
+            reasons.append("page marquée noindex")
+        if page.canonical_status in {"different_url", "cross_domain"}:
+            priority += 4
+            reasons.append("canonical à vérifier")
+        if page.generic_internal_anchor_count >= 5:
+            priority += 1
+            reasons.append("ancres internes trop génériques")
         if priority == 0:
             continue
         confidence = "medium"
@@ -872,6 +1499,8 @@ def build_top_pages_to_rework(
                 "priority_score": priority,
                 "word_count": page.word_count,
                 "depth": page.depth,
+                "page_health_score": page.page_health_score,
+                "page_type": page.page_type,
                 "incoming_links_observed": incoming_links.get(page.url, 0),
                 "reasons": reasons,
                 "confidence": confidence,
@@ -879,6 +1508,35 @@ def build_top_pages_to_rework(
         )
     ranked.sort(key=lambda item: (int(item["priority_score"]), int(item["word_count"]) * -1), reverse=True)
     return ranked[:5]
+
+
+def build_internal_linking_opportunities(
+    pages: list[AuditPage],
+    weak_internal_linking: list[str],
+    probable_orphans: list[str],
+) -> list[dict[str, object]]:
+    targets = [url for url in [*probable_orphans, *weak_internal_linking] if url]
+    if not targets:
+        return []
+    source_candidates = [
+        page
+        for page in pages
+        if page.url not in targets and page.word_count >= 500 and page.page_health_score >= 65
+    ]
+    source_candidates.sort(key=lambda page: (-page.word_count, page.depth, page.url))
+    opportunities: list[dict[str, object]] = []
+    for target in targets[:6]:
+        sources = [page.url for page in source_candidates if target not in page.internal_links_out][:3]
+        if not sources:
+            continue
+        opportunities.append(
+            {
+                "target_url": target,
+                "suggested_source_urls": sources,
+                "reason": "Renforcer cette page avec des liens depuis des contenus déjà visibles dans le crawl.",
+            }
+        )
+    return opportunities
 
 
 def build_confidence_notes(
@@ -968,9 +1626,10 @@ def compute_content_like(
     return path_looks_content_like(url) and word_count >= 80
 
 
-def build_overlap_fingerprint(title: str, headings: list[str]) -> str:
-    heading = " ".join([title, *headings]).strip().lower()
-    if not heading or is_ui_like_text(heading):
+def build_overlap_fingerprint(title: str, headings: list[str], text_excerpt: str = "") -> str:
+    heading = " ".join([title, *headings, text_excerpt]).strip().lower()
+    visible_heading = " ".join([title, *headings]).strip().lower()
+    if not heading or (visible_heading and is_ui_like_text(visible_heading)):
         return ""
     cleaned = re.sub(r"[^a-z0-9àâçéèêëîïôûùüÿñæœ\s-]", " ", heading)
     tokens = [token for token in cleaned.split() if len(token) >= 4]
