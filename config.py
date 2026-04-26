@@ -8,6 +8,7 @@ DEFAULT_MAX_PAGES = 30
 DEFAULT_DISCOVER_PROVIDER = "auto"
 DEFAULT_QUALIFY_MODE = "qualify_fast"
 DEFAULT_AUDIT_MODE = "audit_light"
+DEFAULT_CRAWL_SOURCE = "mixed"
 DISCOVER_HTTP_TIMEOUT = 6
 DISCOVER_RETRY_ATTEMPTS = 2
 DISCOVER_RETRY_BACKOFF = 1.0
@@ -231,6 +232,10 @@ SITEMAP_CANDIDATES = [
     "/sitemap.xml",
     "/sitemap_index.xml",
     "/sitemap-index.xml",
+    "/wp-sitemap.xml",
+    "/post-sitemap.xml",
+    "/page-sitemap.xml",
+    "/category-sitemap.xml",
 ]
 
 EXCLUDED_CRAWL_EXTENSIONS = {
@@ -270,6 +275,7 @@ EXCLUDED_CRAWL_PATH_PREFIXES = {
     "/dashboard",
     "/docs",
     "/feed",
+    "/go",
     "/help",
     "/login",
     "/my-account",

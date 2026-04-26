@@ -19,6 +19,7 @@ from audit_store import record_audit_report
 from config import (
     AUDIT_MODE_CONFIGS,
     CONTENT_PATH_HINTS,
+    DEFAULT_CRAWL_SOURCE,
     DEFAULT_AUDIT_MODE,
     DEFAULT_DELAY,
     DEFAULT_MAX_PAGES,
@@ -26,6 +27,7 @@ from config import (
     EXCLUDED_CRAWL_EXTENSIONS,
     EXCLUDED_CRAWL_PATH_PREFIXES,
     NON_CONTENT_PATH_PREFIXES,
+    SITEMAP_CANDIDATES,
     UI_HEADING_PATTERNS,
 )
 from io_helpers import read_scored_csv, write_csv_rows, write_json_file
@@ -72,7 +74,7 @@ def audit_domains(
     max_total_seconds_per_domain: float | None = None,
     overlap_enabled: bool | None = None,
     overlap_max_pages: int | None = None,
-    crawl_source: str = "home",
+    crawl_source: str = DEFAULT_CRAWL_SOURCE,
     sitemap_max_urls: int | None = None,
     respect_robots: bool = True,
     html_output: str | None = None,
@@ -510,8 +512,11 @@ def crawl_site(
     if progress_label:
         print(f"  Crawl en cours sur {progress_label}...")
 
-    while queue and len(visited) < max_pages:
+    stop_reason = "queue_empty"
+    skipped_urls = 0
+    while queue and len(pages) < max_pages:
         if crawl_budget_exceeded(started_at, total_requests, max_total_seconds_per_domain, max_total_requests_per_domain):
+            stop_reason = "budget_exceeded"
             break
         if cancel_callback is not None:
             cancel_callback()
@@ -546,9 +551,7 @@ def crawl_site(
             cancel_callback=cancel_callback,
         )
         if page is None:
-            consecutive_failures += 1
-            if consecutive_failures >= max_consecutive_errors:
-                break
+            skipped_urls += 1
             continue
         page.depth = depth
         pages.append(page)
@@ -568,13 +571,27 @@ def crawl_site(
                     seen_or_queued.add(link)
                     queue.append((link, depth + 1))
         if consecutive_failures >= max_consecutive_errors:
+            stop_reason = "max_consecutive_errors"
             break
         if total_requests >= 5 and not pages:
+            stop_reason = "no_pages_collected"
             break
         if cancel_callback is not None:
             cancel_callback()
         time.sleep(delay)
 
+    if len(pages) >= max_pages:
+        stop_reason = "max_pages_reached"
+    if metadata is not None:
+        metadata.update(
+            {
+                "pages_collected": len(pages),
+                "urls_attempted": total_requests,
+                "urls_skipped": skipped_urls,
+                "queued_urls_remaining": len(queue),
+                "stop_reason": stop_reason,
+            }
+        )
     if progress_label:
         print(f"  Crawl termine pour {progress_label}: {len(pages)} pages")
     return pages
@@ -651,7 +668,7 @@ def discover_sitemap_urls(
         for item in (robots_rules or {}).get("sitemaps", [])
         if str(item).startswith(("http://", "https://"))
     ]
-    candidates.extend(f"{base}{path}" for path in ("/sitemap.xml", "/sitemap_index.xml", "/sitemap-index.xml"))
+    candidates.extend(f"{base}{path}" for path in SITEMAP_CANDIDATES)
     seen_sitemaps: set[str] = set()
     discovered: list[str] = []
     queue: deque[str] = deque(dict.fromkeys(candidates))
@@ -729,6 +746,8 @@ def crawl_page(
         if response.status_code >= 400:
             page.issues.append(f"HTTP {response.status_code} detecte sur la page")
             return page
+        if clean_domain(response.url) != clean_domain(url):
+            return None
         if response.skip_reason == "non_html":
             return None
         if response.skip_reason == "html_too_large":
@@ -811,7 +830,7 @@ def should_crawl(
     if parsed.netloc and clean_domain(parsed.netloc) != clean_domain(base_domain):
         return False
     path = parsed.path.lower()
-    if any(path.startswith(prefix) for prefix in active_exclusions):
+    if any(path_matches_prefix(path, prefix) for prefix in active_exclusions):
         return False
     if any(path.endswith(ext) for ext in EXCLUDED_CRAWL_EXTENSIONS):
         return False
@@ -966,7 +985,7 @@ def path_looks_content_like(url: str) -> bool:
 
 def path_is_non_content(url: str) -> bool:
     path = urlparse(url).path.lower()
-    return any(path.startswith(prefix) for prefix in NON_CONTENT_PATH_PREFIXES)
+    return any(path_matches_prefix(path, prefix) for prefix in NON_CONTENT_PATH_PREFIXES)
 
 
 def is_content_like_page(page: AuditPage) -> bool:
@@ -1598,6 +1617,13 @@ def crawl_link_priority(url: str, base_domain: str) -> int:
     if path.count("/") <= 2:
         score += 2
     return score
+
+
+def path_matches_prefix(path: str, prefix: str) -> bool:
+    cleaned = prefix.rstrip("/") or "/"
+    if cleaned == "/":
+        return True
+    return path == cleaned or path.startswith(f"{cleaned}/")
 
 
 def compute_meaningful_h1_count(headings: list[str]) -> int:

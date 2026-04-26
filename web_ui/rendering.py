@@ -8,6 +8,7 @@ from urllib.parse import quote, unquote
 
 from config import (
     AUDIT_MODE_CONFIGS,
+    DEFAULT_CRAWL_SOURCE,
     DEFAULT_AUDIT_MODE,
     DEFAULT_DELAY,
     DEFAULT_DISCOVER_PROVIDER,
@@ -469,9 +470,9 @@ def render_audit_card() -> str:
           </label>
           <label>Crawl source
             <select name="crawl_source">
-              <option value="home" selected>home</option>
-              <option value="sitemap">sitemap</option>
-              <option value="mixed">mixed</option>
+              <option value="home" {"selected" if DEFAULT_CRAWL_SOURCE == "home" else ""}>home</option>
+              <option value="sitemap" {"selected" if DEFAULT_CRAWL_SOURCE == "sitemap" else ""}>sitemap</option>
+              <option value="mixed" {"selected" if DEFAULT_CRAWL_SOURCE == "mixed" else ""}>mixed</option>
             </select>
           </label>
           <label>Top
@@ -486,11 +487,14 @@ def render_audit_card() -> str:
           <label>Max pages
             <input type="number" name="max_pages" value="30" min="1">
           </label>
+          <label>Temps max / site
+            <input type="number" name="max_total_seconds_per_domain" value="90" min="1">
+          </label>
           <label>Delay
             <input type="number" step="0.1" name="delay" value="0.2">
           </label>
         </div>
-        <p class="field-help">Commence avec `10` a `30` pages pour un triage rapide. Au-dela, certains sites lents peuvent facilement depasser 3 minutes, surtout avec plusieurs domaines.</p>
+        <p class="field-help">Commence avec `10` a `30` pages pour un triage rapide. Si le rapport s'arrete avant `Max pages`, augmente le temps max, surtout sur les sites WordPress lents.</p>
         <label>Output dir
           <input type="text" name="output_dir" value="reports/audits">
         </label>
@@ -501,7 +505,7 @@ def render_audit_card() -> str:
           <label class="checkbox-line"><input type="checkbox" name="cache_enabled"> Cache HTTP</label>
           <label class="checkbox-line"><input type="checkbox" name="skip_robots"> Ignorer robots.txt</label>
         </div>
-        <p class="field-help">`mixed` part de la home et du sitemap. Le HTML autonome est pratique pour relire un audit sans passer par l'UI. Le cache aide surtout quand tu itères plusieurs fois sur le même site.</p>
+        <p class="field-help">`mixed` part de la home et du sitemap pour mieux couvrir les sites WordPress. Le HTML autonome est pratique pour relire un audit sans passer par l'UI. Le cache aide surtout quand tu itères plusieurs fois sur le même site.</p>
         <p class="field-help">Regarde ensuite `reports/audits/audit_summary.csv`, le JSON du domaine, le HTML si demandé, et `reports/audits/audit_index.sqlite` pour l'historique local.</p>
         <button class="button" type="submit">3. Sortir Un Mini Audit Exploitable</button>
       </form>

@@ -8,6 +8,7 @@ from audit import audit_domains
 from compare_audits import compare_audit_reports
 from config import (
     AUDIT_MODE_CONFIGS,
+    DEFAULT_CRAWL_SOURCE,
     DEFAULT_AUDIT_MODE,
     DEFAULT_DELAY,
     DEFAULT_DISCOVER_PROVIDER,
@@ -108,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--overlap-max-pages", type=int, help="Maximum pages considered for overlap analysis")
     audit_parser.add_argument(
         "--crawl-source",
-        default="home",
+        default=DEFAULT_CRAWL_SOURCE,
         choices=["home", "sitemap", "mixed"],
         help="Seed crawl from homepage, sitemap URLs, or both",
     )

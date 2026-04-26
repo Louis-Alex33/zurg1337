@@ -92,6 +92,8 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertFalse(should_crawl("https://example.com/login", "example.com"))
         self.assertFalse(should_crawl("https://example.com/docs/getting-started", "example.com"))
         self.assertFalse(should_crawl("https://example.com/cart", "example.com"))
+        self.assertFalse(should_crawl("https://example.com/go/affiliate-offer", "example.com"))
+        self.assertTrue(should_crawl("https://example.com/golf-guide", "example.com"))
         self.assertTrue(should_crawl("https://example.com/blog/refresh-seo", "example.com"))
 
     def test_crawl_site_deduplicates_queue_entries(self) -> None:
@@ -145,6 +147,47 @@ class AuditHeuristicsTests(unittest.TestCase):
 
         self.assertEqual(crawled, ["https://example.com/", "https://example.com/a", "https://example.com/b", "https://example.com/c"])
         self.assertEqual([page.url for page in pages], crawled)
+
+    def test_crawl_site_does_not_count_skipped_urls_as_page_budget(self) -> None:
+        home = AuditPage(
+            url="https://example.com/",
+            word_count=800,
+            internal_links_out=[
+                "https://example.com/tracking-1.pdf",
+                "https://example.com/tracking-2.pdf",
+                "https://example.com/tracking-3.pdf",
+                "https://example.com/tracking-4.pdf",
+                "https://example.com/tracking-5.pdf",
+                "https://example.com/a",
+            ],
+        )
+        page_a = AuditPage(url="https://example.com/a", word_count=600, internal_links_out=[])
+        pages_by_url = {
+            "https://example.com/": home,
+            "https://example.com/a": page_a,
+        }
+
+        def fake_crawl_page(
+            url: str,
+            session,
+            timeout: int,
+            max_html_bytes: int = 0,
+            max_links_per_page: int = 0,
+            max_redirects: int = 0,
+            excluded_path_prefixes=None,
+            cancel_callback=None,
+        ):  # type: ignore[no-untyped-def]
+            return pages_by_url.get(url)
+
+        with patch("audit.crawl_page", side_effect=fake_crawl_page):
+            pages = crawl_site(
+                "https://example.com/",
+                max_pages=2,
+                delay=0,
+                session=object(),  # type: ignore[arg-type]
+            )
+
+        self.assertEqual([page.url for page in pages], ["https://example.com/", "https://example.com/a"])
 
     def test_crawl_site_respects_max_depth_budget(self) -> None:
         home = AuditPage(

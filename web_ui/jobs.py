@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from config import (
     AUDIT_MODE_CONFIGS,
+    DEFAULT_CRAWL_SOURCE,
     DEFAULT_AUDIT_MODE,
     DEFAULT_DELAY,
     DEFAULT_DISCOVER_PROVIDER,
@@ -146,10 +147,11 @@ def run_audit_job(job_id: str) -> None:
     output_dir = (job.params.get("output_dir") or "reports/audits").strip()
     html_output = (job.params.get("html_output") or "").strip()
     mode = (job.params.get("mode") or DEFAULT_AUDIT_MODE).strip() or DEFAULT_AUDIT_MODE
-    crawl_source = (job.params.get("crawl_source") or "home").strip() or "home"
+    crawl_source = (job.params.get("crawl_source") or DEFAULT_CRAWL_SOURCE).strip() or DEFAULT_CRAWL_SOURCE
     top_raw = (job.params.get("top") or "").strip()
     min_score_raw = (job.params.get("min_score") or "").strip()
     max_pages = int(job.params.get("max_pages") or str(DEFAULT_MAX_PAGES))
+    max_seconds_raw = (job.params.get("max_total_seconds_per_domain") or "").strip()
     delay = float(job.params.get("delay") or str(DEFAULT_DELAY))
     respect_robots = job.params.get("skip_robots") != "on"
     cache_enabled = job.params.get("cache_enabled") == "on"
@@ -166,6 +168,7 @@ def run_audit_job(job_id: str) -> None:
             min_score=int(min_score_raw) if min_score_raw else None,
             mode=mode,
             max_pages=max_pages,
+            max_total_seconds_per_domain=float(max_seconds_raw) if max_seconds_raw else None,
             delay=delay,
             crawl_source=crawl_source,
             respect_robots=respect_robots,
@@ -178,6 +181,11 @@ def run_audit_job(job_id: str) -> None:
             f"{len(reports)} audits termines",
             f"Mode: {mode}",
             f"Crawl source: {crawl_source}",
+            (
+                f"Budget temps/site: {format_duration(float(max_seconds_raw))}"
+                if max_seconds_raw
+                else "Budget temps/site: mode par defaut"
+            ),
             f"Site direct: {site}" if site else f"Input CSV: {input_csv}",
             f"Summary CSV: {output_dir}/audit_summary.csv",
         ]
@@ -389,11 +397,15 @@ def estimate_job_duration(job: JobRecord) -> str | None:
     if job.kind == "audit":
         mode = (job.params.get("mode") or DEFAULT_AUDIT_MODE).strip() or DEFAULT_AUDIT_MODE
         max_pages = int(job.params.get("max_pages") or str(AUDIT_MODE_CONFIGS[mode].max_pages))
+        max_seconds_raw = (job.params.get("max_total_seconds_per_domain") or "").strip()
         top_raw = (job.params.get("top") or "").strip()
         site = (job.params.get("site") or "").strip()
         target_count = 1 if site else int(top_raw) if top_raw else 3
         low = target_count * max_pages * 1
         high = target_count * max_pages * 6
+        if max_seconds_raw:
+            high = min(high, target_count * int(float(max_seconds_raw)))
+            low = min(low, high)
         return (
             f"A {target_count} site(s) x {max_pages} pages, compte souvent {format_duration(low)} "
             f"a {format_duration(high)}. Les timeouts reseau peuvent rallonger."

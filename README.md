@@ -370,7 +370,8 @@ Important:
 
 - le crawl reste volontairement simple
 - `audit_light` est le mode par defaut
-- `--crawl-source home` part de la homepage, `sitemap` part des URLs sitemap, `mixed` combine les deux
+- `--crawl-source mixed` est le defaut: il part de la homepage et du sitemap quand il existe
+- `--crawl-source home` part seulement de la homepage, `sitemap` part seulement des URLs sitemap
 - `robots.txt` est verifie par defaut; utilise `--skip-robots` seulement pour un test local ponctuel
 - `--cache` active un cache HTTP local utile quand tu relances souvent le meme audit
 - le systeme prefere un audit incomplet mais rapide a un crawl trop couteux
@@ -577,6 +578,11 @@ Chaque case de la card `Audit`:
   Quoi mettre: `audit_light` ou `audit_full`.
   Bon a savoir: `audit_light` est le mode par defaut. `audit_full` doit rester reserve a quelques domaines seulement.
 
+- `Crawl source`
+  Role: choisir les URLs de depart du crawl.
+  Quoi mettre: `mixed`, `home` ou `sitemap`.
+  Bon a savoir: `mixed` est le defaut conseille pour les sites WordPress, car la homepage ne lie pas toujours toutes les pages utiles.
+
 - `Min score`
   Role: ignorer les domaines trop faibles.
   Quoi mettre: un score minimum entre `0` et `100`.
@@ -588,6 +594,12 @@ Chaque case de la card `Audit`:
   Quoi mettre: un nombre entier.
   Exemple: `30`, `50`, `80`.
   Comment le choisir: `30` est bien pour du triage commercial rapide. `80` donne un audit plus riche mais plus lent.
+
+- `Temps max / site`
+  Role: fixer le budget temps par domaine dans l'UI.
+  Quoi mettre: un nombre de secondes.
+  Exemple: `90`, `180`, `300`.
+  Bon a savoir: si le sitemap contient beaucoup d'URLs mais que peu de pages sont analysees, ce budget est souvent le premier frein.
 
 - `Delay`
   Role: ajouter un delai entre les pages crawlées.
