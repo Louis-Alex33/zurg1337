@@ -111,7 +111,7 @@ def audit_domains(
     resolved_max_requests = (
         max_total_requests_per_domain
         if max_total_requests_per_domain is not None
-        else mode_config.max_total_requests_per_domain
+        else max(mode_config.max_total_requests_per_domain, resolved_max_pages)
     )
     resolved_max_links = max_links_per_page if max_links_per_page is not None else mode_config.max_links_per_page
     resolved_max_html_bytes = max_html_bytes if max_html_bytes is not None else mode_config.max_html_bytes
@@ -516,8 +516,14 @@ def crawl_site(
     stop_reason = "queue_empty"
     skipped_urls = 0
     while queue and len(pages) < max_pages:
-        if crawl_budget_exceeded(started_at, total_requests, max_total_seconds_per_domain, max_total_requests_per_domain):
-            stop_reason = "budget_exceeded"
+        budget_stop_reason = crawl_budget_stop_reason(
+            started_at,
+            total_requests,
+            max_total_seconds_per_domain,
+            max_total_requests_per_domain,
+        )
+        if budget_stop_reason:
+            stop_reason = budget_stop_reason
             break
         if cancel_callback is not None:
             cancel_callback()
@@ -589,6 +595,9 @@ def crawl_site(
         "urls_skipped": skipped_urls,
         "queued_urls_remaining": len(queue),
         "stop_reason": stop_reason,
+        "max_pages": max_pages,
+        "max_total_requests_per_domain": max_total_requests_per_domain,
+        "max_total_seconds_per_domain": max_total_seconds_per_domain,
     }
     if metadata is not None:
         metadata.update(final_metadata)
@@ -1588,15 +1597,17 @@ def get_audit_mode_config(mode: str):
         raise CLIError(f"Mode audit inconnu: {mode}") from exc
 
 
-def crawl_budget_exceeded(
+def crawl_budget_stop_reason(
     started_at: float,
     total_requests: int,
     max_total_seconds_per_domain: float,
     max_total_requests_per_domain: int,
-) -> bool:
+) -> str:
     if max_total_seconds_per_domain > 0 and (time.monotonic() - started_at) >= max_total_seconds_per_domain:
-        return True
-    return max_total_requests_per_domain > 0 and total_requests >= max_total_requests_per_domain
+        return "max_total_seconds_reached"
+    if max_total_requests_per_domain > 0 and total_requests >= max_total_requests_per_domain:
+        return "max_total_requests_reached"
+    return ""
 
 
 def crawl_link_priority(url: str, base_domain: str) -> int:

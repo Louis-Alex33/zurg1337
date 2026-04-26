@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 from unittest.mock import patch
 
 from audit import (
+    audit_domains,
     build_report,
     classify_page_type,
     compute_observed_health_score,
@@ -148,6 +150,26 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertEqual(crawled, ["https://example.com/", "https://example.com/a", "https://example.com/b", "https://example.com/c"])
         self.assertEqual([page.url for page in pages], crawled)
 
+    def test_audit_domains_raises_request_budget_to_requested_page_budget(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            with (
+                patch("audit.crawl_site", return_value=[]) as mock_crawl_site,
+                patch("audit.record_audit_report"),
+            ):
+                audit_domains(
+                    input_csv=None,
+                    output_dir=tmp_dir,
+                    site="example.com",
+                    max_pages=100,
+                    max_total_seconds_per_domain=0,
+                    delay=0,
+                    history=False,
+                    sqlite_index=f"{tmp_dir}/index.sqlite",
+                )
+
+        self.assertEqual(mock_crawl_site.call_args.kwargs["max_pages"], 100)
+        self.assertEqual(mock_crawl_site.call_args.kwargs["max_total_requests_per_domain"], 100)
+
     def test_crawl_site_does_not_count_skipped_urls_as_page_budget(self) -> None:
         home = AuditPage(
             url="https://example.com/",
@@ -188,6 +210,44 @@ class AuditHeuristicsTests(unittest.TestCase):
             )
 
         self.assertEqual([page.url for page in pages], ["https://example.com/", "https://example.com/a"])
+
+    def test_crawl_site_records_request_budget_stop_reason(self) -> None:
+        pages_by_url = {
+            "https://example.com/": AuditPage(
+                url="https://example.com/",
+                word_count=800,
+                internal_links_out=["https://example.com/a", "https://example.com/b"],
+            ),
+            "https://example.com/a": AuditPage(url="https://example.com/a", word_count=600),
+            "https://example.com/b": AuditPage(url="https://example.com/b", word_count=600),
+        }
+        metadata: dict[str, object] = {}
+
+        def fake_crawl_page(
+            url: str,
+            session,
+            timeout: int,
+            max_html_bytes: int = 0,
+            max_links_per_page: int = 0,
+            max_redirects: int = 0,
+            excluded_path_prefixes=None,
+            cancel_callback=None,
+        ):  # type: ignore[no-untyped-def]
+            return pages_by_url[url]
+
+        with patch("audit.crawl_page", side_effect=fake_crawl_page):
+            pages = crawl_site(
+                "https://example.com/",
+                max_pages=10,
+                max_total_requests_per_domain=2,
+                delay=0,
+                session=object(),  # type: ignore[arg-type]
+                metadata=metadata,
+            )
+
+        self.assertEqual(len(pages), 2)
+        self.assertEqual(metadata["stop_reason"], "max_total_requests_reached")
+        self.assertEqual(metadata["max_total_requests_per_domain"], 2)
 
     def test_crawl_site_respects_max_depth_budget(self) -> None:
         home = AuditPage(
