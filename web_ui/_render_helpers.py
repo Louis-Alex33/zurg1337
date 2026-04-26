@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -164,6 +165,365 @@ def build_client_actions(
     if not actions:
         actions.append("Vérifier manuellement les pages les plus visibles avant de décider d’un plan de reprise.")
     return actions[:5]
+
+
+def client_urgency_label(
+    score: int,
+    summary: dict[str, object],
+    business_signals: list[dict[str, object]],
+) -> str:
+    high_signals = sum(1 for item in business_signals if str(item.get("severity") or "") == "HIGH")
+    blocking_count = sum(
+        _as_int(summary.get(key))
+        for key in (
+            "noindex_pages",
+            "canonical_to_other_url_pages",
+            "canonical_cross_domain_pages",
+            "robots_blocked_pages",
+        )
+    )
+    if score < 60 or blocking_count or high_signals >= 3:
+        return "Niveau d’urgence : élevé"
+    if score < 75 or business_signals:
+        return "Niveau d’urgence : moyen"
+    return "Niveau d’urgence : faible"
+
+
+def build_client_strengths(summary: dict[str, object], observed_score: int) -> list[str]:
+    pages_crawled = _as_int(summary.get("pages_crawled"))
+    pages_ok = _as_int(summary.get("pages_ok"))
+    content_pages = _as_int(summary.get("content_like_pages"))
+    avg_score = _as_int(summary.get("avg_page_health_score"))
+    strengths: list[str] = []
+    if pages_ok and (pages_crawled == 0 or pages_ok >= max(1, round(pages_crawled * 0.85))):
+        strengths.append("La majorité des pages visitées répond correctement, sans signal d’erreur massif dans le crawl.")
+    if content_pages >= 5:
+        strengths.append(f"Le site dispose déjà d’une base éditoriale exploitable avec {content_pages} contenus repérés.")
+    elif content_pages:
+        strengths.append(f"{content_pages} contenu(s) utile(s) ressortent déjà et peuvent servir de point de départ.")
+    if avg_score >= 70 or observed_score >= 75:
+        strengths.append("La base observée est plutôt saine : les reprises proposées visent surtout à consolider l’existant.")
+    if not _as_int(summary.get("missing_titles")) and not _as_int(summary.get("missing_h1")):
+        strengths.append("Les titres principaux et les titres Google ne montrent pas de manque généralisé sur les pages analysées.")
+    if not _as_int(summary.get("pages_with_errors")):
+        strengths.append("Aucune vague d’erreurs HTTP bloquantes n’apparaît dans les pages visitées.")
+    if (
+        not _as_int(summary.get("duplicate_title_groups"))
+        and not _as_int(summary.get("duplicate_meta_description_groups"))
+        and not _as_int(summary.get("possible_content_overlap_pairs"))
+    ):
+        strengths.append("Le crawl ne fait pas ressortir de duplication forte entre les contenus analysés.")
+    if not strengths:
+        strengths.append("Le site donne déjà assez de matière pour travailler avec des exemples concrets plutôt qu’avec des constats abstraits.")
+    return strengths[:5]
+
+
+def build_score_explanation(score: int, summary: dict[str, object]) -> list[str]:
+    positives: list[str] = []
+    limits: list[str] = []
+    content_pages = _as_int(summary.get("content_like_pages"))
+    pages_ok = _as_int(summary.get("pages_ok"))
+    pages_with_errors = _as_int(summary.get("pages_with_errors"))
+    avg_page_score = _as_int(summary.get("avg_page_health_score"))
+
+    if pages_ok and not pages_with_errors:
+        positives.append("les pages visitées répondent majoritairement correctement")
+    if content_pages:
+        positives.append(f"{content_pages} contenus donnent une base de travail concrète")
+    if avg_page_score >= 70:
+        positives.append(f"le score moyen des pages de contenu reste correct ({avg_page_score}/100)")
+
+    blockers = [
+        ("noindex_pages", "des pages importantes marquées noindex"),
+        ("canonical_to_other_url_pages", "des canonicals à vérifier"),
+        ("canonical_cross_domain_pages", "des canonicals externes à contrôler"),
+        ("thin_content_pages", "des contenus encore trop légers"),
+        ("dated_content_signals", "des dates visibles qui peuvent freiner la confiance"),
+        ("weak_internal_linking_pages", "un soutien interne insuffisant sur certaines pages"),
+        ("possible_content_overlap_pairs", "des sujets proches à clarifier"),
+    ]
+    for key, label in blockers:
+        count = _as_int(summary.get(key))
+        if count:
+            limits.append(f"{count} {label}")
+
+    lines: list[str] = []
+    if positives:
+        lines.append("Ce qui tire le score vers le haut : " + ", ".join(positives[:3]) + ".")
+    if limits:
+        lines.append("Ce qui empêche d’aller plus loin : " + ", ".join(limits[:3]) + ".")
+    lines.append(
+        f"Le score {score}/100 est un indicateur de priorisation, pas un verdict absolu : il sert à décider quoi reprendre en premier."
+    )
+    return lines
+
+
+def build_priority_roadmap(
+    summary: dict[str, object],
+    business_signals: list[dict[str, object]],
+    top_pages: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    quick_actions: list[str] = []
+    medium_actions: list[str] = []
+    long_actions: list[str] = []
+
+    if _as_int(summary.get("noindex_pages")):
+        quick_actions.append("vérifier les pages noindex")
+    if _as_int(summary.get("canonical_to_other_url_pages")) or _as_int(summary.get("canonical_cross_domain_pages")):
+        quick_actions.append("contrôler les canonicals")
+    if _as_int(summary.get("missing_meta_descriptions")):
+        quick_actions.append("compléter les descriptions Google manquantes")
+    if _as_int(summary.get("dated_content_signals")):
+        quick_actions.append("actualiser les dates et éléments visibles obsolètes")
+    if _as_int(summary.get("weak_internal_linking_pages")) or _as_int(summary.get("probable_orphan_pages")):
+        quick_actions.append("ajouter des liens internes évidents vers les pages isolées")
+
+    if top_pages:
+        medium_actions.append("reprendre les pages prioritaires avec un brief clair page par page")
+    if _as_int(summary.get("thin_content_pages")):
+        medium_actions.append("enrichir les contenus trop courts avec exemples, critères de choix et FAQ")
+    if _as_int(summary.get("possible_content_overlap_pairs")):
+        medium_actions.append("différencier ou fusionner les contenus qui répondent au même besoin")
+    if _as_int(summary.get("duplicate_title_groups")) or _as_int(summary.get("duplicate_meta_description_groups")):
+        medium_actions.append("clarifier les titles et metas des groupes proches")
+
+    if _as_int(summary.get("possible_content_overlap_pairs")) or _as_int(summary.get("content_like_pages")) >= 10:
+        long_actions.append("structurer des clusters éditoriaux autour des pages les plus utiles")
+    if _as_int(summary.get("deep_pages_detected")) or _as_int(summary.get("probable_orphan_pages")):
+        long_actions.append("renforcer les pages hub et les chemins de navigation")
+    if business_signals:
+        long_actions.append("définir une feuille de route éditoriale à partir des signaux confirmés")
+
+    if not quick_actions:
+        quick_actions.append("relire manuellement les 2 ou 3 pages prioritaires et valider les constats")
+    if not medium_actions:
+        medium_actions.append("améliorer les contenus qui portent déjà un potentiel business clair")
+    if not long_actions:
+        long_actions.append("consolider les meilleurs contenus avant d’ouvrir de nouveaux sujets")
+
+    return [
+        {"period": "Sous 30 jours", "focus": "Corrections rapides", "actions": sentence_from_actions(quick_actions[:3])},
+        {"period": "Sous 60 jours", "focus": "Reprises éditoriales", "actions": sentence_from_actions(medium_actions[:3])},
+        {"period": "Sous 90 jours", "focus": "Consolidation", "actions": sentence_from_actions(long_actions[:3])},
+    ]
+
+
+def build_impact_effort_matrix(
+    summary: dict[str, object],
+    business_signals: list[dict[str, object]],
+    top_pages: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    matrix: list[dict[str, str]] = []
+    seen_actions: set[str] = set()
+    signal_actions = {
+        "noindex_pages": ("Vérifier les pages noindex", "Élevé", "Faible", "Haute"),
+        "canonical_to_other_url_pages": ("Contrôler les canonicals", "Élevé", "Moyen", "Haute"),
+        "canonical_cross_domain_pages": ("Contrôler les canonicals externes", "Élevé", "Moyen", "Haute"),
+        "robots_blocked_pages": ("Vérifier les pages bloquées par robots.txt", "Élevé", "Moyen", "Haute"),
+        "dated_content_signals": ("Mettre à jour les contenus datés", "Élevé", "Moyen", "Haute"),
+        "probable_orphan_pages": ("Remettre en avant les pages isolées", "Élevé", "Faible", "Haute"),
+        "weak_internal_linking_pages": ("Renforcer le maillage interne", "Élevé", "Faible", "Haute"),
+        "thin_content_pages": ("Enrichir les contenus légers", "Moyen", "Moyen", "Moyenne"),
+        "possible_content_overlap_pairs": ("Clarifier les contenus proches", "Élevé", "Moyen", "Haute"),
+        "duplicate_title_groups": ("Différencier les titres Google", "Moyen", "Faible", "Moyenne"),
+        "duplicate_meta_description_groups": ("Différencier les descriptions Google", "Moyen", "Faible", "Moyenne"),
+        "deep_pages_detected": ("Rapprocher les pages profondes", "Moyen", "Faible", "Moyenne"),
+    }
+    keys = [str(item.get("key") or "") for item in business_signals]
+    keys.extend(key for key in signal_actions if _as_int(summary.get(key)))
+    for key in keys:
+        if key not in signal_actions:
+            continue
+        action, impact, effort, priority = signal_actions[key]
+        if action in seen_actions:
+            continue
+        seen_actions.add(action)
+        count = _as_int(summary.get(key))
+        label = f"{action} ({count})" if count else action
+        matrix.append({"priority": priority, "action": label, "impact": impact, "effort": effort})
+        if len(matrix) >= 6:
+            break
+    if top_pages and "Prioriser les pages à reprendre" not in seen_actions:
+        matrix.append(
+            {
+                "priority": "Haute",
+                "action": f"Prioriser les {min(len(top_pages), 3)} premières pages à reprendre",
+                "impact": "Élevé",
+                "effort": "Moyen",
+            }
+        )
+    if not matrix:
+        matrix.append(
+            {
+                "priority": "Moyenne",
+                "action": "Valider les pages les plus visibles avec une relecture manuelle",
+                "impact": "Moyen",
+                "effort": "Faible",
+            }
+        )
+    return matrix[:6]
+
+
+def build_editorial_opportunities(
+    summary: dict[str, object],
+    top_pages: list[dict[str, object]],
+) -> list[str]:
+    opportunities: list[str] = []
+    content_pages = _as_int(summary.get("content_like_pages"))
+    if content_pages >= 8:
+        opportunities.append(
+            f"Consolider les {content_pages} contenus repérés : le site a déjà assez de matière pour améliorer l’existant avant de produire du neuf."
+        )
+    if _as_int(summary.get("possible_content_overlap_pairs")):
+        opportunities.append("Transformer les contenus proches en pages complémentaires : un hub, des guides spécialisés ou une fusion selon l’intention réelle.")
+    if _as_int(summary.get("weak_internal_linking_pages")) or _as_int(summary.get("probable_orphan_pages")):
+        opportunities.append("Créer des liens depuis les pages les plus complètes vers les contenus peu visibles afin de mieux distribuer l’autorité interne.")
+    if _as_int(summary.get("dated_content_signals")):
+        opportunities.append("Ajouter un angle fraîcheur : mise à jour, comparaison récente, exemples actuels, sélection par niveau ou par besoin.")
+    if _as_int(summary.get("thin_content_pages")):
+        opportunities.append("Enrichir les pages courtes avec des sections d’aide à la décision : critères, erreurs à éviter, FAQ et cas d’usage.")
+    if top_pages:
+        first_target = format_url_display(str(top_pages[0].get("url") or ""))
+        opportunities.append(f"Utiliser {first_target} comme page pilote pour montrer rapidement la méthode de reprise.")
+    if not opportunities:
+        opportunities.append("Aucune grande faiblesse éditoriale ne ressort automatiquement : la suite logique est une validation manuelle des pages business clés.")
+    return opportunities[:5]
+
+
+def build_method_limit_lines(
+    summary: dict[str, object],
+    pages_crawled: int,
+    crawl_metadata: dict[str, object],
+    confidence_notes: list[str],
+) -> list[str]:
+    lines = [client_scope_summary(summary, pages_crawled)]
+    crawl_source = str(crawl_metadata.get("crawl_source") or "").strip()
+    if crawl_source:
+        source_label = {"home": "page d’accueil", "sitemap": "sitemap", "mixed": "page d’accueil + sitemap"}.get(
+            crawl_source,
+            crawl_source,
+        )
+        lines.append(f"Source de crawl utilisée : {source_label}.")
+    sitemap_count = _as_int(crawl_metadata.get("sitemap_urls_found"))
+    if sitemap_count:
+        lines.append(f"Sitemap détecté avec {sitemap_count} URL(s) exploitables pendant l’analyse.")
+    elif crawl_source in {"sitemap", "mixed"}:
+        lines.append("Aucun sitemap exploitable n’a été confirmé pendant cette analyse.")
+    stop_reason = str(crawl_metadata.get("stop_reason") or "").strip()
+    if stop_reason:
+        lines.append(crawl_stop_reason_label(stop_reason, crawl_metadata))
+    remaining = _as_int(crawl_metadata.get("queued_urls_remaining"))
+    if remaining:
+        lines.append(f"{remaining} URL(s) restaient en file d’attente au moment de l’arrêt du crawl.")
+    if crawl_metadata:
+        robots = "oui" if crawl_metadata.get("robots_txt_available") else "non"
+        lines.append(f"Robots.txt détecté : {robots}.")
+    lines.extend(str(item) for item in confidence_notes[:2] if item)
+    return lines[:7]
+
+
+def crawl_stop_reason_label(reason: str, crawl_metadata: dict[str, object]) -> str:
+    labels = {
+        "queue_empty": "Le crawl s’est arrêté naturellement après épuisement des URLs accessibles dans le budget.",
+        "max_pages_reached": f"Le crawl a atteint la limite fixée de {_as_int(crawl_metadata.get('max_pages'))} pages.",
+        "max_total_seconds_reached": "Le crawl a été arrêté par la limite de temps définie.",
+        "max_total_requests_reached": "Le crawl a été arrêté par la limite de requêtes définie.",
+        "max_consecutive_errors": "Le crawl a été interrompu après plusieurs erreurs consécutives.",
+        "no_pages_collected": "Le crawl n’a pas réussi à collecter de pages HTML exploitables.",
+    }
+    return labels.get(reason, f"Raison d’arrêt du crawl : {reason}.")
+
+
+def build_page_rework_brief(
+    item: dict[str, object],
+    page_details: dict[str, object],
+) -> dict[str, str]:
+    reasons = [client_reason_label(str(reason)) for reason in (item.get("reasons") or [])]
+    issues = [str(issue) for issue in (page_details.get("issues") or [])]
+    dated_refs = [str(ref) for ref in (page_details.get("dated_references") or [])]
+    word_count = _as_int(item.get("word_count") or page_details.get("word_count"))
+    priority = _as_int(item.get("priority_score"))
+    h1_values = page_details.get("h1") or []
+    first_h1 = str(h1_values[0]) if isinstance(h1_values, list) and h1_values else ""
+    title = str(page_details.get("title") or first_h1 or "").strip()
+    url = str(item.get("url") or page_details.get("url") or "")
+
+    observation_parts: list[str] = []
+    if word_count:
+        observation_parts.append(f"{word_count} mots observés")
+    observation_parts.extend(issues[:2])
+    observation_parts.extend(dated_refs[:1])
+    if not observation_parts:
+        observation_parts.append("La page ressort dans les signaux prioritaires du crawl.")
+
+    return {
+        "why": ", ".join(reasons[:3]) if reasons else "La page ressort dans les priorités du crawl.",
+        "observation": ". ".join(observation_parts[:3]),
+        "recommended_action": recommend_page_action(reasons, issues),
+        "effort": estimate_page_effort(reasons, word_count),
+        "impact": estimate_page_impact(reasons, priority),
+        "rewrite_angle": build_rewrite_angle(url, title, reasons),
+    }
+
+
+def recommend_page_action(reasons: list[str], issues: list[str]) -> str:
+    haystack = " ".join([*reasons, *issues]).lower()
+    if "noindex" in haystack:
+        return "Vérifier l’intention d’indexation puis rouvrir la page si elle doit travailler en SEO."
+    if "canonical" in haystack:
+        return "Contrôler la canonical et confirmer quelle URL doit porter le sujet."
+    if "date" in haystack or "daté" in haystack:
+        return "Mettre à jour les informations visibles et ajouter un signal clair de fraîcheur éditoriale."
+    if "lien" in haystack or "maillage" in haystack or "navigation" in haystack:
+        return "Ajouter des liens internes depuis des pages proches et clarifier les ancres."
+    if "contenu" in haystack or "mots" in haystack:
+        return "Enrichir la page avec les réponses, critères et exemples attendus par l’utilisateur."
+    if "description google" in haystack or "titre google" in haystack:
+        return "Réécrire le title et la meta description autour d’une promesse plus précise."
+    return "Relire la page, confirmer le signal, puis définir une reprise éditoriale ciblée."
+
+
+def estimate_page_effort(reasons: list[str], word_count: int) -> str:
+    haystack = " ".join(reasons).lower()
+    if "canonical" in haystack or "noindex" in haystack:
+        return "faible à moyen"
+    if "contenu" in haystack or word_count and word_count < 350:
+        return "moyen"
+    if "lien" in haystack or "description google" in haystack or "titre google" in haystack:
+        return "faible"
+    return "moyen"
+
+
+def estimate_page_impact(reasons: list[str], priority: int) -> str:
+    haystack = " ".join(reasons).lower()
+    if priority >= 8 or "noindex" in haystack or "canonical" in haystack:
+        return "élevé"
+    if priority >= 4 or "maillage" in haystack or "contenu" in haystack:
+        return "moyen à élevé"
+    return "moyen"
+
+
+def build_rewrite_angle(url: str, title: str, reasons: list[str]) -> str:
+    readable_topic = title.strip()
+    if not readable_topic:
+        slug = url.rstrip("/").split("/")[-1]
+        readable_topic = re.sub(r"[-_]+", " ", slug).strip() or "le sujet principal"
+    lower_reasons = " ".join(reasons).lower()
+    if "date" in lower_reasons:
+        return f"Repositionner la page comme une version actuelle de “{readable_topic}”."
+    if "maillage" in lower_reasons or "navigation" in lower_reasons:
+        return f"Faire de “{readable_topic}” une page mieux reliée depuis les contenus proches."
+    if "contenu" in lower_reasons:
+        return f"Transformer “{readable_topic}” en ressource plus complète, avec critères, exemples et réponses directes."
+    return f"Clarifier la promesse de “{readable_topic}” pour mieux couvrir l’intention principale."
+
+
+def sentence_from_actions(actions: list[str]) -> str:
+    cleaned = [item.strip() for item in actions if item.strip()]
+    if not cleaned:
+        return "Prioriser les vérifications manuelles les plus simples."
+    sentence = ", ".join(cleaned)
+    return sentence[0].upper() + sentence[1:] + "."
 
 
 def build_primary_rationale(

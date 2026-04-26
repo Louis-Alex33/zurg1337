@@ -340,38 +340,14 @@ def write_audit_html_index(reports: list[AuditReport], output_path: Path) -> Pat
 
 def write_audit_html_report(report: AuditReport, output_path: Path) -> Path:
     summary = report.summary
-    top_pages = report.top_pages_to_rework[:8]
-    signals = report.business_priority_signals[:8]
-    technical = report.technical_checks
-    page_rows = []
-    for page in report.pages[:80]:
-        page_rows.append(
-            "<tr>"
-            f"<td><a href='{html_lib.escape(str(page.get('url') or '#'))}'>{html_lib.escape(short_url(str(page.get('url') or '')))}</a></td>"
-            f"<td>{html_lib.escape(str(page.get('page_type') or '-'))}</td>"
-            f"<td>{html_lib.escape(str(page.get('page_health_score') or 0))}/100</td>"
-            f"<td>{html_lib.escape(str(page.get('word_count') or 0))}</td>"
-            f"<td>{html_lib.escape(' | '.join(str(item) for item in (page.get('issues') or [])[:4]))}</td>"
-            "</tr>"
-        )
-    top_page_items = "".join(
-        f"<li><a href='{html_lib.escape(str(item.get('url') or '#'))}'>{html_lib.escape(short_url(str(item.get('url') or '')))}</a>"
-        f" <span>{html_lib.escape(str(item.get('page_health_score') or '-'))}/100</span></li>"
-        for item in top_pages
-    ) or "<li>Aucune page prioritaire nette.</li>"
-    signal_items = "".join(
-        f"<li><strong>{html_lib.escape(str(item.get('signal') or 'Signal'))}</strong> "
-        f"<span>{html_lib.escape(str(item.get('count') or 0))}</span></li>"
-        for item in signals
-    ) or "<li>Aucun signal prioritaire net.</li>"
-    technical_items = "".join(
-        f"<li><strong>{html_lib.escape(key.replace('_', ' '))}</strong> <span>{html_lib.escape(str(value))}</span></li>"
-        for key, value in technical.items()
-    ) or "<li>Aucun signal technique net.</li>"
-    metadata_items = "".join(
-        f"<li><strong>{html_lib.escape(str(key).replace('_', ' '))}</strong> <span>{html_lib.escape(str(value))}</span></li>"
-        for key, value in report.crawl_metadata.items()
-    ) or "<li>Métadonnées non disponibles.</li>"
+    top_pages = report.top_pages_to_rework[:6]
+    strengths = audit_html_strengths(report)
+    actions = audit_html_actions(report)
+    roadmap = audit_html_roadmap(report)
+    matrix = audit_html_impact_effort(report)
+    opportunities = audit_html_editorial_opportunities(report)
+    method_limits = audit_html_method_limits(report)
+    score_lines = audit_html_score_explanation(report)
     html = f"""<!doctype html>
 <html lang="fr">
 <head>
@@ -382,32 +358,49 @@ def write_audit_html_report(report: AuditReport, output_path: Path) -> Path:
 </head>
 <body>
   <main>
-    <header class="hero">
-      <p>Audit SEO autonome</p>
-      <h1>{html_lib.escape(report.domain)}</h1>
-      <strong>{report.observed_health_score}/100</strong>
-      <span>{report.pages_crawled} pages crawlées · {html_lib.escape(report.audited_at)}</span>
+    <header class="hero cover">
+      <div>
+        <p>Audit SEO client</p>
+        <h1>{html_lib.escape(report.domain)}</h1>
+        <h2>{html_lib.escape(audit_html_score_label(report.observed_health_score))}</h2>
+        <span>{report.pages_crawled} pages analysées · {html_lib.escape(report.audited_at)}</span>
+      </div>
+      <aside>
+        <strong>{report.observed_health_score}/100</strong>
+        <em>{html_lib.escape(audit_html_urgency_label(report))}</em>
+      </aside>
     </header>
     <section class="grid">
-      <article><h2>Synthèse</h2><ul>
-        <li><strong>Pages de contenu</strong> <span>{summary.get('content_like_pages', 0)}</span></li>
-        <li><strong>Score moyen page</strong> <span>{summary.get('avg_page_health_score', 0)}/100</span></li>
-        <li><strong>Score page min</strong> <span>{summary.get('min_page_health_score', 0)}/100</span></li>
-        <li><strong>Pages légères</strong> <span>{summary.get('thin_content_pages', 0)}</span></li>
-      </ul></article>
-      <article><h2>Signaux prioritaires</h2><ul>{signal_items}</ul></article>
-      <article><h2>Technique</h2><ul>{technical_items}</ul></article>
-      <article><h2>Crawl</h2><ul>{metadata_items}</ul></article>
+      <article><h2>En bref</h2>{audit_html_list(audit_html_takeaways(report))}</article>
+      <article><h2>Ce qui fonctionne déjà</h2>{audit_html_list(strengths)}</article>
+      <article><h2>Priorités business</h2>{audit_html_list(actions)}</article>
+      <article><h2>Lecture du score</h2>{audit_html_list(score_lines)}</article>
     </section>
     <section>
-      <h2>Pages à revoir en priorité</h2>
-      <ul class="top-pages">{top_page_items}</ul>
+      <h2>Plan d’action 30 / 60 / 90 jours</h2>
+      <div class="roadmap">{audit_html_roadmap_cards(roadmap)}</div>
     </section>
     <section>
-      <h2>Pages analysées</h2>
+      <h2>Matrice impact / effort</h2>
+      {audit_html_matrix_table(matrix)}
+    </section>
+    <section>
+      <h2>Pages à retravailler en premier</h2>
+      {audit_html_page_cards(top_pages, report.pages)}
+    </section>
+    <section class="grid two">
+      <article><h2>Opportunités éditoriales</h2>{audit_html_list(opportunities)}</article>
+      <article><h2>Méthode et limites de l’analyse</h2>{audit_html_list(method_limits)}</article>
+    </section>
+    <section>
+      <h2>Annexe technique</h2>
+      <div class="grid two">
+        <article><h2>Chiffres clés</h2>{audit_html_summary_list(summary)}</article>
+        <article><h2>Crawl</h2>{audit_html_metadata_list(report.crawl_metadata)}</article>
+      </div>
       <table>
         <thead><tr><th>URL</th><th>Type</th><th>Score</th><th>Mots</th><th>Points relevés</th></tr></thead>
-        <tbody>{"".join(page_rows)}</tbody>
+        <tbody>{audit_html_page_rows(report.pages)}</tbody>
       </table>
     </section>
   </main>
@@ -415,6 +408,318 @@ def write_audit_html_report(report: AuditReport, output_path: Path) -> Path:
 </html>"""
     output_file = write_text_file(output_path, html)
     return output_file
+
+
+def audit_html_score_label(score: int) -> str:
+    if score >= 75:
+        return "Base observée : plutôt saine"
+    if score >= 60:
+        return "Base observée : saine, avec plusieurs reprises utiles"
+    return "Base observée : premiers signaux à corriger"
+
+
+def audit_html_urgency_label(report: AuditReport) -> str:
+    high_signals = sum(1 for item in report.business_priority_signals if str(item.get("severity") or "") == "HIGH")
+    blocking_count = sum(
+        int(report.summary.get(key, 0) or 0)
+        for key in ("noindex_pages", "canonical_to_other_url_pages", "canonical_cross_domain_pages", "robots_blocked_pages")
+    )
+    if report.observed_health_score < 60 or blocking_count or high_signals >= 3:
+        return "Urgence élevée"
+    if report.observed_health_score < 75 or report.business_priority_signals:
+        return "Urgence moyenne"
+    return "Urgence faible"
+
+
+def audit_html_takeaways(report: AuditReport) -> list[str]:
+    lines = [
+        f"Lecture fondée sur {report.pages_crawled} pages publiques analysées.",
+        f"{int(report.summary.get('content_like_pages', 0) or 0)} contenus utiles repérés dans le crawl.",
+    ]
+    if report.business_priority_signals:
+        lines.append(f"Signal principal : {report.business_priority_signals[0].get('signal')}.")
+    if report.top_pages_to_rework:
+        lines.append(f"{min(len(report.top_pages_to_rework), 3)} pages ressortent comme premières candidates à la reprise.")
+    return lines[:4]
+
+
+def audit_html_strengths(report: AuditReport) -> list[str]:
+    summary = report.summary
+    strengths: list[str] = []
+    pages_ok = int(summary.get("pages_ok", 0) or 0)
+    if pages_ok and pages_ok >= max(1, round(report.pages_crawled * 0.85)):
+        strengths.append("La majorité des pages visitées répond correctement, sans vague d’erreurs visible.")
+    content_pages = int(summary.get("content_like_pages", 0) or 0)
+    if content_pages:
+        strengths.append(f"Le site dispose déjà d’une base éditoriale exploitable avec {content_pages} contenus repérés.")
+    if not int(summary.get("missing_titles", 0) or 0) and not int(summary.get("missing_h1", 0) or 0):
+        strengths.append("Les titres principaux et les titres Google ne montrent pas de manque généralisé.")
+    if not int(summary.get("possible_content_overlap_pairs", 0) or 0):
+        strengths.append("Aucun chevauchement éditorial fort n’apparaît automatiquement dans les contenus analysés.")
+    return strengths[:4] or ["Le site présente assez de matière pour construire un plan d’action concret."]
+
+
+def audit_html_actions(report: AuditReport) -> list[str]:
+    summary = report.summary
+    actions: list[str] = []
+    if int(summary.get("noindex_pages", 0) or 0):
+        actions.append("Vérifier les pages de contenu marquées noindex.")
+    if int(summary.get("canonical_to_other_url_pages", 0) or 0) or int(summary.get("canonical_cross_domain_pages", 0) or 0):
+        actions.append("Contrôler les canonicals qui déplacent le signal vers une autre URL.")
+    if int(summary.get("dated_content_signals", 0) or 0):
+        actions.append("Mettre à jour les contenus qui affichent des dates anciennes.")
+    if int(summary.get("weak_internal_linking_pages", 0) or 0) or int(summary.get("probable_orphan_pages", 0) or 0):
+        actions.append("Renforcer le maillage interne vers les pages peu visibles.")
+    if int(summary.get("thin_content_pages", 0) or 0):
+        actions.append("Enrichir les contenus trop courts avant de produire de nouveaux sujets.")
+    if report.top_pages_to_rework:
+        actions.append("Prioriser les premières pages listées pour créer un lot de reprise pilote.")
+    return actions[:5] or ["Valider manuellement les pages business clés avant de définir la feuille de route."]
+
+
+def audit_html_score_explanation(report: AuditReport) -> list[str]:
+    summary = report.summary
+    positives: list[str] = []
+    limits: list[str] = []
+    if int(summary.get("pages_ok", 0) or 0) and not int(summary.get("pages_with_errors", 0) or 0):
+        positives.append("les pages visitées répondent correctement")
+    if int(summary.get("content_like_pages", 0) or 0):
+        positives.append("le site dispose de contenus exploitables")
+    for key, label in (
+        ("thin_content_pages", "contenus légers"),
+        ("dated_content_signals", "dates visibles à vérifier"),
+        ("weak_internal_linking_pages", "maillage interne faible"),
+        ("possible_content_overlap_pairs", "sujets proches"),
+    ):
+        value = int(summary.get(key, 0) or 0)
+        if value:
+            limits.append(f"{value} {label}")
+    lines = []
+    if positives:
+        lines.append("Ce qui tire le score vers le haut : " + ", ".join(positives[:3]) + ".")
+    if limits:
+        lines.append("Ce qui empêche d’aller plus loin : " + ", ".join(limits[:3]) + ".")
+    lines.append(f"Le score {report.observed_health_score}/100 sert à prioriser, pas à résumer toute la qualité du site.")
+    return lines
+
+
+def audit_html_roadmap(report: AuditReport) -> list[tuple[str, str, str]]:
+    actions = audit_html_actions(report)
+    summary = report.summary
+    quick = []
+    if int(summary.get("missing_meta_descriptions", 0) or 0):
+        quick.append("compléter les metas manquantes")
+    if int(summary.get("dated_content_signals", 0) or 0):
+        quick.append("actualiser les dates visibles")
+    if int(summary.get("weak_internal_linking_pages", 0) or 0):
+        quick.append("ajouter les liens internes évidents")
+    if not quick:
+        quick = actions[:2]
+    medium = ["reprendre les pages prioritaires avec un brief page par page"]
+    if int(summary.get("thin_content_pages", 0) or 0):
+        medium.append("enrichir les contenus courts")
+    if int(summary.get("possible_content_overlap_pairs", 0) or 0):
+        medium.append("clarifier les contenus proches")
+    long = ["consolider les clusters éditoriaux et les pages hub"]
+    if int(summary.get("deep_pages_detected", 0) or 0):
+        long.append("rapprocher les pages profondes")
+    return [
+        ("Sous 30 jours", "Corrections rapides", audit_html_sentence(quick[:3])),
+        ("Sous 60 jours", "Reprises éditoriales", audit_html_sentence(medium[:3])),
+        ("Sous 90 jours", "Consolidation", audit_html_sentence(long[:3])),
+    ]
+
+
+def audit_html_impact_effort(report: AuditReport) -> list[tuple[str, str, str, str]]:
+    rows: list[tuple[str, str, str, str]] = []
+    mapping = [
+        ("noindex_pages", "Haute", "Vérifier les pages noindex", "Élevé", "Faible"),
+        ("canonical_to_other_url_pages", "Haute", "Contrôler les canonicals", "Élevé", "Moyen"),
+        ("dated_content_signals", "Haute", "Mettre à jour les contenus datés", "Élevé", "Moyen"),
+        ("weak_internal_linking_pages", "Haute", "Renforcer le maillage interne", "Élevé", "Faible"),
+        ("thin_content_pages", "Moyenne", "Enrichir les contenus légers", "Moyen", "Moyen"),
+        ("possible_content_overlap_pairs", "Haute", "Clarifier les contenus proches", "Élevé", "Moyen"),
+        ("duplicate_title_groups", "Moyenne", "Différencier les titres Google", "Moyen", "Faible"),
+    ]
+    for key, priority, action, impact, effort in mapping:
+        count = int(report.summary.get(key, 0) or 0)
+        if count:
+            rows.append((priority, f"{action} ({count})", impact, effort))
+        if len(rows) >= 6:
+            break
+    if not rows:
+        rows.append(("Moyenne", "Relire les pages business clés", "Moyen", "Faible"))
+    return rows
+
+
+def audit_html_editorial_opportunities(report: AuditReport) -> list[str]:
+    summary = report.summary
+    lines: list[str] = []
+    content_pages = int(summary.get("content_like_pages", 0) or 0)
+    if content_pages >= 8:
+        lines.append(f"Consolider les {content_pages} contenus existants avant de produire de nouveaux articles.")
+    if int(summary.get("possible_content_overlap_pairs", 0) or 0):
+        lines.append("Fusionner ou différencier les contenus proches selon l’intention de recherche.")
+    if int(summary.get("weak_internal_linking_pages", 0) or 0) or int(summary.get("probable_orphan_pages", 0) or 0):
+        lines.append("Créer des liens depuis les contenus forts vers les pages peu visibles.")
+    if int(summary.get("dated_content_signals", 0) or 0):
+        lines.append("Ajouter un angle fraîcheur : données récentes, exemples actuels, sélection par besoin.")
+    if report.top_pages_to_rework:
+        lines.append(f"Utiliser {short_url(str(report.top_pages_to_rework[0].get('url') or ''))} comme page pilote.")
+    return lines[:5] or ["Aucune opportunité éditoriale nette ne ressort automatiquement : une validation manuelle est recommandée."]
+
+
+def audit_html_method_limits(report: AuditReport) -> list[str]:
+    lines = [f"Lecture fondée sur {report.pages_crawled} pages publiques réellement visitées."]
+    metadata = report.crawl_metadata
+    if metadata.get("crawl_source"):
+        lines.append(f"Source de crawl : {metadata.get('crawl_source')}.")
+    if metadata.get("sitemap_urls_found") is not None:
+        lines.append(f"URLs sitemap détectées : {metadata.get('sitemap_urls_found')}.")
+    if metadata.get("stop_reason"):
+        lines.append(f"Raison d’arrêt : {metadata.get('stop_reason')}.")
+    if metadata.get("queued_urls_remaining"):
+        lines.append(f"URLs restantes en file d’attente : {metadata.get('queued_urls_remaining')}.")
+    lines.extend(report.confidence_notes[:2])
+    return lines[:7]
+
+
+def audit_html_page_cards(top_pages: list[dict[str, object]], pages: list[dict[str, object]]) -> str:
+    if not top_pages:
+        return "<p>Aucune page prioritaire nette.</p>"
+    pages_by_url = {str(page.get("url") or ""): page for page in pages}
+    cards = []
+    for item in top_pages:
+        url = str(item.get("url") or "")
+        page = pages_by_url.get(url, {})
+        reasons = [str(reason) for reason in (item.get("reasons") or [])]
+        issues = [str(issue) for issue in (page.get("issues") or [])[:2]]
+        observation = ", ".join([f"{item.get('word_count', 0)} mots", *issues])
+        cards.append(
+            "<article class='page-card'>"
+            f"<h3><a href='{html_lib.escape(url or '#')}'>{html_lib.escape(short_url(url))}</a></h3>"
+            f"<p><strong>Pourquoi elle ressort</strong><br>{html_lib.escape(', '.join(reasons[:3]) or 'Page prioritaire du crawl.')}</p>"
+            f"<p><strong>Observation</strong><br>{html_lib.escape(observation)}</p>"
+            f"<p><strong>Action recommandée</strong><br>{html_lib.escape(audit_html_page_action(reasons))}</p>"
+            f"<p><strong>Effort estimé</strong> {html_lib.escape(audit_html_page_effort(reasons))} · <strong>Impact potentiel</strong> {html_lib.escape(audit_html_page_impact(item, reasons))}</p>"
+            f"<p><strong>Angle possible</strong><br>{html_lib.escape(audit_html_rewrite_angle(url, page))}</p>"
+            "</article>"
+        )
+    return "<div class='page-list'>" + "".join(cards) + "</div>"
+
+
+def audit_html_page_action(reasons: list[str]) -> str:
+    haystack = " ".join(reasons).lower()
+    if "date" in haystack:
+        return "Mettre à jour les informations visibles et ajouter un signal de fraîcheur."
+    if "liens" in haystack or "retrouver" in haystack:
+        return "Ajouter des liens internes depuis des contenus proches."
+    if "contenu" in haystack:
+        return "Enrichir la page avec critères, exemples et réponses directes."
+    if "canonical" in haystack:
+        return "Contrôler quelle URL doit porter le sujet."
+    return "Relire la page et définir une reprise ciblée."
+
+
+def audit_html_page_effort(reasons: list[str]) -> str:
+    haystack = " ".join(reasons).lower()
+    if "liens" in haystack or "description" in haystack or "titre" in haystack:
+        return "faible"
+    if "canonical" in haystack:
+        return "faible à moyen"
+    return "moyen"
+
+
+def audit_html_page_impact(item: dict[str, object], reasons: list[str]) -> str:
+    priority = int(item.get("priority_score", 0) or 0)
+    haystack = " ".join(reasons).lower()
+    if priority >= 8 or "canonical" in haystack or "noindex" in haystack:
+        return "élevé"
+    if priority >= 4:
+        return "moyen à élevé"
+    return "moyen"
+
+
+def audit_html_rewrite_angle(url: str, page: dict[str, object]) -> str:
+    title = str(page.get("title") or "").strip()
+    if not title:
+        title = re.sub(r"[-_]+", " ", url.rstrip("/").split("/")[-1]).strip() or "le sujet principal"
+    return f"Clarifier la promesse de “{title}” et mieux couvrir l’intention principale."
+
+
+def audit_html_summary_list(summary: dict[str, object]) -> str:
+    items = [
+        f"Pages OK : {summary.get('pages_ok', 0)}",
+        f"Pages en erreur : {summary.get('pages_with_errors', 0)}",
+        f"Pages de contenu : {summary.get('content_like_pages', 0)}",
+        f"Score moyen page : {summary.get('avg_page_health_score', 0)}/100",
+        f"Pages légères : {summary.get('thin_content_pages', 0)}",
+        f"Maillage faible : {summary.get('weak_internal_linking_pages', 0)}",
+    ]
+    return audit_html_list(items)
+
+
+def audit_html_metadata_list(metadata: dict[str, object]) -> str:
+    if not metadata:
+        return "<p>Métadonnées non disponibles.</p>"
+    items = [f"{str(key).replace('_', ' ')} : {value}" for key, value in metadata.items()]
+    return audit_html_list(items[:10])
+
+
+def audit_html_page_rows(pages: list[dict[str, object]]) -> str:
+    rows = []
+    for page in pages[:80]:
+        issues = " | ".join(str(item) for item in (page.get("issues") or [])[:4]) or "-"
+        rows.append(
+            "<tr>"
+            f"<td><a href='{html_lib.escape(str(page.get('url') or '#'))}'>{html_lib.escape(short_url(str(page.get('url') or '')))}</a></td>"
+            f"<td>{html_lib.escape(str(page.get('page_type') or '-'))}</td>"
+            f"<td>{html_lib.escape(str(page.get('page_health_score') or 0))}/100</td>"
+            f"<td>{html_lib.escape(str(page.get('word_count') or 0))}</td>"
+            f"<td>{html_lib.escape(issues)}</td>"
+            "</tr>"
+        )
+    return "".join(rows) or "<tr><td colspan='5'>Aucune URL détaillée disponible.</td></tr>"
+
+
+def audit_html_list(items: list[str]) -> str:
+    body = "".join(f"<li>{html_lib.escape(str(item))}</li>" for item in items)
+    return f"<ul>{body}</ul>" if body else "<p>Aucun élément à afficher.</p>"
+
+
+def audit_html_roadmap_cards(items: list[tuple[str, str, str]]) -> str:
+    return "".join(
+        "<article>"
+        f"<span>{html_lib.escape(period)}</span>"
+        f"<h3>{html_lib.escape(focus)}</h3>"
+        f"<p>{html_lib.escape(actions)}</p>"
+        "</article>"
+        for period, focus, actions in items
+    )
+
+
+def audit_html_matrix_table(items: list[tuple[str, str, str, str]]) -> str:
+    rows = "".join(
+        "<tr>"
+        f"<td>{html_lib.escape(priority)}</td>"
+        f"<td>{html_lib.escape(action)}</td>"
+        f"<td>{html_lib.escape(impact)}</td>"
+        f"<td>{html_lib.escape(effort)}</td>"
+        "</tr>"
+        for priority, action, impact, effort in items
+    )
+    return (
+        "<table><thead><tr><th>Priorité</th><th>Action</th><th>Impact</th><th>Effort</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def audit_html_sentence(items: list[str]) -> str:
+    cleaned = [item.strip().rstrip(".") for item in items if item]
+    if not cleaned:
+        return "Valider les priorités avec une relecture manuelle."
+    sentence = ", ".join(cleaned)
+    return sentence[0].upper() + sentence[1:] + "."
 
 
 def write_text_file(path: Path, payload: str) -> Path:
@@ -425,23 +730,39 @@ def write_text_file(path: Path, payload: str) -> Path:
 
 def audit_html_styles() -> str:
     return """
-    body { margin: 0; font-family: Arial, sans-serif; color: #17212b; background: #f6f7f4; }
+    :root { --ink: #17212b; --muted: #53605a; --line: #dde3db; --paper: #ffffff; --soft: #f6f7f4; --accent: #17313e; --gold: #a97624; }
+    body { margin: 0; font-family: Arial, sans-serif; color: var(--ink); background: var(--soft); }
     main { max-width: 1120px; margin: 0 auto; padding: 32px; }
-    .hero { padding: 28px; background: #17313e; color: white; border-radius: 8px; margin-bottom: 24px; }
+    .hero { padding: 28px; background: var(--accent); color: white; border-radius: 8px; margin-bottom: 24px; }
+    .cover { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 24px; align-items: end; }
     .hero p { margin: 0 0 8px; text-transform: uppercase; letter-spacing: .08em; font-size: 12px; }
     .hero h1 { margin: 0 0 12px; font-size: 34px; }
+    .hero h2 { margin: 0 0 12px; font-size: 22px; font-weight: 600; }
     .hero strong { display: block; font-size: 42px; margin-bottom: 4px; }
+    .hero em { display: inline-block; margin-top: 6px; font-style: normal; font-weight: 700; color: #f7d899; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     article, section { margin-bottom: 20px; }
-    article { background: white; border: 1px solid #dde3db; border-radius: 8px; padding: 16px; }
+    article { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
     h2 { font-size: 18px; margin: 0 0 12px; }
+    h3 { margin: 0 0 8px; font-size: 16px; }
+    p { color: var(--muted); line-height: 1.55; }
     ul { padding-left: 18px; }
     li { margin: 7px 0; }
-    li span { color: #53605a; }
-    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #dde3db; }
+    li span { color: var(--muted); }
+    .roadmap, .page-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .roadmap article span { display: block; color: var(--gold); text-transform: uppercase; letter-spacing: .08em; font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+    .page-card h3 a { overflow-wrap: anywhere; }
+    .page-card p { margin: 10px 0 0; }
+    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid var(--line); }
     th, td { padding: 10px; border-bottom: 1px solid #e8ece5; text-align: left; vertical-align: top; }
     th { background: #eef2ea; }
     a { color: #0b5c76; }
+    @media (max-width: 760px) {
+      main { padding: 18px; }
+      .cover, .grid.two { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+    }
     """
 
 

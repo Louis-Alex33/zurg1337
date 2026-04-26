@@ -366,6 +366,18 @@ Ce que l'audit produit dans la V2:
 - une copie datee dans `reports/audits/<domain>/<timestamp>.json`
 - un index local SQLite dans `reports/audits/audit_index.sqlite`
 
+Le rapport client HTML contient maintenant:
+
+- une synthese "En bref" avec niveau d'urgence
+- une section "Ce qui fonctionne deja"
+- une lecture pedagogique du score
+- un plan d'action `30 / 60 / 90 jours`
+- une matrice `impact / effort`
+- des fiches par page prioritaire avec action, effort, impact et angle possible
+- des opportunites editoriales
+- une section methode / limites
+- une annexe technique avec chiffres de crawl et URLs observees
+
 Important:
 
 - le crawl reste volontairement simple

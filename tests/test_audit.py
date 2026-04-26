@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
@@ -20,6 +21,7 @@ from audit import (
     parse_robots_txt,
     robots_can_fetch,
     should_crawl,
+    write_audit_html_report,
 )
 from models import AuditPage
 
@@ -343,6 +345,45 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertTrue(report.business_priority_signals)
         self.assertTrue(report.top_pages_to_rework)
         self.assertIn("contenu à enrichir", " ".join(report.top_pages_to_rework[0]["reasons"]))  # type: ignore[index]
+
+    def test_standalone_audit_html_is_client_facing(self) -> None:
+        home = AuditPage(
+            url="https://example.com/",
+            title="Magazine SEO",
+            meta_description="Magazine SEO avec des guides complets pour les lecteurs.",
+            h1=["Magazine SEO"],
+            word_count=900,
+            internal_links_out=["https://example.com/blog/refresh"],
+            has_structured_data=True,
+        )
+        thin = AuditPage(
+            url="https://example.com/blog/refresh",
+            title="Refresh SEO",
+            meta_description="",
+            h1=["Refresh SEO"],
+            word_count=120,
+            internal_links_out=[],
+            depth=4,
+        )
+        report = build_report(
+            [home, thin],
+            domain="example.com",
+            crawl_metadata={"crawl_source": "mixed", "stop_reason": "queue_empty", "sitemap_urls_found": 2},
+        )
+
+        with TemporaryDirectory() as tmp_dir:
+            output = write_audit_html_report(report, Path(tmp_dir) / "audit.html")
+            page = output.read_text(encoding="utf-8")
+
+        self.assertIn("Audit SEO client", page)
+        self.assertIn("Ce qui fonctionne déjà", page)
+        self.assertIn("Plan d’action 30 / 60 / 90 jours", page)
+        self.assertIn("Matrice impact / effort", page)
+        self.assertIn("Pages à retravailler en premier", page)
+        self.assertIn("Opportunités éditoriales", page)
+        self.assertIn("Méthode et limites de l’analyse", page)
+        self.assertIn("Annexe technique", page)
+        self.assertIn("Pourquoi elle ressort", page)
 
     def test_build_report_can_disable_overlap_for_light_mode(self) -> None:
         home = AuditPage(

@@ -24,11 +24,18 @@ from ._render_helpers import (
     build_audit_hero_summary,
     build_audit_summary_signal_note,
     build_client_actions,
+    build_client_strengths,
     build_client_takeaways,
+    build_editorial_opportunities,
+    build_impact_effort_matrix,
+    build_method_limit_lines,
+    build_page_rework_brief,
     build_method_lines,
     build_primary_rationale,
     build_priority_labels,
+    build_priority_roadmap,
     build_reusable_summary_text,
+    build_score_explanation,
     build_signal_examples,
     client_finding_text,
     client_reason_label,
@@ -37,6 +44,7 @@ from ._render_helpers import (
     client_score_note,
     client_scope_summary,
     client_signal_label,
+    client_urgency_label,
     compute_audit_summary_metrics,
     confidence_label,
     depth_label,
@@ -817,6 +825,78 @@ def render_client_decision_block(actions: list[str]) -> str:
     )
 
 
+def render_client_strengths_block(strengths: list[str]) -> str:
+    return (
+        "<section class='subpanel positive-panel'>"
+        "<h2>Ce qui fonctionne déjà</h2>"
+        f"{render_string_list(strengths, empty_label='Aucun point positif net n’a été isolé automatiquement.')}"
+        "</section>"
+    )
+
+
+def render_score_explanation_block(lines: list[str]) -> str:
+    return (
+        "<section class='subpanel score-explanation-panel'>"
+        "<h2>Lecture du score</h2>"
+        f"{render_string_list(lines, empty_label='Le score demande une relecture manuelle.')}"
+        "</section>"
+    )
+
+
+def render_roadmap_block(items: list[dict[str, str]]) -> str:
+    if not items:
+        return "<p class='muted'>Aucun plan d’action n’a pu être généré.</p>"
+    cards = "".join(
+        "<article class='roadmap-card'>"
+        f"<span>{html.escape(item.get('period', '-'))}</span>"
+        f"<strong>{html.escape(item.get('focus', '-'))}</strong>"
+        f"<p>{html.escape(item.get('actions', '-'))}</p>"
+        "</article>"
+        for item in items
+    )
+    return f"<div class='roadmap-grid'>{cards}</div>"
+
+
+def render_impact_effort_matrix(items: list[dict[str, str]]) -> str:
+    if not items:
+        return "<p class='muted'>Aucune action prioritaire n’a été isolée.</p>"
+    rows = "".join(
+        "<tr>"
+        f"<td><span class='priority-chip'>{html.escape(item.get('priority', '-'))}</span></td>"
+        f"<td>{html.escape(item.get('action', '-'))}</td>"
+        f"<td>{html.escape(item.get('impact', '-'))}</td>"
+        f"<td>{html.escape(item.get('effort', '-'))}</td>"
+        "</tr>"
+        for item in items
+    )
+    return (
+        "<div class='table-wrap impact-table-wrap'>"
+        "<table class='impact-table'>"
+        "<thead><tr><th>Priorité</th><th>Action</th><th>Impact</th><th>Effort</th></tr></thead>"
+        f"<tbody>{rows}</tbody>"
+        "</table>"
+        "</div>"
+    )
+
+
+def render_editorial_opportunities_block(lines: list[str]) -> str:
+    return (
+        "<section class='subpanel editorial-opportunities-panel'>"
+        "<h2>Opportunités éditoriales</h2>"
+        f"{render_string_list(lines, empty_label='Aucune opportunité éditoriale nette n’a été isolée.')}"
+        "</section>"
+    )
+
+
+def render_method_limits_block(lines: list[str]) -> str:
+    return (
+        "<section class='subpanel method-limits-panel'>"
+        "<h2>Méthode et limites de l’analyse</h2>"
+        f"{render_string_list(lines, empty_label='Aucune limite spécifique n’a été fournie.')}"
+        "</section>"
+    )
+
+
 def render_cover_brief_grid(
     observed_score: int,
     pages_crawled: int,
@@ -901,6 +981,97 @@ def render_portfolio_priority_grid(top_pages: list[dict[str, object]], pages_by_
     return render_top_pages_to_rework(top_pages[:3], pages_by_url)
 
 
+def render_technical_appendix(
+    summary: dict[str, object],
+    crawl_metadata: dict[str, object],
+    pages_by_url: dict[str, dict[str, object]],
+) -> str:
+    return f"""
+    <section class="report-page report-page-appendix">
+      <section class="subpanel">
+        <h2>Annexe technique</h2>
+        <p class="section-intro">Cette partie garde les données utiles pour relire le crawl sans alourdir la synthèse client.</p>
+        <div class="grid two audit-report-grid appendix-grid">
+          <section class="subpanel appendix-inner-panel">
+            <h2>Chiffres clés</h2>
+            {render_summary_key_figures(summary)}
+          </section>
+          <section class="subpanel appendix-inner-panel">
+            <h2>Paramètres du crawl</h2>
+            {render_crawl_metadata(crawl_metadata)}
+          </section>
+        </div>
+        <section class="subpanel appendix-inner-panel">
+          <h2>URLs observées</h2>
+          {render_technical_page_table(list(pages_by_url.values()))}
+        </section>
+      </section>
+    </section>
+    """
+
+
+def render_crawl_metadata(crawl_metadata: dict[str, object]) -> str:
+    if not crawl_metadata:
+        return "<p class='muted'>Métadonnées de crawl non disponibles.</p>"
+    preferred_keys = [
+        ("crawl_source", "Source"),
+        ("seed_urls_count", "URLs de départ"),
+        ("sitemap_urls_found", "URLs sitemap trouvées"),
+        ("pages_collected", "Pages collectées"),
+        ("urls_attempted", "Requêtes tentées"),
+        ("urls_skipped", "URLs ignorées"),
+        ("queued_urls_remaining", "URLs restantes"),
+        ("stop_reason", "Raison d’arrêt"),
+        ("max_pages", "Limite de pages"),
+        ("max_total_seconds_per_domain", "Limite de temps"),
+        ("robots_txt_available", "Robots.txt détecté"),
+        ("robots_txt_status", "Statut robots.txt"),
+    ]
+    rows = []
+    for key, label in preferred_keys:
+        if key not in crawl_metadata:
+            continue
+        value = crawl_metadata.get(key)
+        rows.append(
+            "<div>"
+            f"<dt>{html.escape(label)}</dt>"
+            f"<dd>{html.escape(str(value))}</dd>"
+            "</div>"
+        )
+    if not rows:
+        return "<p class='muted'>Métadonnées de crawl non disponibles.</p>"
+    return f"<dl class='audit-fact-list technical-fact-list'>{''.join(rows)}</dl>"
+
+
+def render_technical_page_table(pages: list[dict[str, object]]) -> str:
+    if not pages:
+        return "<p class='muted'>Aucune URL détaillée disponible.</p>"
+    rows = []
+    for page in pages[:80]:
+        issues = " | ".join(str(item) for item in (page.get("issues") or [])[:3]) or "-"
+        rows.append(
+            "<tr>"
+            f"<td><a class='subtle-link' href='{html.escape(str(page.get('url') or '#'))}' target='_blank' rel='noreferrer'>{html.escape(format_url_display(str(page.get('url') or ''), max_length=72))}</a></td>"
+            f"<td>{html.escape(str(page.get('page_type') or '-'))}</td>"
+            f"<td>{html.escape(str(page.get('page_health_score') or '-'))}/100</td>"
+            f"<td>{html.escape(str(page.get('word_count') or 0))}</td>"
+            f"<td>{html.escape(issues)}</td>"
+            "</tr>"
+        )
+    more_note = ""
+    if len(pages) > 80:
+        more_note = f"<p class='field-help'>{len(pages) - 80} URL(s) supplémentaires restent disponibles dans le JSON source.</p>"
+    return (
+        "<div class='table-wrap technical-page-table-wrap'>"
+        "<table class='technical-page-table'>"
+        "<thead><tr><th>URL</th><th>Type</th><th>Score</th><th>Mots</th><th>Points relevés</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+        "</div>"
+        f"{more_note}"
+    )
+
+
 def render_full_report_layout(
     domain: str,
     observed_score: int,
@@ -914,10 +1085,18 @@ def render_full_report_layout(
     overlaps: list[dict[str, object]],
     dated_content: list[dict[str, object]],
     pages_by_url: dict[str, dict[str, object]],
+    crawl_metadata: dict[str, object],
 ) -> str:
     takeaways = build_client_takeaways(summary, business_signals, top_pages)
     actions = build_client_actions(summary, business_signals, top_pages)
     rationale = build_primary_rationale(summary, business_signals)
+    strengths = build_client_strengths(summary, observed_score)
+    score_lines = build_score_explanation(observed_score, summary)
+    roadmap = build_priority_roadmap(summary, business_signals, top_pages)
+    impact_effort = build_impact_effort_matrix(summary, business_signals, top_pages)
+    editorial_opportunities = build_editorial_opportunities(summary, top_pages)
+    method_limits = build_method_limit_lines(summary, pages_crawled, crawl_metadata, confidence_notes)
+    urgency = client_urgency_label(observed_score, summary, business_signals)
     client_findings = [client_finding_text(str(item)) for item in critical_findings]
     secondary_sections = ""
     if should_render_secondary_signal_section(overlaps, dated_content, business_signals):
@@ -956,6 +1135,7 @@ def render_full_report_layout(
           <p class="audit-hero-copy">{html.escape(build_audit_hero_summary(observed_score, summary, business_signals))}</p>
           <p class="audit-score-explainer">Cette première page aide à repérer rapidement l’état général du site, le point qui ressort en premier et les pages à regarder d’abord.</p>
           {render_cover_brief_grid(observed_score, pages_crawled, summary, top_pages)}
+          <p class="audit-urgency-line">{html.escape(urgency)}</p>
         </section>
         <aside class="cover-side-stack">
           {render_cover_signal_block(business_signals)}
@@ -971,10 +1151,14 @@ def render_full_report_layout(
           <h2>Lecture rapide</h2>
           {render_string_list(takeaways, empty_label="Pas assez d’éléments pour sortir une lecture claire.")}
         </section>
+        {render_client_strengths_block(strengths)}
+      </div>
+      <div class="grid two audit-report-grid">
         <section class="subpanel">
           <h2>Pourquoi ce point compte</h2>
           {render_string_list(rationale, empty_label="Aucun point secondaire notable à signaler.")}
         </section>
+        {render_score_explanation_block(score_lines)}
       </div>
       {render_client_decision_block(actions)}
       <div class="grid two audit-report-grid">
@@ -989,6 +1173,18 @@ def render_full_report_layout(
       </div>
     </section>
 
+    <section class="report-page report-page-plan">
+      <section class="subpanel">
+        <h2>Plan d’action 30 / 60 / 90 jours</h2>
+        <p class="section-intro">Cette priorisation transforme le crawl en séquence de travail lisible côté client.</p>
+        {render_roadmap_block(roadmap)}
+      </section>
+      <section class="subpanel">
+        <h2>Matrice impact / effort</h2>
+        {render_impact_effort_matrix(impact_effort)}
+      </section>
+    </section>
+
     <section class="report-page report-page-priority">
       <section class="subpanel">
         <h2>Pages à revoir en priorité</h2>
@@ -998,6 +1194,11 @@ def render_full_report_layout(
     </section>
 
     {secondary_sections}
+    <section class="report-page report-page-opportunities">
+      {render_editorial_opportunities_block(editorial_opportunities)}
+      {render_method_limits_block(method_limits)}
+    </section>
+    {render_technical_appendix(summary, crawl_metadata, pages_by_url)}
     """
 
 
@@ -1105,6 +1306,7 @@ def render_audit_report_page(path: Path, relative_path: Path, file_size: str, va
             overlaps=overlaps,
             dated_content=dated_content,
             pages_by_url=pages_by_url,
+            crawl_metadata=payload.get("crawl_metadata") or {},
         )
         if active_variant == "full"
         else render_portfolio_report_layout(
@@ -1193,9 +1395,20 @@ def render_top_pages_to_rework(items: list[dict[str, object]], pages_by_url: dic
         display_url = format_url_display(str(item.get("url") or ""), max_length=72)
         health_score = str(item.get("page_health_score") or page_details.get("page_health_score") or "-")
         page_type = str(item.get("page_type") or page_details.get("page_type") or "-")
+        brief = build_page_rework_brief(item, page_details)
         chips = "".join(
             f"<span class='priority-chip'>{html.escape(client_reason_label(str(reason)))}</span>"
             for reason in reasons
+        )
+        client_brief = (
+            "<div class='page-client-brief'>"
+            f"<div><span>Pourquoi elle ressort</span><strong>{html.escape(brief['why'])}</strong></div>"
+            f"<div><span>Observation</span><strong>{html.escape(brief['observation'])}</strong></div>"
+            f"<div><span>Action recommandée</span><strong>{html.escape(brief['recommended_action'])}</strong></div>"
+            f"<div><span>Effort estimé</span><strong>{html.escape(brief['effort'])}</strong></div>"
+            f"<div><span>Impact potentiel</span><strong>{html.escape(brief['impact'])}</strong></div>"
+            f"<div><span>Angle possible</span><strong>{html.escape(brief['rewrite_angle'])}</strong></div>"
+            "</div>"
         )
         cards.append(
             "<article class='page-priority-card'>"
@@ -1207,6 +1420,7 @@ def render_top_pages_to_rework(items: list[dict[str, object]], pages_by_url: dic
             f"<span class='audit-pages-pill'>{html.escape(page_depth_label)}</span>"
             f"<span class='audit-pages-pill'>{html.escape(confidence)}</span></div>"
             f"<div class='audit-compact-body'>{chips or '<span class=\"muted\">Aucune raison spécifiée.</span>'}</div>"
+            f"{client_brief}"
             f"{render_page_issue_details(page_details)}"
             "</article>"
         )

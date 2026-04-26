@@ -472,6 +472,81 @@ PAGE_STYLE = """
       line-height: 1.45;
       overflow-wrap: anywhere;
     }
+    .audit-urgency-line {
+      margin: 16px 0 0;
+      display: inline-flex;
+      width: fit-content;
+      border-radius: 999px;
+      padding: 7px 12px;
+      background: rgba(179,74,60,0.10);
+      color: var(--danger);
+      font-weight: 800;
+      font-size: 0.88rem;
+    }
+    .positive-panel {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.78), rgba(241,247,238,0.86));
+    }
+    .score-explanation-panel,
+    .method-limits-panel,
+    .editorial-opportunities-panel {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.78), rgba(248,243,234,0.88));
+    }
+    .roadmap-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .roadmap-card {
+      border-radius: 8px;
+      border: 1px solid rgba(217,211,195,0.92);
+      background: rgba(255,255,255,0.72);
+      padding: 15px;
+      display: grid;
+      gap: 8px;
+    }
+    .roadmap-card span {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.74rem;
+      font-weight: 800;
+    }
+    .roadmap-card strong {
+      color: var(--inkdeep);
+      font-size: 1.04rem;
+    }
+    .roadmap-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .impact-table {
+      min-width: 720px;
+    }
+    .impact-table td:nth-child(2) {
+      min-width: 18rem;
+      color: var(--inkdeep);
+      font-weight: 650;
+    }
+    .appendix-grid {
+      margin-top: 16px;
+    }
+    .appendix-inner-panel {
+      box-shadow: none;
+      background: rgba(255,255,255,0.54);
+    }
+    .appendix-inner-panel h2 {
+      font-size: 1.15rem;
+    }
+    .technical-fact-list dd {
+      overflow-wrap: anywhere;
+    }
+    .technical-page-table {
+      min-width: 920px;
+    }
     .report-intro-grid,
     .portfolio-kpi-grid {
       display: grid;
@@ -678,6 +753,32 @@ PAGE_STYLE = """
       gap: 8px;
       flex-wrap: wrap;
       margin-top: 8px;
+    }
+    .page-client-brief {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .page-client-brief div {
+      border-radius: 8px;
+      border: 1px solid rgba(217,211,195,0.86);
+      background: rgba(255,255,255,0.58);
+      padding: 11px 12px;
+      display: grid;
+      gap: 5px;
+    }
+    .page-client-brief span {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      font-size: 0.7rem;
+      font-weight: 800;
+    }
+    .page-client-brief strong {
+      color: var(--inkdeep);
+      line-height: 1.45;
+      font-size: 0.92rem;
     }
     .page-url {
       display: block;
@@ -1010,6 +1111,7 @@ PAGE_STYLE = """
       .grid.two,
       .audit-metric-grid,
       .audit-highlight-grid,
+      .roadmap-grid,
       .report-intro-grid,
       .portfolio-kpi-grid,
       .file-meta {
@@ -1049,7 +1151,7 @@ PAGE_STYLE = """
       }
     }
     @media (max-width: 900px) {
-      .hero, .grid.two, .inline-fields, .meta-grid, .audit-metric-grid, .quick-start-grid, .audit-hero-grid, .audit-highlight-grid, .report-intro-grid, .portfolio-kpi-grid, .compact-metric-grid, .cover-layout-grid, .cover-brief-grid {
+      .hero, .grid.two, .inline-fields, .meta-grid, .audit-metric-grid, .quick-start-grid, .audit-hero-grid, .audit-highlight-grid, .report-intro-grid, .portfolio-kpi-grid, .compact-metric-grid, .cover-layout-grid, .cover-brief-grid, .roadmap-grid, .page-client-brief {
         grid-template-columns: 1fr;
       }
       .page { padding: 20px 14px 40px; }
