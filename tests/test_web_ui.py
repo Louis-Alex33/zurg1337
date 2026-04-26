@@ -86,6 +86,7 @@ class WebUITests(unittest.TestCase):
         self.assertIn("ignore l'Input CSV", page)
         self.assertIn("Commencer Ici", page)
         self.assertIn("Je veux analyser un seul site", page)
+        self.assertIn('name="max_pages" value="100"', page)
         self.assertIn("3. Sortir Un Mini Audit Exploitable", page)
         self.assertIn("/clear-jobs", page)
 

@@ -13,6 +13,7 @@ from config import (
     DEFAULT_DELAY,
     DEFAULT_DISCOVER_PROVIDER,
     DEFAULT_QUALIFY_MODE,
+    DEFAULT_UI_AUDIT_MAX_PAGES,
     QUALIFY_MODE_CONFIGS,
 )
 
@@ -100,7 +101,7 @@ def render_dashboard(flash: str = "") -> str:
             <ol class="flow compact-flow">
               <li>Va dans la card <strong>Audit</strong>.</li>
               <li>Remplis seulement le champ <strong>Site</strong> avec `example.com`.</li>
-              <li>Laisse `Max pages` sur `30` pour commencer.</li>
+              <li>Laisse `Max pages` sur `{DEFAULT_UI_AUDIT_MAX_PAGES}` pour couvrir les petits sites.</li>
               <li>Ouvre ensuite `reports/audits/audit_summary.csv` puis le JSON du domaine.</li>
             </ol>
           </article>
@@ -454,7 +455,7 @@ def render_audit_card() -> str:
     <section class="panel accent-ink">
       <div class="panel-head"><h2>Audit</h2><span class="badge">triage ou deep dive</span></div>
       <p class="card-lede">La card la plus utile si tu veux comprendre un site vite. Tu peux l'utiliser directement sur un seul domaine, sans passer par le CSV.</p>
-      <div class="card-tip">Pour un test simple, remplis seulement <strong>Site</strong>, garde `audit_light`, laisse `Max pages` a `30`, puis lance l'audit.</div>
+      <div class="card-tip">Pour un test simple, remplis seulement <strong>Site</strong>, garde `audit_light`, laisse `Max pages` a `{DEFAULT_UI_AUDIT_MAX_PAGES}`, puis lance l'audit.</div>
       <form method="post" action="/run/audit" class="stack">
         <label>Input CSV
           <input type="text" name="input_csv" value="data/domains_scored.csv">
@@ -485,7 +486,7 @@ def render_audit_card() -> str:
         <p class="field-help">`audit_light` privilegie un audit rapide et peu gourmand. `audit_full` est reserve aux quelques domaines qui meritent plus de profondeur.</p>
         <div class="inline-fields">
           <label>Max pages
-            <input type="number" name="max_pages" value="30" min="1">
+            <input type="number" name="max_pages" value="{DEFAULT_UI_AUDIT_MAX_PAGES}" min="1">
           </label>
           <label>Temps max / site
             <input type="number" name="max_total_seconds_per_domain" value="300" min="1">
@@ -494,7 +495,7 @@ def render_audit_card() -> str:
             <input type="number" step="0.1" name="delay" value="0.2">
           </label>
         </div>
-        <p class="field-help">Commence avec `10` a `30` pages pour un triage rapide. Sur un site lent, 30 pages peuvent prendre 3 a 5 minutes.</p>
+        <p class="field-help">`Max pages` est une limite dure. Mets `100` pour couvrir un sitemap d'environ 100 URLs; baisse a `30` seulement pour un triage rapide.</p>
         <label>Output dir
           <input type="text" name="output_dir" value="reports/audits">
         </label>

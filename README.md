@@ -592,8 +592,8 @@ Chaque case de la card `Audit`:
 - `Max pages`
   Role: limiter la profondeur pratique de l'audit.
   Quoi mettre: un nombre entier.
-  Exemple: `30`, `50`, `80`.
-  Comment le choisir: `30` est bien pour du triage commercial rapide. `80` donne un audit plus riche mais plus lent.
+  Exemple: `30`, `80`, `100`.
+  Comment le choisir: l'UI propose `100` par defaut pour couvrir les petits sitemaps. `30` est seulement un triage rapide.
 
 - `Temps max / site`
   Role: fixer le budget temps par domaine dans l'UI.

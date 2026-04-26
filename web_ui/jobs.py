@@ -12,13 +12,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from config import (
-    AUDIT_MODE_CONFIGS,
     DEFAULT_CRAWL_SOURCE,
     DEFAULT_AUDIT_MODE,
     DEFAULT_DELAY,
     DEFAULT_DISCOVER_PROVIDER,
-    DEFAULT_MAX_PAGES,
     DEFAULT_QUALIFY_MODE,
+    DEFAULT_UI_AUDIT_MAX_PAGES,
 )
 from discover import discover_domains, import_domains_from_file
 from gsc import run_gsc_analysis
@@ -150,7 +149,7 @@ def run_audit_job(job_id: str) -> None:
     crawl_source = (job.params.get("crawl_source") or DEFAULT_CRAWL_SOURCE).strip() or DEFAULT_CRAWL_SOURCE
     top_raw = (job.params.get("top") or "").strip()
     min_score_raw = (job.params.get("min_score") or "").strip()
-    max_pages = int(job.params.get("max_pages") or str(DEFAULT_MAX_PAGES))
+    max_pages = int(job.params.get("max_pages") or str(DEFAULT_UI_AUDIT_MAX_PAGES))
     max_seconds_raw = (job.params.get("max_total_seconds_per_domain") or "").strip()
     delay = float(job.params.get("delay") or str(DEFAULT_DELAY))
     respect_robots = job.params.get("skip_robots") != "on"
@@ -396,7 +395,7 @@ def estimate_job_duration(job: JobRecord) -> str | None:
 
     if job.kind == "audit":
         mode = (job.params.get("mode") or DEFAULT_AUDIT_MODE).strip() or DEFAULT_AUDIT_MODE
-        max_pages = int(job.params.get("max_pages") or str(AUDIT_MODE_CONFIGS[mode].max_pages))
+        max_pages = int(job.params.get("max_pages") or str(DEFAULT_UI_AUDIT_MAX_PAGES))
         max_seconds_raw = (job.params.get("max_total_seconds_per_domain") or "").strip()
         top_raw = (job.params.get("top") or "").strip()
         site = (job.params.get("site") or "").strip()
