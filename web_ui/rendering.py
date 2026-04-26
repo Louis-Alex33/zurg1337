@@ -488,13 +488,13 @@ def render_audit_card() -> str:
             <input type="number" name="max_pages" value="30" min="1">
           </label>
           <label>Temps max / site
-            <input type="number" name="max_total_seconds_per_domain" value="90" min="1">
+            <input type="number" name="max_total_seconds_per_domain" value="300" min="1">
           </label>
           <label>Delay
             <input type="number" step="0.1" name="delay" value="0.2">
           </label>
         </div>
-        <p class="field-help">Commence avec `10` a `30` pages pour un triage rapide. Si le rapport s'arrete avant `Max pages`, augmente le temps max, surtout sur les sites WordPress lents.</p>
+        <p class="field-help">Commence avec `10` a `30` pages pour un triage rapide. Sur un site lent, 30 pages peuvent prendre 3 a 5 minutes.</p>
         <label>Output dir
           <input type="text" name="output_dir" value="reports/audits">
         </label>

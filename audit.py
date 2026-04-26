@@ -148,7 +148,8 @@ def audit_domains(
     ]
     total = len(selected)
     print(
-        f"Audit de {total} domaine(s) | mode={mode} | max_pages={resolved_max_pages} | delay={delay}s"
+        f"Audit de {total} domaine(s) | mode={mode} | crawl_source={crawl_source} | "
+        f"max_pages={resolved_max_pages} | max_seconds={resolved_max_seconds}s | delay={delay}s"
     )
 
     for index, item in enumerate(selected, start=1):
@@ -582,18 +583,20 @@ def crawl_site(
 
     if len(pages) >= max_pages:
         stop_reason = "max_pages_reached"
+    final_metadata = {
+        "pages_collected": len(pages),
+        "urls_attempted": total_requests,
+        "urls_skipped": skipped_urls,
+        "queued_urls_remaining": len(queue),
+        "stop_reason": stop_reason,
+    }
     if metadata is not None:
-        metadata.update(
-            {
-                "pages_collected": len(pages),
-                "urls_attempted": total_requests,
-                "urls_skipped": skipped_urls,
-                "queued_urls_remaining": len(queue),
-                "stop_reason": stop_reason,
-            }
-        )
+        metadata.update(final_metadata)
     if progress_label:
-        print(f"  Crawl termine pour {progress_label}: {len(pages)} pages")
+        print(
+            f"  Crawl termine pour {progress_label}: {len(pages)} pages | "
+            f"stop={stop_reason} | sitemap_urls={len(sitemap_urls)} | queue_restante={len(queue)}"
+        )
     return pages
 
 
