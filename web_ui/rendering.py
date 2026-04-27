@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from urllib.parse import quote, unquote
 
+from audit_report_design import render_premium_audit_report
 from config import (
     AUDIT_MODE_CONFIGS,
     DEFAULT_CRAWL_SOURCE,
@@ -825,6 +826,153 @@ def render_client_decision_block(actions: list[str]) -> str:
     )
 
 
+def render_score_donut(observed_score: int, pages_crawled: int) -> str:
+    score = max(0, min(100, observed_score))
+    tone = "score-donut-low"
+    label = "À renforcer"
+    if score >= 75:
+        tone = "score-donut-high"
+        label = "Solide"
+    elif score >= 60:
+        tone = "score-donut-mid"
+        label = "À surveiller"
+    return (
+        f"<div class='score-donut-widget {tone}'>"
+        f"<div class='score-donut' style='--score-pct: {score}%;' aria-label='Score observé {score} sur 100'>"
+        "<div class='score-donut-inner'>"
+        f"<strong>{score}</strong>"
+        "<span>/100</span>"
+        "</div>"
+        "</div>"
+        "<div class='score-donut-copy'>"
+        f"<span class='report-status-label'>{html.escape(label)}</span>"
+        f"<p>{html.escape(client_score_note(score, pages_crawled))}</p>"
+        "</div>"
+        "</div>"
+    )
+
+
+def priority_tone_from_score(value: object) -> str:
+    score = _as_int(value)
+    if score >= 7:
+        return "high"
+    if score >= 4:
+        return "moderate"
+    return "healthy"
+
+
+def priority_tone_from_label(label: str) -> str:
+    normalized = label.strip().lower()
+    if "haute" in normalized or "élev" in normalized or "eleve" in normalized:
+        return "high"
+    if "moy" in normalized or "mod" in normalized:
+        return "moderate"
+    return "healthy"
+
+
+def render_priority_badge(label: str, tone: str = "moderate") -> str:
+    safe_tone = tone if tone in {"high", "moderate", "healthy"} else "moderate"
+    return f"<span class='priority-chip priority-badge priority-{safe_tone}'>{html.escape(label)}</span>"
+
+
+def signal_distribution(summary: dict[str, object]) -> list[dict[str, object]]:
+    groups = [
+        (
+            "Indexation",
+            "Ce qui peut empêcher une page d’être prise en compte",
+            "signal-indexing",
+            (
+                "noindex_pages",
+                "canonical_to_other_url_pages",
+                "canonical_cross_domain_pages",
+                "robots_blocked_pages",
+                "pages_with_errors",
+            ),
+        ),
+        (
+            "Contenu",
+            "Ce qui demande une reprise éditoriale visible",
+            "signal-content",
+            (
+                "thin_content_pages",
+                "missing_titles",
+                "missing_meta_descriptions",
+                "missing_h1",
+                "duplicate_title_groups",
+                "duplicate_meta_description_groups",
+                "dated_content_signals",
+            ),
+        ),
+        (
+            "Structure",
+            "Ce qui limite la circulation entre les pages",
+            "signal-structure",
+            (
+                "weak_internal_linking_pages",
+                "probable_orphan_pages",
+                "deep_pages_detected",
+                "possible_content_overlap_pairs",
+            ),
+        ),
+    ]
+    return [
+        {"label": label, "note": note, "tone": tone, "value": sum(_as_int(summary.get(key)) for key in keys)}
+        for label, note, tone, keys in groups
+    ]
+
+
+def render_signal_distribution_chart(summary: dict[str, object]) -> str:
+    groups = signal_distribution(summary)
+    total = sum(int(item["value"]) for item in groups)
+    colors = {
+        "signal-indexing": "#2563eb",
+        "signal-content": "#f97316",
+        "signal-structure": "#0f766e",
+        "signal-clear": "#16a34a",
+    }
+    if total <= 0:
+        chart_style = "background: conic-gradient(#16a34a 0 100%);"
+        legend_items = [
+            "<li><span class='chart-dot signal-clear'></span><span>Aucun signal majeur</span><strong>0</strong></li>"
+        ]
+        total_label = "0 signal prioritaire"
+    else:
+        cursor = 0.0
+        segments: list[str] = []
+        for item in groups:
+            value = int(item["value"])
+            if value <= 0:
+                continue
+            start = cursor
+            cursor += value / total * 100
+            color = colors[str(item["tone"])]
+            segments.append(f"{color} {start:.2f}% {cursor:.2f}%")
+        chart_style = f"background: conic-gradient({', '.join(segments)});"
+        legend_items = [
+            (
+                f"<li><span class='chart-dot {html.escape(str(item['tone']))}'></span>"
+                f"<span>{html.escape(str(item['label']))}<small>{html.escape(str(item['note']))}</small></span>"
+                f"<strong>{int(item['value'])}</strong></li>"
+            )
+            for item in groups
+        ]
+        total_label = f"{total} signaux classés"
+    return (
+        "<section class='subpanel report-chart-card'>"
+        "<div class='report-chart-head'>"
+        "<div>"
+        "<h2>Répartition des signaux</h2>"
+        f"<p class='section-intro'>{html.escape(total_label)} par famille, pour distinguer technique, contenu et structure.</p>"
+        "</div>"
+        "</div>"
+        "<div class='signal-chart-layout'>"
+        f"<div class='signal-pie' style='{html.escape(chart_style)}'><div><strong>{total}</strong><span>signaux</span></div></div>"
+        f"<ul class='chart-legend'>{''.join(legend_items)}</ul>"
+        "</div>"
+        "</section>"
+    )
+
+
 def render_client_strengths_block(strengths: list[str]) -> str:
     return (
         "<section class='subpanel positive-panel'>"
@@ -860,21 +1008,58 @@ def render_roadmap_block(items: list[dict[str, str]]) -> str:
 def render_impact_effort_matrix(items: list[dict[str, str]]) -> str:
     if not items:
         return "<p class='muted'>Aucune action prioritaire n’a été isolée.</p>"
-    rows = "".join(
-        "<tr>"
-        f"<td><span class='priority-chip'>{html.escape(item.get('priority', '-'))}</span></td>"
-        f"<td>{html.escape(item.get('action', '-'))}</td>"
-        f"<td>{html.escape(item.get('impact', '-'))}</td>"
-        f"<td>{html.escape(item.get('effort', '-'))}</td>"
-        "</tr>"
-        for item in items
-    )
+    quadrants = [
+        ("quick-wins", "Quick Wins", "Impact fort / effort faible", "À lancer en premier"),
+        ("projects", "Projets structurants", "Impact fort / effort élevé", "À cadrer"),
+        ("fill-ins", "Optimisations simples", "Impact modéré / effort faible", "À traiter si le temps le permet"),
+        ("later", "À planifier", "Impact modéré / effort élevé", "À garder en backlog"),
+    ]
+    grouped: dict[str, list[dict[str, str]]] = {key: [] for key, *_ in quadrants}
+    for item in items:
+        impact = str(item.get("impact") or "").lower()
+        effort = str(item.get("effort") or "").lower()
+        high_impact = "élev" in impact or "eleve" in impact or "fort" in impact
+        low_effort = "faible" in effort
+        if high_impact and low_effort:
+            bucket = "quick-wins"
+        elif high_impact:
+            bucket = "projects"
+        elif low_effort:
+            bucket = "fill-ins"
+        else:
+            bucket = "later"
+        grouped[bucket].append(item)
+
+    cards = []
+    for key, title, axis, note in quadrants:
+        entries = grouped[key]
+        if entries:
+            body = "".join(
+                "<article class='impact-action-card'>"
+                f"{render_priority_badge(str(entry.get('priority') or 'Priorité'), priority_tone_from_label(str(entry.get('priority') or '')))}"
+                f"<strong>{html.escape(entry.get('action', '-'))}</strong>"
+                "<div class='impact-action-meta'>"
+                f"<span>Impact : {html.escape(entry.get('impact', '-'))}</span>"
+                f"<span>Effort : {html.escape(entry.get('effort', '-'))}</span>"
+                "</div>"
+                "</article>"
+                for entry in entries
+            )
+        else:
+            body = "<p class='muted'>Aucune action classée ici.</p>"
+        cards.append(
+            f"<section class='impact-quadrant impact-{key}' aria-label='{html.escape(title)}'>"
+            "<div class='impact-quadrant-head'>"
+            f"<span>{html.escape(note)}</span>"
+            f"<h3>{html.escape(title)}</h3>"
+            f"<p>{html.escape(axis)}</p>"
+            "</div>"
+            f"<div class='impact-quadrant-body'>{body}</div>"
+            "</section>"
+        )
     return (
-        "<div class='table-wrap impact-table-wrap'>"
-        "<table class='impact-table'>"
-        "<thead><tr><th>Priorité</th><th>Action</th><th>Impact</th><th>Effort</th></tr></thead>"
-        f"<tbody>{rows}</tbody>"
-        "</table>"
+        "<div class='impact-matrix-shell' role='group' aria-label='Matrice impact effort'>"
+        f"<div class='impact-quadrant-grid'>{''.join(cards)}</div>"
         "</div>"
     )
 
@@ -1130,18 +1315,26 @@ def render_full_report_layout(
       </div>
       <div class="cover-layout-grid">
         <section class="audit-hero-card audit-hero-primary cover-main-card">
-          <p class="audit-hero-surtitle">En bref</p>
-          <h2>{html.escape(client_score_label(observed_score))}</h2>
-          <p class="audit-hero-copy">{html.escape(build_audit_hero_summary(observed_score, summary, business_signals))}</p>
-          <p class="audit-score-explainer">Cette première page aide à repérer rapidement l’état général du site, le point qui ressort en premier et les pages à regarder d’abord.</p>
-          {render_cover_brief_grid(observed_score, pages_crawled, summary, top_pages)}
-          <p class="audit-urgency-line">{html.escape(urgency)}</p>
+          <div class="audit-cover-main">
+            <div>
+              <p class="audit-hero-surtitle">Synthèse client</p>
+              <h2>{html.escape(client_score_label(observed_score))}</h2>
+              <p class="audit-hero-copy">{html.escape(build_audit_hero_summary(observed_score, summary, business_signals))}</p>
+              <p class="audit-score-explainer">Cette première page aide à repérer rapidement l’état général du site, le point qui ressort en premier et les pages à regarder d’abord.</p>
+              <p class="audit-urgency-line">{html.escape(urgency)}</p>
+            </div>
+            {render_score_donut(observed_score, pages_crawled)}
+          </div>
         </section>
         <aside class="cover-side-stack">
           {render_cover_signal_block(business_signals)}
           {render_cover_top_pages_block(top_pages)}
           {render_cover_decision_block(actions)}
         </aside>
+      </div>
+      <div class="report-dashboard-row">
+        {render_cover_brief_grid(observed_score, pages_crawled, summary, top_pages)}
+        {render_signal_distribution_chart(summary)}
       </div>
     </section>
 
@@ -1243,11 +1436,7 @@ def render_portfolio_report_layout(
         </section>
         <aside class="audit-hero-card audit-hero-secondary">
           <p class="audit-side-label">Repère</p>
-          <div class="audit-hero-stat-block">
-            <span class="audit-status-chip">{html.escape(client_score_label(observed_score))}</span>
-            <strong>{observed_score}/100</strong>
-            <p>{html.escape(client_score_note(observed_score, pages_crawled))}</p>
-          </div>
+          {render_score_donut(observed_score, pages_crawled)}
           {render_portfolio_method_strip(method_lines)}
         </aside>
       </div>
@@ -1293,20 +1482,13 @@ def render_audit_report_page(path: Path, relative_path: Path, file_size: str, va
     switch_variant = "portfolio" if active_variant == "full" else "full"
     switch_label = "Version portfolio" if active_variant == "full" else "Version complète"
     variant_content = (
-        render_full_report_layout(
-            domain=domain,
-            observed_score=observed_score,
-            pages_crawled=_as_int(payload.get("pages_crawled")),
-            subtitle=subtitle,
-            summary=summary,
-            business_signals=business_signals,
-            top_pages=top_pages,
-            critical_findings=critical_findings,
-            confidence_notes=confidence_notes or payload.get("notes") or [],
-            overlaps=overlaps,
-            dated_content=dated_content,
-            pages_by_url=pages_by_url,
-            crawl_metadata=payload.get("crawl_metadata") or {},
+        render_premium_audit_report(
+            payload,
+            standalone=False,
+            overrides={
+                "tool_name": "ZURG 1337",
+                "tool_tagline": "Audit SEO automatisé",
+            },
         )
         if active_variant == "full"
         else render_portfolio_report_layout(
@@ -1391,6 +1573,7 @@ def render_top_pages_to_rework(items: list[dict[str, object]], pages_by_url: dic
         page_details = pages_by_url.get(str(item.get("url") or ""), {})
         confidence = confidence_label(str(item.get("confidence") or ""))
         priority_label = priority_score_label(item.get("priority_score"))
+        priority_tone = priority_tone_from_score(item.get("priority_score"))
         page_depth_label = depth_label(item.get("depth"))
         display_url = format_url_display(str(item.get("url") or ""), max_length=72)
         health_score = str(item.get("page_health_score") or page_details.get("page_health_score") or "-")
@@ -1401,19 +1584,25 @@ def render_top_pages_to_rework(items: list[dict[str, object]], pages_by_url: dic
             for reason in reasons
         )
         client_brief = (
+            "<div class='page-context-note'>"
+            f"<span class='page-card-label'>Pourquoi elle ressort</span><strong>{html.escape(brief['why'])}</strong>"
+            "</div>"
             "<div class='page-client-brief'>"
-            f"<div><span>Pourquoi elle ressort</span><strong>{html.escape(brief['why'])}</strong></div>"
-            f"<div><span>Observation</span><strong>{html.escape(brief['observation'])}</strong></div>"
-            f"<div><span>Action recommandée</span><strong>{html.escape(brief['recommended_action'])}</strong></div>"
-            f"<div><span>Effort estimé</span><strong>{html.escape(brief['effort'])}</strong></div>"
-            f"<div><span>Impact potentiel</span><strong>{html.escape(brief['impact'])}</strong></div>"
-            f"<div><span>Angle possible</span><strong>{html.escape(brief['rewrite_angle'])}</strong></div>"
+            "<section class='page-brief-column'>"
+            f"<div class='page-brief-block'><span class='page-card-label'>Observation</span><strong>{html.escape(brief['observation'])}</strong></div>"
+            f"<div class='page-brief-block is-action'><span class='page-card-label'>Action recommandée</span><strong>{html.escape(brief['recommended_action'])}</strong></div>"
+            "</section>"
+            "<section class='page-brief-column'>"
+            f"<div class='page-brief-block is-impact'><span class='page-card-label'>Impact potentiel</span><strong>{html.escape(brief['impact'])}</strong></div>"
+            f"<div class='page-brief-block'><span class='page-card-label'>Effort estimé</span><strong>{html.escape(brief['effort'])}</strong></div>"
+            f"<div class='page-brief-block is-angle'><span class='page-card-label'>Angle possible</span><strong>{html.escape(brief['rewrite_angle'])}</strong></div>"
+            "</section>"
             "</div>"
         )
         cards.append(
-            "<article class='page-priority-card'>"
+            f"<article class='page-priority-card priority-card-{html.escape(priority_tone)}'>"
             f"<a class='page-url' href='{html.escape(str(item.get('url') or '#'))}' target='_blank' rel='noreferrer'>{html.escape(display_url)}</a>"
-            f"<div class='page-priority-meta'><span class='audit-pages-pill'>{html.escape(priority_label)}</span>"
+            f"<div class='page-priority-meta'>{render_priority_badge(priority_label, priority_tone)}"
             f"<span class='audit-pages-pill'>score page {html.escape(health_score)}/100</span>"
             f"<span class='audit-pages-pill'>{html.escape(page_type)}</span>"
             f"<span class='audit-pages-pill'>{html.escape(str(item.get('word_count') or 0))} mots</span>"

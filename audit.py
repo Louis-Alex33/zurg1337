@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from audit_report_design import render_premium_audit_report
 from audit_store import record_audit_report
 from config import (
     AUDIT_MODE_CONFIGS,
@@ -339,73 +340,7 @@ def write_audit_html_index(reports: list[AuditReport], output_path: Path) -> Pat
 
 
 def write_audit_html_report(report: AuditReport, output_path: Path) -> Path:
-    summary = report.summary
-    top_pages = report.top_pages_to_rework[:6]
-    strengths = audit_html_strengths(report)
-    actions = audit_html_actions(report)
-    roadmap = audit_html_roadmap(report)
-    matrix = audit_html_impact_effort(report)
-    opportunities = audit_html_editorial_opportunities(report)
-    method_limits = audit_html_method_limits(report)
-    score_lines = audit_html_score_explanation(report)
-    html = f"""<!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Audit SEO - {html_lib.escape(report.domain)}</title>
-  <style>{audit_html_styles()}</style>
-</head>
-<body>
-  <main>
-    <header class="hero cover">
-      <div>
-        <p>Audit SEO client</p>
-        <h1>{html_lib.escape(report.domain)}</h1>
-        <h2>{html_lib.escape(audit_html_score_label(report.observed_health_score))}</h2>
-        <span>{report.pages_crawled} pages analysées · {html_lib.escape(report.audited_at)}</span>
-      </div>
-      <aside>
-        <strong>{report.observed_health_score}/100</strong>
-        <em>{html_lib.escape(audit_html_urgency_label(report))}</em>
-      </aside>
-    </header>
-    <section class="grid">
-      <article><h2>En bref</h2>{audit_html_list(audit_html_takeaways(report))}</article>
-      <article><h2>Ce qui fonctionne déjà</h2>{audit_html_list(strengths)}</article>
-      <article><h2>Priorités business</h2>{audit_html_list(actions)}</article>
-      <article><h2>Lecture du score</h2>{audit_html_list(score_lines)}</article>
-    </section>
-    <section>
-      <h2>Plan d’action 30 / 60 / 90 jours</h2>
-      <div class="roadmap">{audit_html_roadmap_cards(roadmap)}</div>
-    </section>
-    <section>
-      <h2>Matrice impact / effort</h2>
-      {audit_html_matrix_table(matrix)}
-    </section>
-    <section>
-      <h2>Pages à retravailler en premier</h2>
-      {audit_html_page_cards(top_pages, report.pages)}
-    </section>
-    <section class="grid two">
-      <article><h2>Opportunités éditoriales</h2>{audit_html_list(opportunities)}</article>
-      <article><h2>Méthode et limites de l’analyse</h2>{audit_html_list(method_limits)}</article>
-    </section>
-    <section>
-      <h2>Annexe technique</h2>
-      <div class="grid two">
-        <article><h2>Chiffres clés</h2>{audit_html_summary_list(summary)}</article>
-        <article><h2>Crawl</h2>{audit_html_metadata_list(report.crawl_metadata)}</article>
-      </div>
-      <table>
-        <thead><tr><th>URL</th><th>Type</th><th>Score</th><th>Mots</th><th>Points relevés</th></tr></thead>
-        <tbody>{audit_html_page_rows(report.pages)}</tbody>
-      </table>
-    </section>
-  </main>
-</body>
-</html>"""
+    html = render_premium_audit_report(report)
     output_file = write_text_file(output_path, html)
     return output_file
 

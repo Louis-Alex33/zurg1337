@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from unittest.mock import patch
 
+from audit_report_design import score_color_class, slug_to_title
 from audit import (
     audit_domains,
     build_report,
@@ -48,6 +49,16 @@ def make_page(**overrides) -> AuditPage:
 
 
 class AuditHeuristicsTests(unittest.TestCase):
+    def test_report_design_helpers_match_expected_labels(self) -> None:
+        self.assertEqual(slug_to_title("padel-porto-vecchio"), "Padel Porto Vecchio")
+        self.assertEqual(
+            slug_to_title("test-dreampadel-match-carbon-2-0-2025"),
+            "Test Dreampadel Match Carbon 2.0 2025",
+        )
+        self.assertEqual(score_color_class(45), "score-low")
+        self.assertEqual(score_color_class(80), "score-mid")
+        self.assertEqual(score_color_class(96), "score-high")
+
     def test_overlap_and_orphan_labels_are_prudent(self) -> None:
         home = AuditPage(
             url="https://example.com/",
@@ -375,14 +386,18 @@ class AuditHeuristicsTests(unittest.TestCase):
             output = write_audit_html_report(report, Path(tmp_dir) / "audit.html")
             page = output.read_text(encoding="utf-8")
 
-        self.assertIn("Audit SEO client", page)
-        self.assertIn("Ce qui fonctionne déjà", page)
+        self.assertIn("Audit SEO", page)
+        self.assertIn("Rapport confidentiel", page)
+        self.assertIn("Ce qui fonctionne", page)
+        self.assertIn("Points d'attention", page)
         self.assertIn("Plan d’action 30 / 60 / 90 jours", page)
         self.assertIn("Matrice impact / effort", page)
-        self.assertIn("Pages à retravailler en premier", page)
+        self.assertIn("Pages à revoir en priorité", page)
         self.assertIn("Opportunités éditoriales", page)
-        self.assertIn("Méthode et limites de l’analyse", page)
+        self.assertIn("Prochaines étapes recommandées", page)
         self.assertIn("Annexe technique", page)
+        self.assertIn(".premium-report .annexe", page)
+        self.assertIn("display: none !important", page)
         self.assertIn("Pourquoi elle ressort", page)
 
     def test_build_report_can_disable_overlap_for_light_mode(self) -> None:
