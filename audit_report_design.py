@@ -88,6 +88,54 @@ TITLE_EXCEPTIONS = {
     "ia": "IA",
 }
 
+FRENCH_LANGUAGE_MARKERS = {
+    "aides",
+    "avec",
+    "choisir",
+    "comment",
+    "conseils",
+    "dans",
+    "des",
+    "devis",
+    "du",
+    "et",
+    "les",
+    "pour",
+    "prix",
+    "quel",
+    "quelle",
+    "retrouvez",
+    "sur",
+    "votre",
+    "vous",
+}
+
+ENGLISH_LANGUAGE_MARKERS = {
+    "about",
+    "and",
+    "best",
+    "browse",
+    "clear",
+    "discover",
+    "essential",
+    "find",
+    "for",
+    "guide",
+    "how",
+    "in",
+    "information",
+    "shopping",
+    "style",
+    "the",
+    "tips",
+    "to",
+    "travel",
+    "what",
+    "why",
+    "with",
+    "your",
+}
+
 SEUIL_LENT = 3.0
 SEUIL_CRITIQUE = 4.0
 SEUIL_TITRE_LONG = 60
@@ -150,7 +198,7 @@ def speed_color_class(load_time: float | None) -> str:
 
 def needs_title_fix(page: dict[str, Any]) -> bool:
     title = str(page.get("titre_google") or "")
-    return bool(title and len(title) > SEUIL_TITRE_LONG)
+    return not title or len(title) > SEUIL_TITRE_LONG
 
 
 def needs_desc_fix(page: dict[str, Any]) -> bool:
@@ -777,47 +825,58 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
         suggestion = as_dict(page.get("seo_suggestions"))
         title = str(page.get("titre_google") or "")
         desc = str(page.get("description_google") or "")
+        title_suggested = str(suggestion.get("titre_suggere") or "").strip()
+        desc_suggested = str(suggestion.get("description_suggeree") or "").strip()
         title_block = ""
-        if title:
+        if title_suggested:
             title_bad = len(title) > SEUIL_TITRE_LONG
             title_note = " — trop long (max 60)" if title_bad else ""
+            title_status = (
+                '<span class="suggestion-longueur--bad">Absent</span>'
+                if not title
+                else f'<span class="suggestion-longueur {"suggestion-longueur--bad" if title_bad else "suggestion-longueur--ok"}">{len(title)} car.{title_note}</span>'
+            )
+            current_title = (
+                f"""
+      <div class="suggestion-actuel">
+        <span class="suggestion-label-actuel">Actuel</span>
+        <span class="suggestion-texte-actuel">{escape(title)}</span>
+      </div>"""
+                if title
+                else ""
+            )
             title_block = f"""
     <div class="suggestion-bloc">
       <div class="suggestion-bloc-header">
         <span class="suggestion-type">Titre Google</span>
-        <span class="suggestion-longueur {'suggestion-longueur--bad' if title_bad else 'suggestion-longueur--ok'}">{len(title)} car.{title_note}</span>
+        {title_status}
       </div>
-      <div class="suggestion-actuel">
-        <span class="suggestion-label-actuel">Actuel</span>
-        <span class="suggestion-texte-actuel">{escape(title)}</span>
-      </div>
+      {current_title}
       <div class="suggestion-propose">
         <span class="suggestion-label-propose">Suggéré</span>
-        <span class="suggestion-texte-propose">{escape(str(suggestion.get("titre_suggere") or title))}</span>
-        <span class="suggestion-longueur-ok">{get_int(suggestion, "titre_longueur", len(str(suggestion.get("titre_suggere") or title)))} car.</span>
+        <span class="suggestion-texte-propose">{escape(title_suggested)}</span>
+        <span class="suggestion-longueur-ok">{get_int(suggestion, "titre_longueur", len(title_suggested))} car.</span>
       </div>
       {render_suggestion_explanation(str(suggestion.get("explication_titre") or ""))}
     </div>"""
-        desc_bad = not desc or len(desc) < SEUIL_DESC_COURTE or len(desc) > SEUIL_DESC_LONGUE
-        desc_status = (
-            '<span class="suggestion-longueur--bad">Absente</span>'
-            if not desc
-            else f'<span class="suggestion-longueur {"suggestion-longueur--bad" if desc_bad else "suggestion-longueur--ok"}">{len(desc)} car.</span>'
-        )
-        current_desc = (
-            f"""
+        desc_block = ""
+        if desc_suggested:
+            desc_bad = not desc or len(desc) < SEUIL_DESC_COURTE or len(desc) > SEUIL_DESC_LONGUE
+            desc_status = (
+                '<span class="suggestion-longueur--bad">Absente</span>'
+                if not desc
+                else f'<span class="suggestion-longueur {"suggestion-longueur--bad" if desc_bad else "suggestion-longueur--ok"}">{len(desc)} car.</span>'
+            )
+            current_desc = (
+                f"""
       <div class="suggestion-actuel">
         <span class="suggestion-label-actuel">Actuel</span>
         <span class="suggestion-texte-actuel">{escape(desc)}</span>
       </div>"""
-            if desc
-            else ""
-        )
-        cards.append(
-            f"""
-  <div class="suggestion-card">
-    <div class="suggestion-url">{escape(display_url_label(str(page.get("url") or ""), str(context["domain"]), empty_label="Accueil"))}</div>
-    {title_block}
+                if desc
+                else ""
+            )
+            desc_block = f"""
     <div class="suggestion-bloc">
       <div class="suggestion-bloc-header">
         <span class="suggestion-type">Description Google</span>
@@ -826,13 +885,23 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
       {current_desc}
       <div class="suggestion-propose">
         <span class="suggestion-label-propose">Suggéré</span>
-        <span class="suggestion-texte-propose">{escape(str(suggestion.get("description_suggeree") or desc))}</span>
-        <span class="suggestion-longueur-ok">{get_int(suggestion, "description_longueur", len(str(suggestion.get("description_suggeree") or desc)))} car.</span>
+        <span class="suggestion-texte-propose">{escape(desc_suggested)}</span>
+        <span class="suggestion-longueur-ok">{get_int(suggestion, "description_longueur", len(desc_suggested))} car.</span>
       </div>
       {render_suggestion_explanation(str(suggestion.get("explication_description") or ""))}
-    </div>
+    </div>"""
+        if not title_block and not desc_block:
+            continue
+        cards.append(
+            f"""
+  <div class="suggestion-card">
+    <div class="suggestion-url">{escape(display_url_label(str(page.get("url") or ""), str(context["domain"]), empty_label="Accueil"))}</div>
+    {title_block}
+    {desc_block}
   </div>"""
         )
+    if not cards:
+        return ""
     return f"""
   <section class="report-page section-suggestions">
     <div class="section-label">OPTIMISATIONS</div>
@@ -1442,13 +1511,14 @@ def generate_seo_suggestions(pages: list[dict[str, Any]]) -> list[dict[str, Any]
     pages_a_corriger = [page for page in pages if needs_title_fix(page) or needs_desc_fix(page)]
     if not pages_a_corriger:
         return pages
-    suggestions = generate_seo_suggestions_with_anthropic(pages_a_corriger)
-    if not suggestions:
-        suggestions = [build_local_seo_suggestion(page) for page in pages_a_corriger]
-    suggestions_by_url = {str(suggestion.get("url") or ""): suggestion for suggestion in suggestions}
+    raw_suggestions = generate_seo_suggestions_with_anthropic(pages_a_corriger)
+    suggestions_by_url = {str(suggestion.get("url") or ""): suggestion for suggestion in raw_suggestions}
     for page in pages:
-        suggestion = suggestions_by_url.get(str(page.get("url") or ""))
-        if suggestion:
+        if not (needs_title_fix(page) or needs_desc_fix(page)):
+            continue
+        raw_suggestion = suggestions_by_url.get(str(page.get("url") or "")) or build_local_seo_suggestion(page)
+        suggestion = sanitize_seo_suggestion(page, raw_suggestion)
+        if has_actionable_seo_suggestion(suggestion):
             page["seo_suggestions"] = suggestion
     return pages
 
@@ -1469,7 +1539,8 @@ def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]]) -> list
                 "nb_mots": page.get("mots", 0),
                 "type": page.get("type", "page"),
                 "problemes": {
-                    "titre_trop_long": needs_title_fix(page),
+                    "titre_absent": not page.get("titre_google"),
+                    "titre_trop_long": len(str(page.get("titre_google") or "")) > SEUIL_TITRE_LONG,
                     "description_absente": not page.get("description_google"),
                     "description_trop_longue": len(str(page.get("description_google") or "")) > SEUIL_DESC_LONGUE,
                     "description_trop_courte": 0 < len(str(page.get("description_google") or "")) < SEUIL_DESC_COURTE,
@@ -1488,6 +1559,9 @@ Règles strictes :
 - Langue : même langue que le titre actuel
 - Ton : professionnel, accrocheur, fidèle au sujet
 - Ne pas inventer de contenu qui n'existe pas
+- Si le titre actuel n'est pas absent ou trop long, laisse "titre_suggere" vide et "titre_longueur" à 0
+- Ne propose jamais le même titre que le titre actuel
+- N'allonge pas un titre correct avec un suffixe générique comme ": informations essentielles"
 
 Pages à corriger :
 {pages_json}
@@ -1521,40 +1595,163 @@ Réponds UNIQUEMENT avec un JSON valide, sans markdown, sans backticks, sans com
 def build_local_seo_suggestion(page: dict[str, Any]) -> dict[str, Any]:
     url = str(page.get("url") or "")
     title_current = str(page.get("titre_google") or slug_to_title(url)).strip()
-    desc_current = str(page.get("description_google") or "").strip()
-    title = fit_seo_title(title_current, url)
-    description = desc_current if SEUIL_DESC_COURTE <= len(desc_current) <= SEUIL_DESC_LONGUE else fit_meta_description(url, title)
-    return {
+    title = fit_seo_title(title_current, url) if needs_title_fix(page) else ""
+    description_seed = title or title_current or slug_to_title(url)
+    description = fit_meta_description(url, description_seed) if needs_desc_fix(page) else ""
+    suggestion = {
         "url": url,
-        "titre_suggere": title,
-        "titre_longueur": len(title),
-        "description_suggeree": description,
-        "description_longueur": len(description),
-        "explication_titre": "Titre resserré pour éviter la troncature dans Google.",
-        "explication_description": "Description reformulée pour garder un extrait clair et exploitable dans les résultats.",
     }
+    if title:
+        suggestion.update(
+            {
+                "titre_suggere": title,
+                "titre_longueur": len(title),
+                "explication_titre": "Titre resserré pour éviter la troncature dans Google.",
+            }
+        )
+    if description:
+        suggestion.update(
+            {
+                "description_suggeree": description,
+                "description_longueur": len(description),
+                "explication_description": "Description reformulée pour garder un extrait clair et exploitable dans les résultats.",
+            }
+        )
+    return suggestion
 
 
 def fit_seo_title(title: str, url: str) -> str:
     cleaned = re.sub(r"\s+", " ", title).strip(" -|")
     if not cleaned:
         cleaned = slug_to_title(url)
-    if len(cleaned) < 50:
-        cleaned = f"{cleaned} : informations essentielles"
     return trim_at_word(cleaned, SEUIL_TITRE_LONG)
 
 
-def fit_meta_description(url: str, title: str) -> str:
+def infer_seo_language(*values: str) -> str:
+    text = " ".join(str(value or "") for value in values).casefold()
+    if re.search(r"[àâçéèêëîïôûùüÿœæ]", text):
+        return "fr"
+    tokens = re.findall(r"[a-z']+", text)
+    french_score = sum(1 for token in tokens if token in FRENCH_LANGUAGE_MARKERS)
+    english_score = sum(1 for token in tokens if token in ENGLISH_LANGUAGE_MARKERS)
+    return "fr" if french_score > english_score else "en"
+
+
+def sanitize_seo_suggestion(page: dict[str, Any], suggestion: dict[str, Any]) -> dict[str, Any]:
+    url = str(page.get("url") or suggestion.get("url") or "")
+    cleaned = as_dict(suggestion).copy()
+    cleaned["url"] = url
+
+    title_current = re.sub(r"\s+", " ", str(page.get("titre_google") or "")).strip()
+    title_suggested = re.sub(r"\s+", " ", str(cleaned.get("titre_suggere") or "")).strip(" -|")
+    title_needs_work = needs_title_fix(page)
+    if title_needs_work:
+        if not title_suggested:
+            title_suggested = fit_seo_title(title_current, url)
+        else:
+            title_suggested = trim_at_word(title_suggested, SEUIL_TITRE_LONG)
+        if title_suggested and not same_normalized_text(title_current, title_suggested):
+            cleaned["titre_suggere"] = title_suggested
+            cleaned["titre_longueur"] = len(title_suggested)
+            cleaned.setdefault("explication_titre", "Titre resserré pour éviter la troncature dans Google.")
+        else:
+            remove_title_suggestion(cleaned)
+    else:
+        remove_title_suggestion(cleaned)
+
+    desc_suggested = re.sub(r"\s+", " ", str(cleaned.get("description_suggeree") or "")).strip()
+    target_language = infer_seo_language(title_current, str(page.get("description_google") or ""), slug_to_title(url))
+    if needs_desc_fix(page):
+        seed_title = str(cleaned.get("titre_suggere") or title_current or slug_to_title(url))
+        if (
+            not desc_suggested
+            or not (SEUIL_DESC_COURTE <= len(desc_suggested) <= SEUIL_DESC_LONGUE)
+            or infer_seo_language(desc_suggested) != target_language
+        ):
+            desc_suggested = fit_meta_description(url, seed_title, language=target_language)
+        cleaned["description_suggeree"] = desc_suggested
+        cleaned["description_longueur"] = len(desc_suggested)
+        cleaned.setdefault(
+            "explication_description",
+            "Description reformulée pour garder un extrait clair et exploitable dans les résultats.",
+        )
+    else:
+        remove_description_suggestion(cleaned)
+
+    return cleaned
+
+
+def has_actionable_seo_suggestion(suggestion: dict[str, Any]) -> bool:
+    return bool(str(suggestion.get("titre_suggere") or "").strip() or str(suggestion.get("description_suggeree") or "").strip())
+
+
+def same_normalized_text(left: str, right: str) -> bool:
+    def normalize(value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip(" -|:").casefold()
+
+    return bool(left or right) and normalize(left) == normalize(right)
+
+
+def remove_title_suggestion(suggestion: dict[str, Any]) -> None:
+    suggestion.pop("titre_suggere", None)
+    suggestion.pop("titre_longueur", None)
+    suggestion.pop("explication_titre", None)
+
+
+def remove_description_suggestion(suggestion: dict[str, Any]) -> None:
+    suggestion.pop("description_suggeree", None)
+    suggestion.pop("description_longueur", None)
+    suggestion.pop("explication_description", None)
+
+
+def fit_meta_description(url: str, title: str, *, language: str | None = None) -> str:
     topic = slug_to_title(url)
     if topic.lower() in {"page sans titre", "accueil"}:
         topic = title
-    description = (
-        f"Retrouvez les informations essentielles sur {topic}, avec une page claire "
-        "pour comprendre le sujet, comparer les options et passer à l'action."
+    language = language or infer_seo_language(title, topic)
+    topic = trim_at_word(topic, 42 if language == "fr" else 58)
+    if language == "fr":
+        description = (
+            f"Retrouvez les informations essentielles sur {topic}, avec conseils pratiques, "
+            "points clés et prochaines étapes."
+        )
+    else:
+        description = (
+            f"Find essential information about {topic}, with practical tips, key details, "
+            "and clear next steps for readers."
+        )
+    return complete_meta_description(description, language)
+
+
+def complete_meta_description(description: str, language: str) -> str:
+    if 140 <= len(description) <= 155:
+        return finish_sentence(description)
+    extras = (
+        (
+            "À jour.",
+            "Conseils pratiques inclus.",
+            "Points clés et conseils pratiques.",
+            "Conseils pratiques pour avancer avec confiance.",
+        )
+        if language == "fr"
+        else (
+            "Useful for planning.",
+            "Useful for browsing and planning.",
+            "Useful for browsing and planning with confidence.",
+        )
     )
-    if len(description) < 140:
-        description = f"{description} Points clés et conseils pratiques."
-    return trim_at_word(description, 155)
+    for extra in extras:
+        candidate = f"{description} {extra}"
+        if 140 <= len(candidate) <= 155:
+            return finish_sentence(candidate)
+    return finish_sentence(trim_at_word(description, 155))
+
+
+def finish_sentence(value: str) -> str:
+    cleaned = value.strip(" ,;:-")
+    if cleaned.endswith((".", "!", "?")):
+        return cleaned
+    return f"{cleaned}."
 
 
 def trim_at_word(value: str, limit: int) -> str:

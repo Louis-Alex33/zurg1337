@@ -8,7 +8,15 @@ from types import SimpleNamespace
 
 from unittest.mock import patch
 
-from audit_report_design import render_premium_audit_report, score_color_class, slug_to_title
+from audit_report_design import (
+    build_local_seo_suggestion,
+    fit_meta_description,
+    fit_seo_title,
+    render_premium_audit_report,
+    sanitize_seo_suggestion,
+    score_color_class,
+    slug_to_title,
+)
 from audit import (
     audit_domains,
     build_report,
@@ -58,6 +66,56 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertEqual(score_color_class(45), "score-low")
         self.assertEqual(score_color_class(80), "score-mid")
         self.assertEqual(score_color_class(96), "score-high")
+
+    def test_local_seo_suggestion_keeps_valid_title_out_of_desc_fix(self) -> None:
+        title = "Cutest Planners For 2025: Keeping Your Life Organized"
+        suggestion = build_local_seo_suggestion(
+            {
+                "url": "https://example.com/cutest-planners-for-keeping-your-life-organized",
+                "titre_google": title,
+                "description_google": "",
+            }
+        )
+
+        self.assertNotIn("titre_suggere", suggestion)
+        self.assertNotIn("titre_longueur", suggestion)
+        self.assertIn("description_suggeree", suggestion)
+        self.assertIn("Find essential information", suggestion["description_suggeree"])
+        self.assertNotIn("Retrouvez", suggestion["description_suggeree"])
+
+    def test_fit_seo_title_does_not_pad_valid_title_with_generic_suffix(self) -> None:
+        title = "Guide to the Hottest Summer Style Trends in 2025"
+
+        self.assertEqual(fit_seo_title(title, "https://example.com/hottest-summer-style-trends-2025"), title)
+
+    def test_sanitize_seo_suggestion_removes_duplicate_valid_title(self) -> None:
+        title = "Cutest Planners For 2025: Keeping Your Life Organized"
+        suggestion = sanitize_seo_suggestion(
+            {
+                "url": "https://example.com/cutest-planners-for-keeping-your-life-organized",
+                "titre_google": title,
+                "description_google": "",
+            },
+            {
+                "url": "https://example.com/cutest-planners-for-keeping-your-life-organized",
+                "titre_suggere": title,
+                "titre_longueur": len(title),
+                "description_suggeree": "Retrouvez les informations essentielles sur cette page, avec une description claire et utile pour Google.",
+            },
+        )
+
+        self.assertNotIn("titre_suggere", suggestion)
+        self.assertIn("description_suggeree", suggestion)
+        self.assertIn("Find essential information", suggestion["description_suggeree"])
+        self.assertNotIn("Retrouvez", suggestion["description_suggeree"])
+
+    def test_fit_meta_description_keeps_french_for_french_pages(self) -> None:
+        description = fit_meta_description(
+            "https://example.com/douche-senior-bordeaux-prix-aides",
+            "Douche senior Bordeaux : prix 2026, aides MaPrimeAdapt",
+        )
+
+        self.assertIn("Retrouvez les informations", description)
 
     def test_overlap_and_orphan_labels_are_prudent(self) -> None:
         home = AuditPage(
