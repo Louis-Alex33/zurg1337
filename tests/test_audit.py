@@ -394,13 +394,14 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertIn("Matrice impact / effort", page)
         self.assertIn("Pages à revoir en priorité", page)
         self.assertIn("Opportunités éditoriales", page)
-        self.assertIn("Prochaines étapes recommandées", page)
+        self.assertIn("Prochaines étapes", page)
+        self.assertIn("section-finale", page)
         self.assertIn("Annexe technique", page)
         self.assertIn(".premium-report .annexe", page)
         self.assertIn("display: none !important", page)
         self.assertIn("Pourquoi elle ressort", page)
 
-    def test_premium_report_v2_regressions_are_rendered(self) -> None:
+    def test_premium_report_v3_density_regressions_are_rendered(self) -> None:
         current_year = str(datetime.now().year)
         page = render_premium_audit_report(
             {
@@ -478,14 +479,21 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertIn("is-zero", page)
         self.assertIn("is-warning", page)
         self.assertIn("date-badge--titre", page)
-        self.assertIn("2025, 2024", page)
+        self.assertIn("dates-table", page)
+        self.assertIn("<th>Page</th><th>Titre</th><th>URL</th><th>Contenu</th>", page)
+        self.assertIn("2025", page)
+        self.assertIn("2024", page)
         self.assertNotIn("titre :", page)
+        self.assertIn("Bricolage+Grotesque", page)
+        self.assertIn("pages-prioritaires-grid", page)
+        self.assertIn("fiche-page", page)
+        self.assertIn("finale-grid", page)
         self.assertIn("Voir l'annexe technique (2 URLs)", page)
         self.assertIn("Imprimer avec annexe", page)
         self.assertIn("printWithAnnexe", page)
         self.assertIn("<th>URL</th><th>Type</th><th>Score</th><th>Mots</th><th>Points relevés</th>", page)
         self.assertIn("Les autres quadrants ne présentent pas d'action prioritaire", page)
-        self.assertLess(page.find("Prochaines étapes recommandées"), page.find("Annexe technique"))
+        self.assertLess(page.find("Prochaines étapes"), page.find("Annexe technique"))
 
     def test_build_report_can_disable_overlap_for_light_mode(self) -> None:
         home = AuditPage(

@@ -103,7 +103,7 @@ def render_premium_audit_report(source: Any, *, standalone: bool = True, overrid
   <title>Audit SEO - {escape(context["domain"])}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>{styles}</style>
 </head>
 <body class="report-document">
@@ -176,8 +176,7 @@ def render_report_body(context: dict[str, Any]) -> str:
   {render_action_plan(context)}
   {priority_pages}
   {signals}
-  {render_opportunities(context)}
-  {render_conclusion(context)}
+  {render_final_section(context)}
   {render_appendix(context)}
 </main>"""
 
@@ -189,7 +188,7 @@ def render_cover(context: dict[str, Any]) -> str:
   <section class="report-page report-page-cover cover-page">
     <header class="cover-brand">
       <div>
-        <strong>{escape(context["tool_name"])}</strong>
+        <strong class="tool-name">{escape(context["tool_name"])}</strong>
         <span>{escape(context["tool_tagline"])}</span>
       </div>
       <span class="label">Rapport SEO</span>
@@ -197,7 +196,7 @@ def render_cover(context: dict[str, Any]) -> str:
     <div class="cover-center">
       <div>
         <p class="label">Audit réalisé le {escape(context["audit_date"])}</p>
-        <h1>Audit SEO</h1>
+        <h1 class="cover-title">Audit SEO</h1>
         <p class="cover-domain">{escape(context["domain"])}</p>
       </div>
       <div class="cover-score">
@@ -226,7 +225,7 @@ def render_executive_summary(context: dict[str, Any]) -> str:
     return f"""
   <section class="report-page executive-page synthese" id="synthese">
     <div class="section-head">
-      <p class="label">Synthèse exécutive</p>
+      <p class="label section-label">Synthèse exécutive</p>
       <h2>Lecture rapide du site</h2>
     </div>
     <div class="executive-grid">
@@ -279,7 +278,7 @@ def render_action_plan(context: dict[str, Any]) -> str:
     return f"""
   <section class="report-page plan-page">
     <div class="section-head">
-      <p class="label">Plan d’action</p>
+      <p class="label section-label">Plan d’action</p>
       <h2>Plan d’action 30 / 60 / 90 jours</h2>
     </div>
     <div class="timeline">{timeline}</div>
@@ -340,11 +339,11 @@ def render_priority_pages(pages: list[dict[str, Any]]) -> str:
         priority = str(page.get("priorite") or "modérée")
         cards.append(
             f"""
-      <article class="card priority-page-card">
+      <article class="card priority-page-card fiche-page">
         <div class="priority-card-head">
           <div>
             <h3>{escape(str(page.get("titre") or slug_to_title(str(page.get("slug") or page.get("url") or ""))))}</h3>
-            <p class="muted-url">{escape(str(page.get("url") or ""))}</p>
+            <p class="muted-url fiche-url">{escape(str(page.get("url") or ""))}</p>
           </div>
           <div class="priority-score-stack">
             <span class="score-badge {score_class}">{score}/100</span>
@@ -358,23 +357,23 @@ def render_priority_pages(pages: list[dict[str, Any]]) -> str:
         <section class="page-reason">
           <span class="section-icon">!</span>
           <div>
-            <p class="label">Pourquoi elle ressort</p>
+            <p class="label fiche-section-label">Pourquoi elle ressort</p>
             <p>{escape(str(page.get("pourquoi") or "Page prioritaire du crawl."))}</p>
           </div>
         </section>
         <section>
-          <p class="label">Observation</p>
+          <p class="label fiche-section-label">Observation</p>
           <p>{escape(str(page.get("observation") or "À relire dans le contexte business de la page."))}</p>
         </section>
         <section class="recommended-action">
           <span>→</span>
           <div>
-            <p class="label">Action recommandée</p>
+            <p class="label fiche-section-label">Action recommandée</p>
             <p>{escape(str(page.get("action") or "Définir une reprise ciblée."))}</p>
           </div>
         </section>
         <section class="rewrite-angle">
-          <p class="label">Angle possible</p>
+          <p class="label fiche-section-label">Angle possible</p>
           <p>{escape(str(page.get("angle") or "Clarifier la promesse et renforcer l'intention principale."))}</p>
         </section>
         <div class="impact-effort-row">
@@ -386,10 +385,10 @@ def render_priority_pages(pages: list[dict[str, Any]]) -> str:
     return f"""
   <section class="report-page priority-pages">
     <div class="section-head">
-      <p class="label">Pages prioritaires</p>
+      <p class="label section-label">Pages prioritaires</p>
       <h2>Pages à revoir en priorité</h2>
     </div>
-    <div class="priority-page-list">{''.join(cards)}</div>
+    <div class="priority-page-list pages-prioritaires-grid">{''.join(cards)}</div>
   </section>"""
 
 
@@ -411,7 +410,7 @@ def render_secondary_signals(context: dict[str, Any]) -> str:
     return f"""
   <section class="report-page secondary-page">
     <div class="section-head">
-      <p class="label">Repères complémentaires</p>
+      <p class="label section-label">Repères complémentaires</p>
       <h2>Repères complémentaires</h2>
     </div>
     <div class="metric-grid secondary-metrics">
@@ -419,26 +418,54 @@ def render_secondary_signals(context: dict[str, Any]) -> str:
     </div>
     <section class="card signal-check-list">
       <h3>Éléments à vérifier</h3>
-      {render_signal_groups(signals)}
+      {render_signal_groups(signals, str(context["domain"]))}
     </section>
   </section>"""
 
 
-def render_signal_groups(signals: list[dict[str, Any]]) -> str:
+def render_signal_groups(signals: list[dict[str, Any]], domain: str = "") -> str:
     if not signals:
         return "<p class='empty-state'>Aucun signal de date visible à vérifier.</p>"
-    groups = []
+    rows = []
     for signal in signals:
+        url = str(signal.get("url") or "")
         dates = signal.get("dates") or []
-        badges = render_date_badges(dates)
-        groups.append(
+        rows.append(
             f"""
-            <article class="signal-url-group">
-              <a href="{escape(str(signal.get("url") or "#"))}" target="_blank" rel="noreferrer">{escape(str(signal.get("url") or "URL non précisée"))}</a>
-              {badges}
-            </article>"""
+            <tr>
+              <td class="dates-url"><a href="{escape(appendix_href(url))}" target="_blank" rel="noreferrer">{escape(compact_url_label(url, domain))}</a></td>
+              <td class="dates-cell">{render_date_table_cell(dates, "titre")}</td>
+              <td class="dates-cell">{render_date_table_cell(dates, "url")}</td>
+              <td class="dates-cell">{render_date_table_cell(dates, "contenu")}</td>
+            </tr>"""
         )
-    return "".join(groups)
+    return (
+        "<table class='dates-table'>"
+        "<thead><tr><th>Page</th><th>Titre</th><th>URL</th><th>Contenu</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+    )
+
+
+def render_date_table_cell(dates: list[Any], expected_type: str) -> str:
+    badges = []
+    for item in dates:
+        if not isinstance(item, dict):
+            continue
+        date_type = date_type_class(str(item.get("type") or "contenu"))
+        if date_type != expected_type:
+            continue
+        for value in extract_year_values(str(item.get("valeur") or "date à vérifier")):
+            badges.append(f"<span class='date-badge date-badge--{expected_type} date-{expected_type}'>{escape(value)}</span>")
+    return "".join(badges) or "<span class='dates-empty'>—</span>"
+
+
+def compact_url_label(url: str, domain: str = "") -> str:
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    label = parsed.path.lstrip("/") or parsed.netloc or url
+    if domain and label.startswith(domain.strip("/") + "/"):
+        label = label[len(domain.strip("/")) + 1 :]
+    return truncate(label or url, 40)
 
 
 def render_date_badges(dates: list[Any]) -> str:
@@ -499,6 +526,44 @@ def render_opportunities(context: dict[str, Any]) -> str:
   </section>"""
 
 
+def render_final_section(context: dict[str, Any]) -> str:
+    opportunities = context["opportunites"][:3]
+    opportunity_items = "".join(
+        f"""
+        <li class="opportunite-item">
+          <span class="opportunite-icon">+</span>
+          <span>{escape(str(item))}</span>
+        </li>"""
+        for item in opportunities
+    )
+    actions = "".join(f"<li>{escape(str(action))}</li>" for action in context["actions_30j"][:3])
+    contact = str(context["contact_cta"])
+    href = f"mailto:{contact}" if "@" in contact and not contact.startswith("mailto:") else contact
+    return f"""
+  <section class="report-page section-finale">
+    <div class="section-label">Conclusion</div>
+    <div class="finale-grid">
+      <div class="finale-col">
+        <h2>Opportunités éditoriales</h2>
+        <ul class="opportunites-list">{opportunity_items}</ul>
+      </div>
+      <div class="finale-col">
+        <h2>Prochaines étapes</h2>
+        <ol class="etapes-list">{actions}</ol>
+        <div class="cta-block">
+          <p class="cta-question">Vous souhaitez qu'on travaille ces pages ensemble ?</p>
+          <a href="{escape(href)}" class="cta-email">{escape(contact)}</a>
+        </div>
+      </div>
+    </div>
+    <div class="rapport-footer">
+      <span class="tool-name">{escape(context["tool_name"])}</span>
+      <span class="footer-date">{escape(context["audit_date"])}</span>
+      <span class="footer-mention">Rapport généré automatiquement — données issues d'un crawl réel</span>
+    </div>
+  </section>"""
+
+
 def render_appendix(context: dict[str, Any]) -> str:
     urls = context["urls_crawlees"]
     rows = "".join(render_appendix_row(row) for row in urls)
@@ -519,7 +584,7 @@ def render_appendix(context: dict[str, Any]) -> str:
   <section class="report-page annexe" id="annexe" style="display:none">
     <div class="section-head appendix-head">
       <div>
-        <p class="label">Annexe</p>
+        <p class="label section-label">Annexe</p>
         <h2>Annexe technique</h2>
       </div>
     </div>
@@ -598,7 +663,7 @@ def render_metric_card(label: str, value: Any, note: str, tone: str = "", *, mut
         f"<article class='card {classes}'>"
         f"<strong class='metric-value metrique-value'>{escape(value_text)}</strong>"
         f"<span class='metric-label metrique-label'>{escape(label)}</span>"
-        f"<p>{escape(note)}</p>"
+        f"<p class='metric-note metrique-sublabel'>{escape(note)}</p>"
         "</article>"
     )
 
@@ -1042,8 +1107,10 @@ def render_report_script() -> str:
 
 def render_report_styles() -> str:
     return """
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600&display=swap');
     :root {
+      --font-display: 'Bricolage Grotesque', sans-serif;
+      --font-body: 'Inter', sans-serif;
       --color-bg: #F9F8F6;
       --color-surface: #FFFFFF;
       --color-border: #E8E4DC;
@@ -1069,7 +1136,7 @@ def render_report_styles() -> str:
       margin: 0;
       background: var(--color-bg);
       color: var(--color-text-primary);
-      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      font-family: var(--font-body);
       font-size: 15px;
       line-height: 1.6;
     }
@@ -1078,16 +1145,26 @@ def render_report_styles() -> str:
       margin: 0 auto;
       padding: var(--space-lg);
       color: var(--color-text-primary);
-      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      font-family: var(--font-body);
       font-size: 15px;
       line-height: 1.6;
     }
     .premium-report * { box-sizing: border-box; }
+    .premium-report body,
+    .premium-report p,
+    .premium-report td,
+    .premium-report th,
+    .premium-report li,
+    .premium-report span,
+    .premium-report a,
+    .premium-report button {
+      font-family: var(--font-body);
+    }
     .premium-report h1,
     .premium-report h2,
     .premium-report h3 {
       margin: 0;
-      font-family: Syne, Inter, ui-sans-serif, system-ui, sans-serif;
+      font-family: var(--font-display);
       font-weight: 700;
       line-height: 1.12;
       letter-spacing: 0;
@@ -1105,11 +1182,27 @@ def render_report_styles() -> str:
       line-height: 1.2;
       text-transform: uppercase;
     }
+    .premium-report .tool-name,
+    .premium-report .cover-title,
+    .premium-report .section-label,
+    .premium-report .metrique-value {
+      font-family: var(--font-display);
+    }
+    .premium-report .section-label {
+      color: var(--color-text-muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      line-height: 1.2;
+      text-transform: uppercase;
+      break-before: page;
+      page-break-before: always;
+    }
     .premium-report .report-page {
       display: grid;
       gap: var(--space-lg);
-      min-height: 960px;
-      padding: var(--space-xl) 0;
+      min-height: auto;
+      padding: var(--space-lg) 0;
     }
     .premium-report .card {
       background: var(--color-surface);
@@ -1146,8 +1239,13 @@ def render_report_styles() -> str:
     .premium-report .cover-brand strong,
     .premium-report .signature strong {
       display: block;
-      font-family: Syne, Inter, sans-serif;
+      font-family: var(--font-display);
       font-size: 18px;
+    }
+    .premium-report .tool-name {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: 0;
     }
     .premium-report .cover-brand span,
     .premium-report .signature span,
@@ -1164,9 +1262,20 @@ def render_report_styles() -> str:
     }
     .premium-report .cover-domain {
       margin-top: var(--space-md);
-      color: var(--color-text-secondary);
-      font-size: 22px;
+      color: var(--color-accent);
+      font-family: var(--font-display);
+      font-size: 24px;
       font-weight: 600;
+    }
+    .premium-report .cover-title {
+      color: var(--color-text-primary);
+      font-family: var(--font-display);
+      font-size: 72px;
+      font-style: normal;
+      font-weight: 800;
+      letter-spacing: 0;
+      line-height: 1;
+      text-shadow: none;
     }
     .premium-report .cover-score {
       display: grid;
@@ -1192,7 +1301,7 @@ def render_report_styles() -> str:
     .premium-report .score-gauge.score-low .gauge-meter { stroke: var(--color-score-low); }
     .premium-report .score-gauge text:first-of-type {
       fill: var(--color-text-primary);
-      font-family: Syne, Inter, sans-serif;
+      font-family: var(--font-display);
       font-size: 34px;
       font-weight: 700;
     }
@@ -1255,9 +1364,7 @@ def render_report_styles() -> str:
       gap: var(--space-lg);
     }
     .premium-report .synthese {
-      page-break-before: always;
       page-break-inside: avoid;
-      break-before: page;
       break-inside: avoid;
     }
     .premium-report .executive-left {
@@ -1306,9 +1413,19 @@ def render_report_styles() -> str:
       gap: var(--space-md);
     }
     .premium-report .metriques-grid,
+    .premium-report .secondary-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .premium-report .metriques-grid,
     .premium-report .metrique-card {
       page-break-inside: avoid;
       break-inside: avoid;
+    }
+    .premium-report .metrique-card {
+      padding: 16px 20px;
+      border-radius: 10px;
     }
     .premium-report .synthese-texte {
       page-break-after: auto;
@@ -1322,20 +1439,23 @@ def render_report_styles() -> str:
     }
     .premium-report .metric-card strong {
       display: block;
-      margin-bottom: var(--space-sm);
-      font-family: Syne, Inter, sans-serif;
-      font-size: 32px;
+      margin-bottom: 4px;
+      font-family: var(--font-display);
+      font-size: 36px;
+      font-weight: 800;
       line-height: 1;
     }
     .premium-report .metric-card span {
       display: block;
-      color: var(--color-text-primary);
+      color: var(--color-text-secondary);
+      font-size: 12px;
       font-weight: 700;
+      line-height: 1.4;
     }
     .premium-report .metric-card p {
-      margin-top: var(--space-xs);
-      color: var(--color-text-secondary);
-      font-size: 13px;
+      margin-top: 2px;
+      color: var(--color-text-muted);
+      font-size: 11px;
     }
     .premium-report .metric-muted strong,
     .premium-report .metric-muted span,
@@ -1439,11 +1559,24 @@ def render_report_styles() -> str:
       display: grid;
       gap: var(--space-lg);
     }
+    .premium-report .pages-prioritaires-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-lg);
+    }
     .premium-report .priority-page-card {
       display: grid;
       gap: var(--space-md);
       page-break-inside: avoid;
       break-inside: avoid;
+    }
+    .premium-report .fiche-page {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: var(--space-lg);
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
     .premium-report .priority-card-head {
       display: grid;
@@ -1507,9 +1640,6 @@ def render_report_styles() -> str:
       color: var(--color-text-secondary);
       font-style: italic;
     }
-    .premium-report .secondary-metrics {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
     .premium-report .signal-check-list {
       display: grid;
       gap: var(--space-md);
@@ -1566,6 +1696,47 @@ def render_report_styles() -> str:
       color: var(--color-text-secondary);
       font-size: 13px;
     }
+    .premium-report .dates-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .premium-report .dates-table th {
+      text-align: left;
+      padding: 8px 12px;
+      background: var(--color-bg);
+      border-bottom: 2px solid var(--color-border);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--color-text-secondary);
+      font-family: var(--font-body);
+    }
+    .premium-report .dates-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--color-border);
+      vertical-align: middle;
+    }
+    .premium-report .dates-table tr:hover td {
+      background: var(--color-bg);
+    }
+    .premium-report .dates-url {
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      max-width: 220px;
+      word-break: break-all;
+    }
+    .premium-report .dates-url a {
+      color: var(--color-accent);
+      text-decoration: none;
+    }
+    .premium-report .dates-cell {
+      white-space: nowrap;
+    }
+    .premium-report .dates-empty {
+      color: var(--color-text-muted);
+      font-size: 12px;
+    }
     .premium-report .opportunity-panel {
       display: grid;
       gap: var(--space-md);
@@ -1592,6 +1763,86 @@ def render_report_styles() -> str:
       background: var(--color-accent);
       color: white;
       font-weight: 800;
+    }
+    .premium-report .section-finale {
+      align-content: start;
+      gap: var(--space-lg);
+    }
+    .premium-report .finale-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-xl);
+      margin-top: var(--space-md);
+    }
+    .premium-report .finale-col {
+      display: grid;
+      align-content: start;
+      gap: var(--space-md);
+    }
+    .premium-report .opportunites-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-md);
+    }
+    .premium-report .opportunite-item {
+      display: flex;
+      gap: var(--space-sm);
+      align-items: flex-start;
+      color: var(--color-text-secondary);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .premium-report .opportunite-icon {
+      color: var(--color-accent);
+      font-weight: 700;
+      font-size: 18px;
+      line-height: 1.2;
+      flex-shrink: 0;
+    }
+    .premium-report .etapes-list {
+      padding-left: var(--space-lg);
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+      color: var(--color-text-secondary);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .premium-report .cta-block {
+      margin-top: var(--space-md);
+      background: var(--color-accent);
+      border-radius: 12px;
+      padding: var(--space-lg);
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .premium-report .cta-question {
+      color: white;
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 var(--space-sm) 0;
+    }
+    .premium-report .cta-email {
+      color: white;
+      font-size: 14px;
+      text-decoration: underline;
+      opacity: 0.85;
+    }
+    .premium-report .rapport-footer {
+      margin-top: var(--space-xl);
+      padding-top: var(--space-lg);
+      border-top: 1px solid var(--color-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: var(--space-md);
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--color-text-muted);
     }
     .premium-report .appendix-head {
       grid-template-columns: minmax(0, 1fr) auto;
@@ -1738,20 +1989,89 @@ def render_report_styles() -> str:
         padding: 0;
         background: #ffffff !important;
       }
+      .premium-report section {
+        break-before: avoid;
+        page-break-before: avoid;
+      }
       .premium-report .report-page {
         min-height: auto;
-        page-break-before: always;
-        break-before: page;
+        padding: 0 0 18px;
+        page-break-before: avoid;
+        break-before: avoid;
       }
       .premium-report .report-page-cover {
         page-break-before: auto;
         break-before: auto;
       }
+      .premium-report .section-label {
+        break-before: page;
+        page-break-before: always;
+        margin-top: 0;
+        padding-top: 0;
+      }
+      .premium-report .section-label + * {
+        break-before: avoid;
+        page-break-before: avoid;
+      }
       .premium-report .timeline,
       .premium-report .matrix-grid,
-      .premium-report .secondary-metrics,
       .premium-report .method-grid {
         grid-template-columns: 1fr !important;
+      }
+      .premium-report .metriques-grid,
+      .premium-report .secondary-metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 8px;
+      }
+      .premium-report .metrique-card {
+        padding: 12px 16px;
+      }
+      .premium-report .metrique-value {
+        font-size: 28px;
+      }
+      .premium-report .pages-prioritaires-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .premium-report .fiche-page {
+        padding: 16px;
+        break-inside: avoid;
+        page-break-inside: avoid;
+        font-size: 12px;
+      }
+      .premium-report .fiche-page h3 {
+        font-size: 14px;
+      }
+      .premium-report .fiche-page .fiche-url {
+        font-size: 10px;
+      }
+      .premium-report .fiche-section-label {
+        font-size: 9px;
+        letter-spacing: 0.08em;
+      }
+      .premium-report .finale-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-lg);
+        margin-top: var(--space-lg);
+      }
+      .premium-report .section-finale {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .premium-report .cta-block {
+        padding: var(--space-md);
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .premium-report .rapport-footer {
+        margin-top: var(--space-lg);
+      }
+      .premium-report .dates-table {
+        font-size: 11px;
+      }
+      .premium-report .dates-table td,
+      .premium-report .dates-table th {
+        padding: 6px 8px;
       }
       .premium-report .card,
       .premium-report .priority-page-card,
@@ -1764,9 +2084,7 @@ def render_report_styles() -> str:
         break-inside: avoid;
       }
       .premium-report .synthese {
-        page-break-before: always;
         page-break-inside: avoid;
-        break-before: page;
         break-inside: avoid;
       }
       .premium-report .synthese-texte {
@@ -1800,7 +2118,8 @@ def render_report_styles() -> str:
         box-shadow: none !important;
       }
       .premium-report .cover-page,
-      .premium-report .final-cta {
+      .premium-report .final-cta,
+      .premium-report .cta-block {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
