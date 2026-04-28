@@ -1485,10 +1485,6 @@ def render_audit_report_page(path: Path, relative_path: Path, file_size: str, va
         render_premium_audit_report(
             payload,
             standalone=False,
-            overrides={
-                "tool_name": "ZURG 1337",
-                "tool_tagline": "Audit SEO automatisé",
-            },
         )
         if active_variant == "full"
         else render_portfolio_report_layout(

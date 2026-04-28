@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import html
+import json
 import math
+import os
 import re
+from collections import defaultdict
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import Any
@@ -85,6 +88,12 @@ TITLE_EXCEPTIONS = {
     "ia": "IA",
 }
 
+SEUIL_LENT = 3.0
+SEUIL_CRITIQUE = 4.0
+SEUIL_TITRE_LONG = 60
+SEUIL_DESC_COURTE = 70
+SEUIL_DESC_LONGUE = 160
+
 
 def slug_to_title(value: str) -> str:
     """Transforme un slug ou une URL en titre lisible côté client."""
@@ -120,6 +129,42 @@ def score_color_class(score: int) -> str:
     return "score-low"
 
 
+def classify_speed(load_time: float | None) -> str:
+    if load_time is None:
+        return "inconnu"
+    if load_time < SEUIL_LENT:
+        return "correct"
+    if load_time < SEUIL_CRITIQUE:
+        return "lent"
+    return "critique"
+
+
+def speed_color_class(load_time: float | None) -> str:
+    return {
+        "correct": "score-high",
+        "lent": "score-mid",
+        "critique": "score-low",
+        "inconnu": "score-unknown",
+    }[classify_speed(load_time)]
+
+
+def needs_title_fix(page: dict[str, Any]) -> bool:
+    title = str(page.get("titre_google") or "")
+    return bool(title and len(title) > SEUIL_TITRE_LONG)
+
+
+def needs_desc_fix(page: dict[str, Any]) -> bool:
+    desc = str(page.get("description_google") or "")
+    if not desc:
+        return True
+    return len(desc) < SEUIL_DESC_COURTE or len(desc) > SEUIL_DESC_LONGUE
+
+
+def analyste_name_is_valid(value: str) -> bool:
+    name = value.strip()
+    return bool(name and name != DEFAULT_ANALYSTE_NOM and len(name) > 2)
+
+
 def resolve_date_placeholders(text: str) -> str:
     current_year = str(datetime.now().year)
     pattern = r"\[current_date\s+format\s*=\s*[\"']?Y[\"']?\s*\]"
@@ -148,6 +193,7 @@ def render_premium_audit_report(source: Any, *, standalone: bool = True, overrid
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="generator" content="audit-report">
   <title>Audit SEO - {escape(context["domain"])}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -179,6 +225,13 @@ def prepare_audit_report_context(source: Any, *, overrides: dict[str, Any] | Non
     pages_erreur = get_int(data, "pages_erreur", get_int(summary, "pages_with_errors", 0))
     signal_principal = str(data.get("signal_principal") or build_primary_signal(summary, business_signals))
     pages_prioritaires = normalize_priority_pages(data.get("pages_prioritaires") or top_pages, pages_by_url)
+    urls_crawlees = normalize_crawled_urls(data.get("urls_crawlees") or pages)
+    enrich_priority_pages_with_maillage(pages_prioritaires, urls_crawlees, domain)
+    urls_crawlees = generate_seo_suggestions_for_priority_pages(urls_crawlees, pages_prioritaires)
+    perf = build_perf_data(urls_crawlees)
+    analyste_nom = str(data.get("analyste_nom") or DEFAULT_ANALYSTE_NOM).strip()
+    analyste_titre = str(data.get("analyste_titre") or DEFAULT_ANALYSTE_TITRE).strip()
+    logo_url = str(data.get("logo_url") or "").strip()
     dirigeant_defaults = build_dirigeant_texts(
         domain=domain,
         score=score,
@@ -196,9 +249,11 @@ def prepare_audit_report_context(source: Any, *, overrides: dict[str, Any] | Non
     context = {
         "tool_name": str(data.get("tool_name") or DEFAULT_TOOL_NAME),
         "tool_tagline": str(data.get("tool_tagline") or DEFAULT_TOOL_TAGLINE),
+        "logo_url": logo_url,
         "contact_cta": str(data.get("contact_cta") or DEFAULT_CONTACT_CTA),
-        "analyste_nom": str(data.get("analyste_nom") or DEFAULT_ANALYSTE_NOM),
-        "analyste_titre": str(data.get("analyste_titre") or DEFAULT_ANALYSTE_TITRE),
+        "analyste_nom": analyste_nom,
+        "analyste_titre": analyste_titre,
+        "analyste_valide": analyste_name_is_valid(analyste_nom),
         "analyste_linkedin": str(data.get("analyste_linkedin") or ""),
         "analyste_photo": str(data.get("analyste_photo") or ""),
         "domain": domain,
@@ -232,7 +287,8 @@ def prepare_audit_report_context(source: Any, *, overrides: dict[str, Any] | Non
         "pages_prioritaires": pages_prioritaires,
         "signaux": normalize_signals(data.get("signaux") or dated_content),
         "opportunites": list_or_default(data.get("opportunites"), build_editorial_opportunities(summary, top_pages)),
-        "urls_crawlees": normalize_crawled_urls(data.get("urls_crawlees") or pages),
+        "urls_crawlees": urls_crawlees,
+        "perf": perf,
         "methode": as_dict(data.get("methode")) or build_method(data, summary),
         "offres": normalize_offers(offres_source),
     }
@@ -242,7 +298,7 @@ def prepare_audit_report_context(source: Any, *, overrides: dict[str, Any] | Non
 
 
 def render_report_body(context: dict[str, Any]) -> str:
-    priority_pages = render_priority_pages(context["pages_prioritaires"])
+    priority_pages = render_priority_pages(context)
     signals = render_secondary_signals(context)
     return f"""
 <main class="premium-report">
@@ -252,6 +308,8 @@ def render_report_body(context: dict[str, Any]) -> str:
   {render_benchmark_section(context)}
   {render_action_plan(context)}
   {priority_pages}
+  {render_performance_section(context)}
+  {render_seo_suggestions_section(context)}
   {signals}
   {render_final_section(context)}
   {render_method_about(context)}
@@ -262,14 +320,18 @@ def render_report_body(context: dict[str, Any]) -> str:
 def render_cover(context: dict[str, Any]) -> str:
     urgency_class = urgency_color_class(context["urgency_level"])
     score_class = score_color_class(int(context["score_global"]))
+    logo = (
+        f'<img src="{escape(context["logo_url"])}" alt="" class="header-logo cover-logo">'
+        if context.get("logo_url")
+        else ""
+    )
     return f"""
   <section class="report-page report-page-cover cover-page">
-    <header class="cover-brand">
-      <div>
-        <strong class="tool-name">{escape(context["tool_name"])}</strong>
-        <span>{escape(context["tool_tagline"])}</span>
+    <header class="rapport-header cover-brand">
+      <div class="header-left cover-branding">{logo}</div>
+      <div class="header-right">
+        <span class="header-label">RAPPORT SEO</span>
       </div>
-      <span class="label">Rapport SEO</span>
     </header>
     <div class="cover-center">
       <div>
@@ -289,8 +351,17 @@ def render_cover(context: dict[str, Any]) -> str:
         <span>{int(context["pages_analysees"])} pages analysées</span>
       </div>
     </div>
-    <footer>Rapport confidentiel — préparé pour {escape(context["domain"])}</footer>
+    {render_page_footer(context)}
   </section>"""
+
+
+def render_page_footer(context: dict[str, Any]) -> str:
+    return (
+        '<div class="page-footer">'
+        f'<span class="footer-domain">{escape(context["domain"])}</span>'
+        f'<span class="footer-date">{escape(context["audit_date"])}</span>'
+        "</div>"
+    )
 
 
 def render_dirigeant_summary(context: dict[str, Any]) -> str:
@@ -324,6 +395,7 @@ def render_dirigeant_summary(context: dict[str, Any]) -> str:
         </div>
       </div>
     </div>
+    {render_page_footer(context)}
   </section>"""
 
 
@@ -365,6 +437,7 @@ def render_executive_summary(context: dict[str, Any]) -> str:
         {''.join(render_metric_card(label, value, note, tone, warning=label == "Dates à vérifier") for label, value, note, tone in metrics)}
       </div>
     </div>
+    {render_page_footer(context)}
   </section>"""
 
 
@@ -410,6 +483,7 @@ def render_benchmark_section(context: dict[str, Any]) -> str:
       </table>
     </div>
     <p class="benchmark-disclaimer">Les données concurrentes sont des estimations indicatives issues d'une analyse de surface.</p>
+    {render_page_footer(context)}
   </section>"""
 
 
@@ -443,6 +517,7 @@ def render_action_plan(context: dict[str, Any]) -> str:
       <h2>Matrice impact / effort</h2>
       {render_matrix(context["matrice"])}
     </section>
+    {render_page_footer(context)}
   </section>"""
 
 
@@ -486,7 +561,8 @@ def render_matrix(matrix: dict[str, list[dict[str, Any]]]) -> str:
     return f"<div class='matrix-grid'>{''.join(cards)}</div>{note}"
 
 
-def render_priority_pages(pages: list[dict[str, Any]]) -> str:
+def render_priority_pages(context: dict[str, Any]) -> str:
+    pages = context["pages_prioritaires"]
     if not pages:
         return ""
     cards = []
@@ -494,6 +570,14 @@ def render_priority_pages(pages: list[dict[str, Any]]) -> str:
         score = clamp_score(get_int(page, "score", 0))
         score_class = score_color_class(score)
         priority = str(page.get("priorite") or "modérée")
+        nb_liens = get_int(page, "nb_liens_internes", 0)
+        plural = "s" if nb_liens != 1 else ""
+        maillage_label = str(page.get("maillage_label") or classify_maillage(nb_liens))
+        maillage_alert = (
+            '<span class="fiche-maillage-alerte"> ⚠ Aucune page ne pointe vers celle-ci</span>'
+            if nb_liens == 0
+            else ""
+        )
         cards.append(
             f"""
       <article class="card priority-page-card fiche-page">
@@ -543,6 +627,13 @@ def render_priority_pages(pages: list[dict[str, Any]]) -> str:
             <span class="badge badge--impact">Impact : {escape(str(page.get("impact") or "moyen"))}</span>
           </div>
         </div>
+        <div class="fiche-maillage">
+          <span class="fiche-maillage-icon">🔗</span>
+          <span class="fiche-maillage-count {escape(str(page.get("maillage_class") or classify_maillage_class(nb_liens)))}">
+            {nb_liens} lien{plural} interne{plural}
+          </span>
+          <span class="fiche-maillage-label">— {escape(maillage_label)}{maillage_alert}</span>
+        </div>
       </article>"""
         )
     return f"""
@@ -552,7 +643,212 @@ def render_priority_pages(pages: list[dict[str, Any]]) -> str:
       <h2>Pages à revoir en priorité</h2>
     </div>
     <div class="priority-page-list pages-prioritaires-grid">{''.join(cards)}</div>
+    {render_page_footer(context)}
   </section>"""
+
+
+def render_performance_section(context: dict[str, Any]) -> str:
+    perf = as_dict(context.get("perf"))
+    if not perf.get("pages_lentes"):
+        return ""
+    temps_moyen = optional_float(perf.get("temps_moyen"))
+    temps_max = optional_float(perf.get("temps_max"))
+    pct_lentes = get_int(perf, "pct_lentes", 0)
+    pct_class = "score-low" if pct_lentes > 50 else "score-mid" if pct_lentes > 20 else "score-high"
+    rows = []
+    for page in perf.get("top_10_lentes", []) if isinstance(perf.get("top_10_lentes"), list) else []:
+        item = as_dict(page)
+        load_time = optional_float(item.get("load_time"))
+        speed = classify_speed(load_time)
+        speed_label = {"correct": "OK", "lent": "Lent", "critique": "Critique", "inconnu": "Inconnu"}[speed]
+        redirects = get_int(item, "redirections", 0)
+        redirects_html = (
+            f'<span class="perf-redirect-warning">{redirects} redirect.</span>'
+            if redirects > 0
+            else '<span class="perf-redirect-ok">—</span>'
+        )
+        rows.append(
+            f"""
+      <tr>
+        <td class="perf-url">
+          <a href="{escape(appendix_href(str(item.get("url") or "")))}" target="_blank" rel="noreferrer">
+            {escape(display_url_label(str(item.get("url") or ""), str(context["domain"]), empty_label="Accueil"))}
+          </a>
+        </td>
+        <td>
+          <span class="perf-time {speed_color_class(load_time)}">{escape(format_seconds(load_time))}</span>
+        </td>
+        <td>
+          <span class="perf-badge perf-badge--{speed}">{escape(speed_label)}</span>
+        </td>
+        <td class="perf-redirects">{redirects_html}</td>
+      </tr>"""
+        )
+    return f"""
+  <section class="report-page section-perf">
+    <div class="section-label">PERFORMANCE</div>
+    <h2>Vitesse de chargement</h2>
+
+    <div class="perf-intro">
+      <p>
+        Google considère qu'une page qui met plus de
+        <strong>3 secondes</strong> à charger perd une part
+        significative de ses visiteurs avant même qu'ils aient vu le contenu.
+        Sur votre site, <strong>{pct_lentes}% des pages analysées</strong>
+        dépassent ce seuil.
+      </p>
+    </div>
+
+    <div class="perf-metrics">
+      <div class="perf-metric">
+        <div class="perf-metric-value {speed_color_class(temps_moyen)}">{escape(format_seconds(temps_moyen))}</div>
+        <div class="perf-metric-label">Temps moyen observé</div>
+      </div>
+      <div class="perf-metric">
+        <div class="perf-metric-value {speed_color_class(temps_max)}">{escape(format_seconds(temps_max))}</div>
+        <div class="perf-metric-label">Page la plus lente</div>
+      </div>
+      <div class="perf-metric">
+        <div class="perf-metric-value {pct_class}">{pct_lentes}%</div>
+        <div class="perf-metric-label">Pages dépassant 3s</div>
+      </div>
+    </div>
+
+    <table class="perf-table">
+      <thead>
+        <tr>
+          <th>Page</th>
+          <th>Temps</th>
+          <th>Niveau</th>
+          <th>Redirections</th>
+        </tr>
+      </thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table>
+
+    <div class="perf-actions">
+      <div class="perf-actions-title">Comment améliorer la vitesse</div>
+      <div class="perf-actions-grid">
+        <div class="perf-action-card">
+          <div class="perf-action-icon">🖼</div>
+          <div class="perf-action-content">
+            <div class="perf-action-title">Compresser les images</div>
+            <div class="perf-action-text">Les images non compressées sont la première cause de lenteur. Passer au format WebP et réduire la taille à moins de 150 Ko par image. Outils : Squoosh, TinyPNG, ShortPixel.</div>
+            <div class="perf-action-effort">Effort : faible — Impact : élevé</div>
+          </div>
+        </div>
+        <div class="perf-action-card">
+          <div class="perf-action-icon">↪️</div>
+          <div class="perf-action-content">
+            <div class="perf-action-title">Réduire les redirections</div>
+            <div class="perf-action-text">Chaque redirection ajoute un aller-retour réseau. Les pages avec 1+ redirection observée gagnent à être liées directement vers leur URL finale.</div>
+            <div class="perf-action-effort">Effort : moyen — Impact : moyen</div>
+          </div>
+        </div>
+        <div class="perf-action-card">
+          <div class="perf-action-icon">⚡</div>
+          <div class="perf-action-content">
+            <div class="perf-action-title">Activer la mise en cache</div>
+            <div class="perf-action-text">Un plugin de cache (WP Rocket, W3 Total Cache, LiteSpeed Cache) permet de servir des pages pré-générées sans recalcul serveur à chaque visite.</div>
+            <div class="perf-action-effort">Effort : faible — Impact : élevé</div>
+          </div>
+        </div>
+        <div class="perf-action-card">
+          <div class="perf-action-icon">🌐</div>
+          <div class="perf-action-content">
+            <div class="perf-action-title">Utiliser un CDN</div>
+            <div class="perf-action-text">Un CDN (Cloudflare, BunnyCDN) distribue les fichiers statiques depuis des serveurs proches de vos visiteurs. Gratuit chez Cloudflare pour la formule de base.</div>
+            <div class="perf-action-effort">Effort : moyen — Impact : élevé</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_seo_suggestions_section(context: dict[str, Any]) -> str:
+    pages = [page for page in context.get("urls_crawlees", []) if as_dict(page).get("seo_suggestions")]
+    if not pages:
+        return ""
+    cards = []
+    for raw_page in pages:
+        page = as_dict(raw_page)
+        suggestion = as_dict(page.get("seo_suggestions"))
+        title = str(page.get("titre_google") or "")
+        desc = str(page.get("description_google") or "")
+        title_block = ""
+        if title:
+            title_bad = len(title) > SEUIL_TITRE_LONG
+            title_note = " — trop long (max 60)" if title_bad else ""
+            title_block = f"""
+    <div class="suggestion-bloc">
+      <div class="suggestion-bloc-header">
+        <span class="suggestion-type">Titre Google</span>
+        <span class="suggestion-longueur {'suggestion-longueur--bad' if title_bad else 'suggestion-longueur--ok'}">{len(title)} car.{title_note}</span>
+      </div>
+      <div class="suggestion-actuel">
+        <span class="suggestion-label-actuel">Actuel</span>
+        <span class="suggestion-texte-actuel">{escape(title)}</span>
+      </div>
+      <div class="suggestion-propose">
+        <span class="suggestion-label-propose">Suggéré</span>
+        <span class="suggestion-texte-propose">{escape(str(suggestion.get("titre_suggere") or title))}</span>
+        <span class="suggestion-longueur-ok">{get_int(suggestion, "titre_longueur", len(str(suggestion.get("titre_suggere") or title)))} car.</span>
+      </div>
+      {render_suggestion_explanation(str(suggestion.get("explication_titre") or ""))}
+    </div>"""
+        desc_bad = not desc or len(desc) < SEUIL_DESC_COURTE or len(desc) > SEUIL_DESC_LONGUE
+        desc_status = (
+            '<span class="suggestion-longueur--bad">Absente</span>'
+            if not desc
+            else f'<span class="suggestion-longueur {"suggestion-longueur--bad" if desc_bad else "suggestion-longueur--ok"}">{len(desc)} car.</span>'
+        )
+        current_desc = (
+            f"""
+      <div class="suggestion-actuel">
+        <span class="suggestion-label-actuel">Actuel</span>
+        <span class="suggestion-texte-actuel">{escape(desc)}</span>
+      </div>"""
+            if desc
+            else ""
+        )
+        cards.append(
+            f"""
+  <div class="suggestion-card">
+    <div class="suggestion-url">{escape(display_url_label(str(page.get("url") or ""), str(context["domain"]), empty_label="Accueil"))}</div>
+    {title_block}
+    <div class="suggestion-bloc">
+      <div class="suggestion-bloc-header">
+        <span class="suggestion-type">Description Google</span>
+        {desc_status}
+      </div>
+      {current_desc}
+      <div class="suggestion-propose">
+        <span class="suggestion-label-propose">Suggéré</span>
+        <span class="suggestion-texte-propose">{escape(str(suggestion.get("description_suggeree") or desc))}</span>
+        <span class="suggestion-longueur-ok">{get_int(suggestion, "description_longueur", len(str(suggestion.get("description_suggeree") or desc)))} car.</span>
+      </div>
+      {render_suggestion_explanation(str(suggestion.get("explication_description") or ""))}
+    </div>
+  </div>"""
+        )
+    return f"""
+  <section class="report-page section-suggestions">
+    <div class="section-label">OPTIMISATIONS</div>
+    <h2>Titres et descriptions à corriger</h2>
+    <p class="suggestions-intro">
+      Ces éléments sont ce que Google affiche dans ses résultats de recherche.
+      Un titre trop long est tronqué, une description absente est remplacée par
+      un extrait aléatoire du contenu.
+    </p>
+    {''.join(cards)}
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_suggestion_explanation(value: str) -> str:
+    return f'<div class="suggestion-explication">{escape(value)}</div>' if value.strip() else ""
 
 
 def render_secondary_signals(context: dict[str, Any]) -> str:
@@ -583,6 +879,7 @@ def render_secondary_signals(context: dict[str, Any]) -> str:
       <h3>Éléments à vérifier</h3>
       {render_signal_groups(signals, str(context["domain"]))}
     </section>
+    {render_page_footer(context)}
   </section>"""
 
 
@@ -624,11 +921,17 @@ def render_date_table_cell(dates: list[Any], expected_type: str) -> str:
 
 
 def compact_url_label(url: str, domain: str = "") -> str:
+    return display_url_label(url, domain)
+
+
+def display_url_label(url: str, domain: str = "", *, empty_label: str = "") -> str:
     parsed = urlparse(url if "://" in url else f"https://{url}")
-    label = parsed.path.lstrip("/") or parsed.netloc or url
+    label = parsed.path.lstrip("/")
+    if not label and parsed.netloc and parsed.netloc != domain.strip("/"):
+        label = parsed.netloc
     if domain and label.startswith(domain.strip("/") + "/"):
         label = label[len(domain.strip("/")) + 1 :]
-    return truncate(label or url, 40)
+    return label or empty_label or parsed.netloc or url
 
 
 def render_date_badges(dates: list[Any]) -> str:
@@ -702,6 +1005,11 @@ def render_final_section(context: dict[str, Any]) -> str:
     actions = "".join(f"<li>{escape(str(action))}</li>" for action in context["actions_30j"][:3])
     contact = str(context["contact_cta"])
     href = f"mailto:{contact}" if "@" in contact and not contact.startswith("mailto:") else contact
+    analyste = (
+        f'<span class="footer-analyste">{escape(context["analyste_nom"])}</span>'
+        if context.get("analyste_valide")
+        else ""
+    )
     return f"""
   <section class="report-page section-finale">
     <div class="section-label">Conclusion</div>
@@ -721,9 +1029,9 @@ def render_final_section(context: dict[str, Any]) -> str:
     </div>
     {render_followup_offers(context)}
     <div class="rapport-footer">
-      <span class="tool-name">{escape(context["tool_name"])}</span>
+      {analyste}
       <span class="footer-date">{escape(context["audit_date"])}</span>
-      <span class="footer-mention">Rapport généré automatiquement — données issues d'un crawl réel</span>
+      <span class="footer-confidential">Rapport confidentiel — {escape(context["domain"])}</span>
     </div>
   </section>"""
 
@@ -761,16 +1069,33 @@ def render_method_about(context: dict[str, Any]) -> str:
     analyste_nom = str(context["analyste_nom"])
     analyste_photo = str(context.get("analyste_photo") or "")
     analyste_linkedin = str(context.get("analyste_linkedin") or "")
-    analyste_visual = (
-        f'<img src="{escape(analyste_photo)}" alt="{escape(analyste_nom)}" class="analyste-photo">'
-        if analyste_photo
-        else f'<div class="analyste-avatar">{escape((analyste_nom.strip() or "A")[0].upper())}</div>'
-    )
-    linkedin = (
-        f'<a href="{escape(analyste_linkedin)}" class="analyste-linkedin" target="_blank" rel="noreferrer">Voir le profil LinkedIn →</a>'
-        if analyste_linkedin
-        else ""
-    )
+    analyste_card = ""
+    if context.get("analyste_valide"):
+        analyste_visual = (
+            f'<img src="{escape(analyste_photo)}" alt="{escape(analyste_nom)}" class="analyste-photo">'
+            if analyste_photo
+            else f'<div class="analyste-avatar">{escape(analyste_nom[0].upper())}</div>'
+        )
+        analyste_title = ""
+        if context.get("analyste_titre") and context["analyste_titre"] != DEFAULT_ANALYSTE_TITRE:
+            analyste_title = f'<div class="analyste-titre">{escape(context["analyste_titre"])}</div>'
+        linkedin = (
+            f'<a href="{escape(analyste_linkedin)}" class="analyste-linkedin" target="_blank" rel="noreferrer">Voir le profil LinkedIn →</a>'
+            if analyste_linkedin
+            else ""
+        )
+        analyste_card = f"""
+      <div class="methode-col">
+        <h2>Préparé par</h2>
+        <div class="analyste-card">
+          {analyste_visual}
+          <div class="analyste-info">
+            <div class="analyste-nom">{escape(analyste_nom)}</div>
+            {analyste_title}
+            {linkedin}
+          </div>
+        </div>
+      </div>"""
     return f"""
   <section class="report-page section-methode">
     <div class="section-label">MÉTHODE</div>
@@ -789,23 +1114,9 @@ def render_method_about(context: dict[str, Any]) -> str:
           <p>Ce rapport s'appuie sur un crawl de surface. Il ne couvre pas les données Search Console, les backlinks, ni les performances Core Web Vitals en conditions réelles. {pages_visitees} pages analysées sur {sitemap_urls} détectées dans le sitemap.</p>
         </div>
       </div>
-      <div class="methode-col">
-        <h2>Préparé par</h2>
-        <div class="analyste-card">
-          {analyste_visual}
-          <div class="analyste-info">
-            <div class="analyste-nom">{escape(analyste_nom)}</div>
-            <div class="analyste-titre">{escape(context["analyste_titre"])}</div>
-            {linkedin}
-          </div>
-        </div>
-        <div class="outil-card">
-          <div class="outil-nom">{escape(context["tool_name"])}</div>
-          <div class="outil-description">{escape(context["tool_tagline"])}</div>
-          <div class="outil-meta">Rapport généré le {escape(context["audit_date"])}</div>
-        </div>
-      </div>
+      {analyste_card}
     </div>
+    {render_page_footer(context)}
   </section>"""
 
 
@@ -875,6 +1186,11 @@ def render_conclusion(context: dict[str, Any]) -> str:
     contact = str(context["contact_cta"])
     href = f"mailto:{contact}" if "@" in contact and not contact.startswith("mailto:") else contact
     actions = "".join(f"<li>{escape(str(action))}</li>" for action in context["actions_30j"][:3])
+    analyste = (
+        f'<strong>{escape(context["analyste_nom"])}</strong>'
+        if context.get("analyste_valide")
+        else ""
+    )
     return f"""
   <section class="report-page conclusion-page">
     <div class="section-head">
@@ -887,9 +1203,9 @@ def render_conclusion(context: dict[str, Any]) -> str:
       <a href="{escape(href)}">{escape(contact)}</a>
     </section>
     <footer class="signature">
-      <strong>{escape(context["tool_name"])}</strong>
+      {analyste}
       <span>{escape(context["audit_date"])}</span>
-      <span>Rapport généré automatiquement — données issues d'un crawl réel</span>
+      <span>Rapport confidentiel — {escape(context["domain"])}</span>
     </footer>
   </section>"""
 
@@ -1005,6 +1321,14 @@ def normalize_crawled_urls(items: Any) -> list[dict[str, Any]]:
         issues = item.get("points")
         if issues is None:
             issues = " | ".join(str(issue) for issue in (item.get("issues") or [])[:4]) or "-"
+        outgoing_links = item.get("liens_internes_sortants", item.get("internal_links_out", []))
+        if not isinstance(outgoing_links, list):
+            outgoing_links = []
+        title = str(item.get("titre_google") or item.get("title") or "")
+        description = str(item.get("description_google") or item.get("meta_description") or "")
+        load_time = optional_float(item.get("load_time"))
+        redirections = get_int(item, "redirections", get_int(item, "redirect_count", 0))
+        seo_suggestions = as_dict(item.get("seo_suggestions")) if item.get("seo_suggestions") else None
         normalized.append(
             {
                 "url": str(item.get("url") or ""),
@@ -1012,9 +1336,233 @@ def normalize_crawled_urls(items: Any) -> list[dict[str, Any]]:
                 "score": get_int(item, "score", get_int(item, "page_health_score", 0)),
                 "mots": get_int(item, "mots", get_int(item, "word_count", 0)),
                 "points": str(issues),
+                "load_time": load_time,
+                "redirections": redirections,
+                "liens_internes_sortants": [str(link) for link in outgoing_links if str(link).strip()],
+                "titre_google": title,
+                "description_google": description,
+                **({"seo_suggestions": seo_suggestions} if seo_suggestions else {}),
             }
         )
     return normalized
+
+
+def build_perf_data(urls_crawlees: list[dict[str, Any]]) -> dict[str, Any]:
+    pages_avec_temps = [page for page in urls_crawlees if page.get("load_time") is not None]
+    pages_avec_temps.sort(key=lambda page: optional_float(page.get("load_time")) or 0.0, reverse=True)
+    temps_values = [optional_float(page.get("load_time")) for page in pages_avec_temps]
+    temps_connus = [value for value in temps_values if value is not None]
+    pages_lentes = [page for page in pages_avec_temps if (optional_float(page.get("load_time")) or 0.0) >= SEUIL_LENT]
+    pages_critiques = [page for page in pages_avec_temps if (optional_float(page.get("load_time")) or 0.0) >= SEUIL_CRITIQUE]
+    return {
+        "pages_lentes": pages_lentes,
+        "pages_critiques": pages_critiques,
+        "temps_moyen": round(sum(temps_connus) / len(temps_connus), 2) if temps_connus else None,
+        "temps_max": round(max(temps_connus), 2) if temps_connus else None,
+        "pct_lentes": round(len(pages_lentes) / len(pages_avec_temps) * 100) if pages_avec_temps else 0,
+        "top_10_lentes": pages_avec_temps[:10],
+    }
+
+
+def build_internal_link_map(urls_crawlees: list[dict[str, Any]], domain: str) -> dict[str, int]:
+    incoming: defaultdict[str, int] = defaultdict(int)
+    for page in urls_crawlees:
+        for link in page.get("liens_internes_sortants", []):
+            if not is_internal_link(str(link), domain):
+                continue
+            path = normalized_url_path(str(link), domain)
+            incoming[path] += 1
+    return dict(incoming)
+
+
+def enrich_priority_pages_with_maillage(
+    pages_prioritaires: list[dict[str, Any]],
+    urls_crawlees: list[dict[str, Any]],
+    domain: str,
+) -> None:
+    link_map = build_internal_link_map(urls_crawlees, domain)
+    for page in pages_prioritaires:
+        path = normalized_url_path(str(page.get("url") or ""), domain)
+        nb = link_map.get(path, get_int(page, "incoming_links_observed", 0))
+        page["nb_liens_internes"] = nb
+        page["maillage_label"] = classify_maillage(nb)
+        page["maillage_class"] = classify_maillage_class(nb)
+
+
+def classify_maillage(nb_liens: int) -> str:
+    if nb_liens == 0:
+        return "isolée"
+    if nb_liens < 3:
+        return "faible"
+    if nb_liens < 8:
+        return "correct"
+    return "bien reliée"
+
+
+def classify_maillage_class(nb_liens: int) -> str:
+    return {
+        "isolée": "score-low",
+        "faible": "score-mid",
+        "correct": "score-high",
+        "bien reliée": "score-high",
+    }[classify_maillage(nb_liens)]
+
+
+def generate_seo_suggestions_for_priority_pages(
+    urls_crawlees: list[dict[str, Any]],
+    pages_prioritaires: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    priority_keys = [canonical_url_key(str(page.get("url") or "")) for page in pages_prioritaires]
+    priority_keys = [key for key in priority_keys if key]
+    priority_set = set(priority_keys)
+    candidates = []
+    for page in urls_crawlees:
+        if page.get("seo_suggestions"):
+            continue
+        if priority_set and canonical_url_key(str(page.get("url") or "")) not in priority_set:
+            continue
+        if needs_title_fix(page) or needs_desc_fix(page):
+            candidates.append(page)
+    if not candidates:
+        return urls_crawlees
+    suggestions_source = generate_seo_suggestions(candidates[:10])
+    suggestions_by_url = {
+        canonical_url_key(str(page.get("url") or "")): as_dict(page.get("seo_suggestions"))
+        for page in suggestions_source
+        if as_dict(page.get("seo_suggestions"))
+    }
+    for page in urls_crawlees:
+        key = canonical_url_key(str(page.get("url") or ""))
+        if key in suggestions_by_url:
+            page["seo_suggestions"] = suggestions_by_url[key]
+    return urls_crawlees
+
+
+def generate_seo_suggestions(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pages_a_corriger = [page for page in pages if needs_title_fix(page) or needs_desc_fix(page)]
+    if not pages_a_corriger:
+        return pages
+    suggestions = generate_seo_suggestions_with_anthropic(pages_a_corriger)
+    if not suggestions:
+        suggestions = [build_local_seo_suggestion(page) for page in pages_a_corriger]
+    suggestions_by_url = {str(suggestion.get("url") or ""): suggestion for suggestion in suggestions}
+    for page in pages:
+        suggestion = suggestions_by_url.get(str(page.get("url") or ""))
+        if suggestion:
+            page["seo_suggestions"] = suggestion
+    return pages
+
+
+def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return []
+    try:
+        import anthropic  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+    pages_json = json.dumps(
+        [
+            {
+                "url": page["url"],
+                "titre_actuel": page.get("titre_google", ""),
+                "description_actuelle": page.get("description_google", ""),
+                "nb_mots": page.get("mots", 0),
+                "type": page.get("type", "page"),
+                "problemes": {
+                    "titre_trop_long": needs_title_fix(page),
+                    "description_absente": not page.get("description_google"),
+                    "description_trop_longue": len(str(page.get("description_google") or "")) > SEUIL_DESC_LONGUE,
+                    "description_trop_courte": 0 < len(str(page.get("description_google") or "")) < SEUIL_DESC_COURTE,
+                },
+            }
+            for page in pages
+        ],
+        ensure_ascii=False,
+        indent=2,
+    )
+    prompt = f"""Tu es un expert SEO. Pour chaque page ci-dessous, génère un titre Google optimisé et une description Google optimisée.
+
+Règles strictes :
+- Titre : entre 50 et 60 caractères maximum
+- Description : entre 140 et 155 caractères
+- Langue : même langue que le titre actuel
+- Ton : professionnel, accrocheur, fidèle au sujet
+- Ne pas inventer de contenu qui n'existe pas
+
+Pages à corriger :
+{pages_json}
+
+Réponds UNIQUEMENT avec un JSON valide, sans markdown, sans backticks, sans commentaires :
+[
+  {{
+    "url": "...",
+    "titre_suggere": "...",
+    "titre_longueur": 0,
+    "description_suggeree": "...",
+    "description_longueur": 0,
+    "explication_titre": "...",
+    "explication_description": "..."
+  }}
+]"""
+    try:
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = response.content[0].text
+        suggestions = json.loads(content)
+    except Exception:
+        return []
+    return [as_dict(item) for item in suggestions if isinstance(item, dict)]
+
+
+def build_local_seo_suggestion(page: dict[str, Any]) -> dict[str, Any]:
+    url = str(page.get("url") or "")
+    title_current = str(page.get("titre_google") or slug_to_title(url)).strip()
+    desc_current = str(page.get("description_google") or "").strip()
+    title = fit_seo_title(title_current, url)
+    description = desc_current if SEUIL_DESC_COURTE <= len(desc_current) <= SEUIL_DESC_LONGUE else fit_meta_description(url, title)
+    return {
+        "url": url,
+        "titre_suggere": title,
+        "titre_longueur": len(title),
+        "description_suggeree": description,
+        "description_longueur": len(description),
+        "explication_titre": "Titre resserré pour éviter la troncature dans Google.",
+        "explication_description": "Description reformulée pour garder un extrait clair et exploitable dans les résultats.",
+    }
+
+
+def fit_seo_title(title: str, url: str) -> str:
+    cleaned = re.sub(r"\s+", " ", title).strip(" -|")
+    if not cleaned:
+        cleaned = slug_to_title(url)
+    if len(cleaned) < 50:
+        cleaned = f"{cleaned} : informations essentielles"
+    return trim_at_word(cleaned, SEUIL_TITRE_LONG)
+
+
+def fit_meta_description(url: str, title: str) -> str:
+    topic = slug_to_title(url)
+    if topic.lower() in {"page sans titre", "accueil"}:
+        topic = title
+    description = (
+        f"Retrouvez les informations essentielles sur {topic}, avec une page claire "
+        "pour comprendre le sujet, comparer les options et passer à l'action."
+    )
+    if len(description) < 140:
+        description = f"{description} Points clés et conseils pratiques."
+    return trim_at_word(description, 155)
+
+
+def trim_at_word(value: str, limit: int) -> str:
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    trimmed = cleaned[:limit].rsplit(" ", 1)[0].strip(" -|,.;")
+    return trimmed or cleaned[:limit].strip()
 
 
 def normalize_matrix(matrix: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -1438,6 +1986,54 @@ def sentence_from_items(items: list[str]) -> str:
     return sentence[:1].upper() + sentence[1:] + "."
 
 
+def optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def format_seconds(value: float | None) -> str:
+    if value is None:
+        return "—"
+    formatted = f"{value:.2f}".rstrip("0").rstrip(".")
+    return f"{formatted}s"
+
+
+def canonical_url_key(url: str) -> str:
+    parsed = parse_url_for_domain(url, "")
+    netloc = parsed.netloc.lower().removeprefix("www.")
+    path = parsed.path.rstrip("/")
+    return f"{netloc}{path}".strip("/")
+
+
+def normalized_url_path(url: str, domain: str) -> str:
+    return parse_url_for_domain(url, domain).path.rstrip("/")
+
+
+def is_internal_link(url: str, domain: str) -> bool:
+    parsed = parse_url_for_domain(url, domain)
+    if not parsed.netloc:
+        return True
+    clean_netloc = parsed.netloc.lower().removeprefix("www.")
+    clean_domain = domain.lower().removeprefix("www.").strip("/")
+    return clean_netloc == clean_domain
+
+
+def parse_url_for_domain(url: str, domain: str):
+    value = str(url or "").strip()
+    if not value:
+        return urlparse("")
+    if value.startswith(("http://", "https://")):
+        return urlparse(value)
+    if value.startswith("/"):
+        base = domain.strip("/") or "example.com"
+        return urlparse(f"https://{base}{value}")
+    return urlparse(f"https://{value}")
+
+
 def object_to_mapping(source: Any) -> dict[str, Any]:
     if is_dataclass(source):
         return asdict(source)
@@ -1650,6 +2246,31 @@ def render_report_styles() -> str:
       gap: var(--space-md);
       flex-wrap: wrap;
     }
+    .premium-report .rapport-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-md);
+      min-height: 48px;
+    }
+    .premium-report .cover-branding {
+      min-width: 1px;
+    }
+    .premium-report .header-logo,
+    .premium-report .cover-logo {
+      display: block;
+      max-width: 180px;
+      max-height: 56px;
+      object-fit: contain;
+    }
+    .premium-report .header-label {
+      color: var(--color-text-muted);
+      font-family: var(--font-body);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      line-height: 1.2;
+    }
     .premium-report .cover-brand strong,
     .premium-report .signature strong {
       display: block;
@@ -1772,6 +2393,16 @@ def render_report_styles() -> str:
       color: var(--color-text-muted);
       font-size: 13px;
       text-align: center;
+    }
+    .premium-report .page-footer {
+      align-self: end;
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space-md);
+      color: var(--color-text-muted);
+      font-size: 12px;
+      border-top: 1px solid var(--color-border);
+      padding-top: var(--space-md);
     }
     .premium-report .section-dirigeant {
       break-before: page;
@@ -2181,6 +2812,27 @@ def render_report_styles() -> str:
     .premium-report .fiche-badges-ei {
       justify-content: flex-end;
     }
+    .premium-report .fiche-maillage {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      margin-top: var(--space-sm);
+      color: var(--color-text-secondary);
+      flex-wrap: wrap;
+    }
+    .premium-report .fiche-maillage-icon {
+      font-size: 14px;
+      line-height: 1;
+    }
+    .premium-report .fiche-maillage-count {
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .premium-report .fiche-maillage-alerte {
+      color: var(--color-danger);
+      font-weight: 600;
+    }
     .premium-report .page-reason,
     .premium-report .recommended-action {
       display: grid;
@@ -2215,6 +2867,270 @@ def render_report_styles() -> str:
       background: #F4F3F0;
       color: var(--color-text-secondary);
       font-style: italic;
+    }
+    .premium-report .section-perf,
+    .premium-report .section-suggestions {
+      break-before: page;
+      page-break-before: always;
+    }
+    .premium-report .perf-intro {
+      background: var(--color-bg);
+      border-left: 3px solid var(--color-warning);
+      border-radius: 0 8px 8px 0;
+      padding: var(--space-md) var(--space-lg);
+      margin: var(--space-lg) 0;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .premium-report .perf-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-md);
+      margin-bottom: var(--space-xl);
+    }
+    .premium-report .perf-metric {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      padding: var(--space-lg);
+      text-align: center;
+    }
+    .premium-report .perf-metric-value {
+      font-family: var(--font-display);
+      font-size: 36px;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .premium-report .perf-metric-label {
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+    .premium-report .perf-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-bottom: var(--space-xl);
+    }
+    .premium-report .perf-table th {
+      text-align: left;
+      padding: 8px 12px;
+      background: var(--color-bg);
+      border-bottom: 2px solid var(--color-border);
+      font-size: 10px;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--color-text-secondary);
+    }
+    .premium-report .perf-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--color-border);
+      vertical-align: middle;
+    }
+    .premium-report .perf-url a {
+      color: var(--color-text-primary);
+      text-decoration: none;
+      font-size: 12px;
+      word-break: break-word;
+    }
+    .premium-report .perf-time {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .premium-report .perf-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .premium-report .perf-badge--correct {
+      background: #DCFCE7;
+      color: #166534;
+    }
+    .premium-report .perf-badge--lent {
+      background: #FEF3C7;
+      color: #92400E;
+    }
+    .premium-report .perf-badge--critique {
+      background: #FEE2E2;
+      color: #991B1B;
+    }
+    .premium-report .perf-badge--inconnu {
+      background: #F3F4F6;
+      color: #6B7280;
+    }
+    .premium-report .score-unknown {
+      color: var(--color-text-muted);
+    }
+    .premium-report .perf-redirect-warning {
+      font-size: 11px;
+      color: var(--color-warning);
+      font-weight: 600;
+    }
+    .premium-report .perf-redirect-ok {
+      color: var(--color-text-muted);
+    }
+    .premium-report .perf-actions {
+      margin-top: var(--space-xl);
+    }
+    .premium-report .perf-actions-title {
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: var(--space-lg);
+    }
+    .premium-report .perf-actions-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-md);
+    }
+    .premium-report .perf-action-card {
+      display: flex;
+      gap: var(--space-md);
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      padding: var(--space-md);
+      break-inside: avoid;
+    }
+    .premium-report .perf-action-icon {
+      font-size: 24px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .premium-report .perf-action-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    .premium-report .perf-action-text {
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+      margin-bottom: 6px;
+    }
+    .premium-report .perf-action-effort {
+      font-size: 11px;
+      color: var(--color-text-muted);
+      font-style: italic;
+    }
+    .premium-report .suggestions-intro {
+      font-size: 14px;
+      color: var(--color-text-secondary);
+      line-height: 1.6;
+      margin: var(--space-lg) 0;
+    }
+    .premium-report .suggestion-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: var(--space-lg);
+      margin-bottom: var(--space-lg);
+      break-inside: avoid;
+    }
+    .premium-report .suggestion-url {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      font-family: monospace;
+      margin-bottom: var(--space-md);
+      padding-bottom: var(--space-md);
+      border-bottom: 1px solid var(--color-border);
+      word-break: break-word;
+    }
+    .premium-report .suggestion-bloc {
+      margin-bottom: var(--space-lg);
+    }
+    .premium-report .suggestion-bloc:last-child {
+      margin-bottom: 0;
+    }
+    .premium-report .suggestion-bloc-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: var(--space-md);
+      margin-bottom: var(--space-sm);
+    }
+    .premium-report .suggestion-type {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-secondary);
+    }
+    .premium-report .suggestion-longueur {
+      font-size: 11px;
+      color: var(--color-text-muted);
+    }
+    .premium-report .suggestion-longueur--bad {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--color-danger);
+    }
+    .premium-report .suggestion-longueur--ok {
+      font-size: 11px;
+      color: var(--color-success);
+    }
+    .premium-report .suggestion-actuel,
+    .premium-report .suggestion-propose {
+      display: flex;
+      gap: var(--space-sm);
+      align-items: flex-start;
+      border-radius: 6px;
+      padding: var(--space-sm) var(--space-md);
+    }
+    .premium-report .suggestion-actuel {
+      background: #FEF2F2;
+      margin-bottom: 6px;
+    }
+    .premium-report .suggestion-propose {
+      background: #F0FDF4;
+    }
+    .premium-report .suggestion-label-actuel,
+    .premium-report .suggestion-label-propose {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      flex-shrink: 0;
+      margin-top: 2px;
+      min-width: 44px;
+    }
+    .premium-report .suggestion-label-actuel {
+      color: var(--color-danger);
+    }
+    .premium-report .suggestion-label-propose {
+      color: var(--color-success);
+    }
+    .premium-report .suggestion-texte-actuel {
+      font-size: 13px;
+      color: #7F1D1D;
+      line-height: 1.4;
+      flex: 1;
+    }
+    .premium-report .suggestion-texte-propose {
+      font-size: 13px;
+      color: #14532D;
+      line-height: 1.4;
+      flex: 1;
+      font-weight: 500;
+    }
+    .premium-report .suggestion-longueur-ok {
+      font-size: 11px;
+      color: var(--color-success);
+      font-weight: 600;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .premium-report .suggestion-explication {
+      font-size: 11px;
+      color: var(--color-text-muted);
+      font-style: italic;
+      margin-top: 6px;
+      padding-left: var(--space-sm);
     }
     .premium-report .signal-check-list {
       display: grid;
@@ -2297,14 +3213,16 @@ def render_report_styles() -> str:
       background: var(--color-bg);
     }
     .premium-report .dates-url {
+      max-width: 280px;
       font-size: 12px;
       color: var(--color-text-secondary);
-      max-width: 220px;
-      word-break: break-all;
+      word-break: break-word;
+      white-space: normal;
     }
     .premium-report .dates-url a {
       color: var(--color-accent);
       text-decoration: none;
+      word-break: inherit;
     }
     .premium-report .dates-cell {
       white-space: nowrap;
@@ -2861,6 +3779,23 @@ def render_report_styles() -> str:
       .premium-report .offre-suivi {
         display: none !important;
       }
+      .premium-report .perf-actions-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .premium-report .perf-action-card {
+        padding: 10px;
+      }
+      .premium-report .perf-action-text {
+        font-size: 11px;
+      }
+      .premium-report .suggestion-card {
+        padding: var(--space-md);
+      }
+      .premium-report .suggestion-texte-actuel,
+      .premium-report .suggestion-texte-propose {
+        font-size: 12px;
+      }
       .premium-report .dates-table {
         font-size: 11px;
       }
@@ -2905,6 +3840,7 @@ def render_report_styles() -> str:
       .premium-report .timeline-step,
       .premium-report .matrix-action,
       .premium-report .signal-url-group,
+      .premium-report .perf-action-card,
       .premium-report .rewrite-angle,
       .premium-report .page-reason,
       .premium-report .recommended-action,
@@ -2934,10 +3870,18 @@ def render_report_styles() -> str:
       .premium-report .secondary-metrics,
       .premium-report .dirigeant-trois-colonnes,
       .premium-report .offre-grid,
+      .premium-report .perf-metrics,
+      .premium-report .perf-actions-grid,
       .premium-report .methode-grid,
       .premium-report .method-grid,
       .premium-report .appendix-head {
         grid-template-columns: 1fr;
+      }
+      .premium-report .suggestion-bloc-header,
+      .premium-report .suggestion-actuel,
+      .premium-report .suggestion-propose {
+        flex-direction: column;
+        align-items: flex-start;
       }
       .premium-report .dirigeant-header,
       .premium-report .analyste-card {

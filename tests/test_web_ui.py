@@ -412,7 +412,7 @@ class WebUITests(unittest.TestCase):
         self.assertIn("Opportunités éditoriales", page)
         self.assertIn("Formules disponibles", page)
         self.assertIn("MÉTHODE", page)
-        self.assertIn("Consultant SEO", page)
+        self.assertNotIn("Consultant SEO", page)
         self.assertIn("Annexe technique", page)
         self.assertIn("Prochaines étapes", page)
         self.assertIn("section-finale", page)

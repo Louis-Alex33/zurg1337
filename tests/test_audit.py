@@ -589,6 +589,105 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertNotIn("Votre position face à la concurrence", page)
         self.assertNotIn("concurrent1.fr", page)
 
+    def test_premium_report_v5_identity_perf_suggestions_and_maillage(self) -> None:
+        long_slug = "blog/cutest-planners-for-keeping-your-life-organized-in-2026-with-extra-details"
+        page = render_premium_audit_report(
+            {
+                "domain": "example.com",
+                "audited_at": "2026-04-15T00:47:42",
+                "tool_name": "ZURG 1337",
+                "tool_tagline": "Audit SEO automatisé",
+                "observed_health_score": 76,
+                "summary": {
+                    "pages_crawled": 3,
+                    "pages_ok": 3,
+                    "content_like_pages": 3,
+                    "avg_page_health_score": 74,
+                    "missing_meta_descriptions": 1,
+                    "dated_content_signals": 1,
+                },
+                "pages_prioritaires": [
+                    {
+                        "url": f"https://example.com/{long_slug}",
+                        "titre": "Planner article",
+                        "type": "article",
+                        "mots": 850,
+                        "score": 70,
+                    }
+                ],
+                "urls_crawlees": [
+                    {
+                        "url": "https://example.com/",
+                        "type": "accueil",
+                        "score": 90,
+                        "mots": 900,
+                        "load_time": 1.2,
+                        "redirect_count": 0,
+                        "title": "Accueil Example",
+                        "meta_description": "Une description suffisamment claire pour la page d'accueil du site Example.",
+                        "internal_links_out": [],
+                    },
+                    {
+                        "url": f"https://example.com/{long_slug}",
+                        "type": "article",
+                        "score": 70,
+                        "mots": 850,
+                        "load_time": 4.4,
+                        "redirect_count": 1,
+                        "title": "Cutest Planners For Keeping Your Life Organized In 2026 With Extra Details And Ideas",
+                        "meta_description": "",
+                        "internal_links_out": [],
+                    },
+                    {
+                        "url": "https://example.com/blog/medium-page",
+                        "type": "article",
+                        "score": 80,
+                        "mots": 700,
+                        "load_time": 3.2,
+                        "redirect_count": 0,
+                        "title": "Medium Page Example",
+                        "meta_description": "Une description suffisamment claire pour cette page moyenne du site Example.",
+                        "internal_links_out": [],
+                    },
+                ],
+                "signaux": [
+                    {
+                        "url": f"https://example.com/{long_slug}",
+                        "dates": [{"type": "url", "valeur": "Date visible dans l'URL: 2026"}],
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("RAPPORT SEO", page)
+        self.assertNotIn("ZURG 1337", page)
+        self.assertNotIn("Audit SEO automatisé", page)
+        self.assertNotIn("Rapport généré automatiquement", page)
+        self.assertNotIn('class="tool-name"', page)
+        self.assertNotIn("Consultant SEO", page)
+
+        self.assertIn(long_slug, page)
+        self.assertNotIn("cutest-planners-for-keeping-your-life-o…", page)
+
+        self.assertIn("Vitesse de chargement", page)
+        perf_block = page[page.find("Vitesse de chargement") : page.find("Titres et descriptions à corriger")]
+        self.assertLess(perf_block.find("4.4s"), perf_block.find("3.2s"))
+        self.assertEqual(page.count('class="perf-action-card"'), 4)
+
+        self.assertIn("Titres et descriptions à corriger", page)
+        self.assertIn("suggestion-actuel", page)
+        self.assertIn("suggestion-propose", page)
+        self.assertIn("Titre Google", page)
+        self.assertIn("Description Google", page)
+        self.assertIn("car.", page)
+
+        self.assertIn("0 liens internes", page)
+        self.assertIn("Aucune page ne pointe vers celle-ci", page)
+
+        self.assertLess(page.find("Pages à revoir en priorité"), page.find("Vitesse de chargement"))
+        self.assertLess(page.find("Vitesse de chargement"), page.find("Titres et descriptions à corriger"))
+        self.assertLess(page.find("Titres et descriptions à corriger"), page.find("Repères complémentaires"))
+
     def test_build_report_can_disable_overlap_for_light_mode(self) -> None:
         home = AuditPage(
             url="https://example.com/",
