@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from unittest.mock import patch
 
-from audit_report_design import score_color_class, slug_to_title
+from audit_report_design import render_premium_audit_report, score_color_class, slug_to_title
 from audit import (
     audit_domains,
     build_report,
@@ -399,6 +399,93 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertIn(".premium-report .annexe", page)
         self.assertIn("display: none !important", page)
         self.assertIn("Pourquoi elle ressort", page)
+
+    def test_premium_report_v2_regressions_are_rendered(self) -> None:
+        current_year = str(datetime.now().year)
+        page = render_premium_audit_report(
+            {
+                "domain": "example.com",
+                "audited_at": "2026-04-15T00:47:42",
+                "pages_crawled": 3,
+                "observed_health_score": 92,
+                "summary": {
+                    "pages_ok": 3,
+                    "pages_with_errors": 0,
+                    "missing_titles": 0,
+                    "missing_meta_descriptions": 0,
+                    "avg_page_health_score": 91,
+                    "noindex_pages": 0,
+                    "canonical_to_other_url_pages": 0,
+                    "weak_internal_linking_pages": 0,
+                    "possible_content_overlap_pairs": 0,
+                    "dated_content_signals": 2,
+                },
+                "signal_principal": "Relire les contenus [current_date format='Y']",
+                "pages_prioritaires": [
+                    {
+                        "url": "https://example.com/blog/test",
+                        "titre": "Page test",
+                        "score": 88,
+                        "mots": 600,
+                        "observation": "Observation [current_date format=Y]",
+                        "action": "Action [current_date format = \"Y\"]",
+                        "angle": "Angle [current_date format=Y]",
+                    }
+                ],
+                "signaux": [
+                    {
+                        "url": "https://example.com/blog/date",
+                        "dates": [
+                            {"type": "titre", "valeur": "Date visible dans le titre: 2025"},
+                            {"type": "titre", "valeur": "Date visible dans le titre: 2024"},
+                            {"type": "url", "valeur": "Date visible dans l'URL: 2023"},
+                            {"type": "contenu", "valeur": "Date visible dans le contenu: 2022"},
+                        ],
+                    }
+                ],
+                "opportunites": ["Mettre à jour [current_date format=Y]"],
+                "matrice": {
+                    "quick_wins": [{"titre": "Relire les dates", "impact": "élevé", "effort": "faible", "priorite": "haute"}],
+                    "projets_structurants": [],
+                    "optimisations_simples": [],
+                    "backlog": [],
+                },
+                "urls_crawlees": [
+                    {"url": "example.com/", "type": "accueil", "score": 95, "mots": 900, "points": "-"},
+                    {"url": "example.com/blog/date", "type": "article", "score": 88, "mots": 600, "points": "date visible"},
+                ],
+            }
+        )
+
+        self.assertNotIn("[current_date", page)
+        self.assertIn(f"Angle {current_year}", page)
+        self.assertIn('class="report-page executive-page synthese" id="synthese"', page)
+        self.assertIn(".premium-report .synthese", page)
+        for label in (
+            "Pages analysées",
+            "Pages saines",
+            "Pages en erreur",
+            "Descriptions manquantes",
+            "Titres manquants",
+            "Score moyen",
+            "Pages noindex",
+            "Canonicals à vérifier",
+            "Pages peu reliées",
+            "Sujets trop proches",
+            "Dates visibles à vérifier",
+        ):
+            self.assertIn(label, page)
+        self.assertIn("is-zero", page)
+        self.assertIn("is-warning", page)
+        self.assertIn("date-badge--titre", page)
+        self.assertIn("2025, 2024", page)
+        self.assertNotIn("titre :", page)
+        self.assertIn("Voir l'annexe technique (2 URLs)", page)
+        self.assertIn("Imprimer avec annexe", page)
+        self.assertIn("printWithAnnexe", page)
+        self.assertIn("<th>URL</th><th>Type</th><th>Score</th><th>Mots</th><th>Points relevés</th>", page)
+        self.assertIn("Les autres quadrants ne présentent pas d'action prioritaire", page)
+        self.assertLess(page.find("Prochaines étapes recommandées"), page.find("Annexe technique"))
 
     def test_build_report_can_disable_overlap_for_light_mode(self) -> None:
         home = AuditPage(

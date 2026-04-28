@@ -72,6 +72,22 @@ def score_color_class(score: int) -> str:
     return "score-low"
 
 
+def resolve_date_placeholders(text: str) -> str:
+    current_year = str(datetime.now().year)
+    pattern = r"\[current_date\s+format\s*=\s*[\"']?Y[\"']?\s*\]"
+    return re.sub(pattern, current_year, text)
+
+
+def resolve_all_placeholders(obj: Any) -> Any:
+    if isinstance(obj, str):
+        return resolve_date_placeholders(obj)
+    if isinstance(obj, list):
+        return [resolve_all_placeholders(item) for item in obj]
+    if isinstance(obj, dict):
+        return {key: resolve_all_placeholders(value) for key, value in obj.items()}
+    return obj
+
+
 def render_premium_audit_report(source: Any, *, standalone: bool = True, overrides: dict[str, Any] | None = None) -> str:
     context = prepare_audit_report_context(source, overrides=overrides)
     body = render_report_body(context)
@@ -101,6 +117,7 @@ def prepare_audit_report_context(source: Any, *, overrides: dict[str, Any] | Non
     data = object_to_mapping(source)
     if overrides:
         data = {**data, **overrides}
+    data = resolve_all_placeholders(data)
     summary = as_dict(data.get("summary"))
     pages = [as_dict(page) for page in data.get("pages", []) if isinstance(page, dict)]
     pages_by_url = {str(page.get("url") or ""): page for page in pages if page.get("url")}
@@ -111,6 +128,7 @@ def prepare_audit_report_context(source: Any, *, overrides: dict[str, Any] | Non
     score = clamp_score(get_int(data, "score_global", get_int(data, "observed_health_score", 0)))
     domain = str(data.get("domain") or "Domaine audité")
     pages_analysees = get_int(data, "pages_analysees", get_int(data, "pages_crawled", get_int(summary, "pages_crawled", len(pages))))
+    pages_erreur = get_int(data, "pages_erreur", get_int(summary, "pages_with_errors", 0))
     context = {
         "tool_name": str(data.get("tool_name") or DEFAULT_TOOL_NAME),
         "tool_tagline": str(data.get("tool_tagline") or DEFAULT_TOOL_TAGLINE),
@@ -121,10 +139,16 @@ def prepare_audit_report_context(source: Any, *, overrides: dict[str, Any] | Non
         "urgency_level": str(data.get("urgency_level") or infer_urgency(score, summary, business_signals)),
         "base_status": str(data.get("base_status") or infer_base_status(score)),
         "pages_analysees": pages_analysees,
+        "pages_saines": get_int(data, "pages_saines", get_int(summary, "pages_ok", max(0, pages_analysees - pages_erreur))),
         "contenus_utiles": get_int(data, "contenus_utiles", get_int(summary, "content_like_pages", 0)),
-        "pages_erreur": get_int(data, "pages_erreur", get_int(summary, "pages_with_errors", 0)),
+        "pages_erreur": pages_erreur,
+        "descriptions_manquantes": get_int(data, "descriptions_manquantes", get_int(summary, "missing_meta_descriptions", 0)),
+        "titres_manquants": get_int(data, "titres_manquants", get_int(summary, "missing_titles", 0)),
         "score_moyen_page": get_int(data, "score_moyen_page", get_int(summary, "avg_page_health_score", 0)),
         "pages_noindex": get_int(data, "pages_noindex", get_int(summary, "noindex_pages", 0)),
+        "canonicals": get_int(data, "canonicals", get_int(summary, "canonical_to_other_url_pages", 0)),
+        "pages_peu_reliees": get_int(data, "pages_peu_reliees", get_int(summary, "weak_internal_linking_pages", 0)),
+        "sujets_trop_proches": get_int(data, "sujets_trop_proches", get_int(summary, "possible_content_overlap_pairs", 0)),
         "dates_a_verifier": get_int(data, "dates_a_verifier", get_int(summary, "dated_content_signals", len(dated_content))),
         "signal_principal": str(data.get("signal_principal") or build_primary_signal(summary, business_signals)),
         "ce_qui_fonctionne": list_or_default(data.get("ce_qui_fonctionne"), build_strengths(summary, pages_analysees, score)),
@@ -153,8 +177,8 @@ def render_report_body(context: dict[str, Any]) -> str:
   {priority_pages}
   {signals}
   {render_opportunities(context)}
-  {render_appendix(context)}
   {render_conclusion(context)}
+  {render_appendix(context)}
 </main>"""
 
 
@@ -194,19 +218,19 @@ def render_cover(context: dict[str, Any]) -> str:
 
 def render_executive_summary(context: dict[str, Any]) -> str:
     metrics = [
-        ("Pages saines", context["pages_analysees"] - context["pages_erreur"], "pages sans erreur observée", ""),
+        ("Pages saines", context["pages_saines"], "pages sans erreur observée", ""),
         ("Contenus utiles", context["contenus_utiles"], "pages éditoriales ou informatives", ""),
         ("Score moyen", f"{context['score_moyen_page']}/100", "moyenne des pages analysées", score_color_class(int(context["score_moyen_page"]))),
-        ("Dates à vérifier", context["dates_a_verifier"], "signaux visibles à relire", "metric-warning" if int(context["dates_a_verifier"]) > 0 else ""),
+        ("Dates à vérifier", context["dates_a_verifier"], "signaux visibles à relire", ""),
     ]
     return f"""
-  <section class="report-page executive-page">
+  <section class="report-page executive-page synthese" id="synthese">
     <div class="section-head">
       <p class="label">Synthèse exécutive</p>
       <h2>Lecture rapide du site</h2>
     </div>
     <div class="executive-grid">
-      <div class="executive-left">
+      <div class="executive-left synthese-texte">
         <article class="card insight-card insight-positive">
           <span class="insight-icon">✓</span>
           <div>
@@ -226,8 +250,8 @@ def render_executive_summary(context: dict[str, Any]) -> str:
           <strong>{escape(context["signal_principal"])}</strong>
         </article>
       </div>
-      <div class="metric-grid executive-metrics">
-        {''.join(render_metric_card(label, value, note, tone) for label, value, note, tone in metrics)}
+      <div class="metric-grid metriques-grid executive-metrics synthese-metriques">
+        {''.join(render_metric_card(label, value, note, tone, warning=label == "Dates à vérifier") for label, value, note, tone in metrics)}
       </div>
     </div>
   </section>"""
@@ -297,7 +321,13 @@ def render_matrix(matrix: dict[str, list[dict[str, Any]]]) -> str:
         )
     if not cards:
         return "<p class='empty-state'>Aucune action prioritaire identifiée dans cette matrice.</p>"
-    return f"<div class='matrix-grid'>{''.join(cards)}</div>"
+    note = ""
+    if len(cards) < 2:
+        note = (
+            "<p class='matrice-note'>Les autres quadrants ne présentent pas d'action prioritaire "
+            "identifiée à ce stade — c'est un signal positif sur l'état général du site.</p>"
+        )
+    return f"<div class='matrix-grid'>{''.join(cards)}</div>{note}"
 
 
 def render_priority_pages(pages: list[dict[str, Any]]) -> str:
@@ -365,13 +395,18 @@ def render_priority_pages(pages: list[dict[str, Any]]) -> str:
 
 def render_secondary_signals(context: dict[str, Any]) -> str:
     signals = context["signaux"]
-    if not signals:
-        return ""
     metrics = [
-        ("Pages analysées", context["pages_analysees"], "volume couvert par le crawl", ""),
-        ("Pages en erreur", context["pages_erreur"], "réponses HTTP à vérifier", ""),
-        ("Pages noindex", context["pages_noindex"], "pages écartées de l'indexation", ""),
-        ("Dates visibles à vérifier", context["dates_a_verifier"], "mentions datées repérées", "metric-warning" if int(context["dates_a_verifier"]) > 0 else ""),
+        ("Pages analysées", context["pages_analysees"], "volume couvert par le crawl", False),
+        ("Pages saines", context["pages_saines"], "pages sans erreur observée", False),
+        ("Pages en erreur", context["pages_erreur"], "réponses HTTP à vérifier", True),
+        ("Descriptions manquantes", context["descriptions_manquantes"], "balises description absentes", True),
+        ("Titres manquants", context["titres_manquants"], "titres HTML absents", True),
+        ("Score moyen", f"{context['score_moyen_page']}/100", "moyenne des pages analysées", False),
+        ("Pages noindex", context["pages_noindex"], "pages écartées de l'indexation", False),
+        ("Canonicals à vérifier", context["canonicals"], "canonicals pointant ailleurs", True),
+        ("Pages peu reliées", context["pages_peu_reliees"], "maillage interne à renforcer", True),
+        ("Sujets trop proches", context["sujets_trop_proches"], "intentions éditoriales proches", True),
+        ("Dates visibles à vérifier", context["dates_a_verifier"], "mentions datées repérées", True),
     ]
     return f"""
   <section class="report-page secondary-page">
@@ -380,7 +415,7 @@ def render_secondary_signals(context: dict[str, Any]) -> str:
       <h2>Repères complémentaires</h2>
     </div>
     <div class="metric-grid secondary-metrics">
-      {''.join(render_metric_card(label, value, note, tone, muted_zero=True) for label, value, note, tone in metrics)}
+      {''.join(render_metric_card(label, value, note, muted_zero=True, warning=is_warning_metric) for label, value, note, is_warning_metric in metrics)}
     </div>
     <section class="card signal-check-list">
       <h3>Éléments à vérifier</h3>
@@ -390,22 +425,58 @@ def render_secondary_signals(context: dict[str, Any]) -> str:
 
 
 def render_signal_groups(signals: list[dict[str, Any]]) -> str:
+    if not signals:
+        return "<p class='empty-state'>Aucun signal de date visible à vérifier.</p>"
     groups = []
     for signal in signals:
         dates = signal.get("dates") or []
-        badges = "".join(
-            f"<span class='date-badge date-{date_type_class(str(item.get('type') or 'contenu'))}'>{escape(str(item.get('type') or 'contenu'))} : {escape(str(item.get('valeur') or 'date à vérifier'))}</span>"
-            for item in dates
-            if isinstance(item, dict)
-        )
+        badges = render_date_badges(dates)
         groups.append(
             f"""
             <article class="signal-url-group">
               <a href="{escape(str(signal.get("url") or "#"))}" target="_blank" rel="noreferrer">{escape(str(signal.get("url") or "URL non précisée"))}</a>
-              <div>{badges or "<span class='date-badge date-contenu'>contenu : date à vérifier</span>"}</div>
+              {badges}
             </article>"""
         )
     return "".join(groups)
+
+
+def render_date_badges(dates: list[Any]) -> str:
+    grouped: dict[str, list[str]] = {"titre": [], "url": [], "contenu": []}
+    for item in dates:
+        if not isinstance(item, dict):
+            continue
+        date_type = date_type_class(str(item.get("type") or "contenu"))
+        values = extract_year_values(str(item.get("valeur") or "date à vérifier"))
+        grouped.setdefault(date_type, []).extend(values)
+    lines = []
+    for date_type in ("titre", "url", "contenu"):
+        values = grouped.get(date_type, [])
+        if not values:
+            continue
+        value_text = ", ".join(values)
+        lines.append(
+            "<p class='date-signal-line'>"
+            f"<span class='date-badge date-badge--{date_type} date-{date_type}'>{escape(date_type)}</span>"
+            f"<span class='date-values'>{escape(value_text)}</span>"
+            "</p>"
+        )
+    if not lines:
+        lines.append(
+            "<p class='date-signal-line'>"
+            "<span class='date-badge date-badge--contenu date-contenu'>contenu</span>"
+            "<span class='date-values'>date à vérifier</span>"
+            "</p>"
+        )
+    return f"<div class='date-signal-lines'>{''.join(lines)}</div>"
+
+
+def extract_year_values(value: str) -> list[str]:
+    years = re.findall(r"\b(?:19|20)\d{2}\b", value)
+    if years:
+        return years
+    cleaned = value.strip()
+    return [cleaned] if cleaned else ["date à vérifier"]
 
 
 def render_opportunities(context: dict[str, Any]) -> str:
@@ -430,9 +501,9 @@ def render_opportunities(context: dict[str, Any]) -> str:
 
 def render_appendix(context: dict[str, Any]) -> str:
     urls = context["urls_crawlees"]
-    rows = "".join(render_appendix_row(row) for row in urls[:120])
+    rows = "".join(render_appendix_row(row) for row in urls)
     if not rows:
-        rows = "<tr><td colspan='6'>Aucune URL détaillée disponible.</td></tr>"
+        rows = "<tr><td colspan='5'>Aucune URL détaillée disponible.</td></tr>"
     method = context["methode"]
     method_items = [
         ("Pages visitées", method.get("pages_visitees", context["pages_analysees"])),
@@ -441,21 +512,24 @@ def render_appendix(context: dict[str, Any]) -> str:
         ("Raison d'arrêt", method.get("raison_arret", "-")),
     ]
     return f"""
-  <section class="report-page annexe">
+  <div class="annexe-actions">
+    <button class="annexe-toggle" type="button" onclick="toggleAnnexe()">Voir l'annexe technique ({len(urls)} URLs)</button>
+    <button class="annexe-toggle annexe-print-toggle" type="button" onclick="printWithAnnexe()">Imprimer avec annexe</button>
+  </div>
+  <section class="report-page annexe" id="annexe" style="display:none">
     <div class="section-head appendix-head">
       <div>
         <p class="label">Annexe</p>
         <h2>Annexe technique</h2>
       </div>
-      <button class="annexe-toggle" type="button" onclick="toggleAnnexe()">Afficher / masquer</button>
     </div>
-    <div class="annexe-body" id="annexe-body">
+    <div class="annexe-body">
       <div class="method-grid">
         {''.join(f"<article class='card method-card'><span>{escape(label)}</span><strong>{escape(str(value))}</strong></article>" for label, value in method_items)}
       </div>
       <div class="technical-table-wrap">
-        <table class="technical-table">
-          <thead><tr><th>URL</th><th></th><th>Type</th><th>Score</th><th>Mots</th><th>Points relevés</th></tr></thead>
+        <table class="annexe-table technical-table">
+          <thead><tr><th>URL</th><th>Type</th><th>Score</th><th>Mots</th><th>Points relevés</th></tr></thead>
           <tbody>{rows}</tbody>
         </table>
       </div>
@@ -467,16 +541,24 @@ def render_appendix_row(row: dict[str, Any]) -> str:
     url = str(row.get("url") or "")
     short = truncate(url, 50)
     score = clamp_score(get_int(row, "score", 0))
+    href = appendix_href(url)
     return (
         "<tr>"
-        f"<td><span title='{escape(url)}'>{escape(short)}</span></td>"
-        f"<td><a href='{escape(url or '#')}' target='_blank' rel='noreferrer'>Ouvrir</a></td>"
-        f"<td>{escape(str(row.get('type') or '-'))}</td>"
-        f"<td><span class='score-badge {score_color_class(score)}'>{score}/100</span></td>"
+        f"<td><a href='{escape(href)}' target='_blank' rel='noreferrer' title='{escape(url)}'>{escape(short)}</a></td>"
+        f"<td><span class='type-badge'>{escape(str(row.get('type') or '-'))}</span></td>"
+        f"<td><span class='score-pill {score_color_class(score)}'>{score}/100</span></td>"
         f"<td>{get_int(row, 'mots', 0)}</td>"
-        f"<td>{escape(str(row.get('points') or '-'))}</td>"
+        f"<td class='points-releves'>{escape(str(row.get('points') or '-'))}</td>"
         "</tr>"
     )
+
+
+def appendix_href(url: str) -> str:
+    if not url:
+        return "#"
+    if url.startswith(("http://", "https://")):
+        return url
+    return f"https://{url}"
 
 
 def render_conclusion(context: dict[str, Any]) -> str:
@@ -502,21 +584,34 @@ def render_conclusion(context: dict[str, Any]) -> str:
   </section>"""
 
 
-def render_metric_card(label: str, value: Any, note: str, tone: str = "", *, muted_zero: bool = False) -> str:
+def render_metric_card(label: str, value: Any, note: str, tone: str = "", *, muted_zero: bool = False, warning: bool = False) -> str:
     value_text = str(value)
-    is_zero = value_text in {"0", "0/100"}
-    classes = "metric-card"
+    is_zero = metric_value_is_zero(value_text)
+    classes = "metric-card metrique-card"
     if tone:
         classes += f" {tone}"
     if muted_zero and is_zero:
-        classes += " metric-muted"
+        classes += " metric-muted is-zero"
+    if warning and not is_zero and metric_numeric_value(value_text) > 0:
+        classes += " metric-warning is-warning"
     return (
         f"<article class='card {classes}'>"
-        f"<strong>{escape(value_text)}</strong>"
-        f"<span>{escape(label)}</span>"
+        f"<strong class='metric-value metrique-value'>{escape(value_text)}</strong>"
+        f"<span class='metric-label metrique-label'>{escape(label)}</span>"
         f"<p>{escape(note)}</p>"
         "</article>"
     )
+
+
+def metric_value_is_zero(value: str) -> bool:
+    return metric_numeric_value(value) == 0
+
+
+def metric_numeric_value(value: str) -> int:
+    match = re.match(r"\s*(-?\d+)", value)
+    if not match:
+        return 0
+    return int(match.group(1))
 
 
 def render_text_list(items: list[str]) -> str:
@@ -932,9 +1027,15 @@ def render_report_script() -> str:
     return """
 <script>
   function toggleAnnexe() {
-    const body = document.getElementById('annexe-body');
-    if (!body) return;
-    body.hidden = !body.hidden;
+    const el = document.getElementById('annexe');
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function printWithAnnexe() {
+    document.body.classList.add('print-with-annexe');
+    window.print();
+    document.body.classList.remove('print-with-annexe');
   }
 </script>"""
 
@@ -1101,11 +1202,12 @@ def render_report_styles() -> str:
       font-weight: 700;
     }
     .premium-report .score-badge,
+    .premium-report .score-pill,
     .premium-report .urgency-badge,
     .premium-report .priority-badge,
+    .premium-report .type-badge,
     .premium-report .page-tags span,
-    .premium-report .impact-effort-row span,
-    .premium-report .date-badge {
+    .premium-report .impact-effort-row span {
       display: inline-flex;
       align-items: center;
       width: fit-content;
@@ -1152,6 +1254,12 @@ def render_report_styles() -> str:
       grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
       gap: var(--space-lg);
     }
+    .premium-report .synthese {
+      page-break-before: always;
+      page-break-inside: avoid;
+      break-before: page;
+      break-inside: avoid;
+    }
     .premium-report .executive-left {
       display: grid;
       gap: var(--space-md);
@@ -1197,6 +1305,21 @@ def render_report_styles() -> str:
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: var(--space-md);
     }
+    .premium-report .metriques-grid,
+    .premium-report .metrique-card {
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    .premium-report .synthese-texte {
+      page-break-after: auto;
+      break-after: auto;
+    }
+    .premium-report .synthese-metriques {
+      page-break-before: auto;
+      page-break-inside: avoid;
+      break-before: auto;
+      break-inside: avoid;
+    }
     .premium-report .metric-card strong {
       display: block;
       margin-bottom: var(--space-sm);
@@ -1218,6 +1341,13 @@ def render_report_styles() -> str:
     .premium-report .metric-muted span,
     .premium-report .metric-muted p {
       color: var(--color-text-muted);
+    }
+    .premium-report .metrique-card.is-zero .metrique-value,
+    .premium-report .metrique-card.is-zero .metrique-label {
+      color: var(--color-text-muted);
+    }
+    .premium-report .metrique-card.is-warning .metrique-value {
+      color: var(--color-warning);
     }
     .premium-report .timeline {
       position: relative;
@@ -1291,6 +1421,13 @@ def render_report_styles() -> str:
       flex-wrap: wrap;
       color: var(--color-text-secondary);
       font-size: 13px;
+    }
+    .premium-report .matrice-note {
+      font-size: 13px;
+      color: var(--color-text-muted);
+      font-style: italic;
+      margin-top: var(--space-md);
+      text-align: center;
     }
     .premium-report .empty-state {
       color: var(--color-text-secondary);
@@ -1389,22 +1526,45 @@ def render_report_styles() -> str:
       font-weight: 700;
       overflow-wrap: anywhere;
     }
-    .premium-report .signal-url-group div {
+    .premium-report .date-signal-lines {
+      display: grid;
+      gap: var(--space-xs);
+    }
+    .premium-report .date-signal-line {
       display: flex;
-      gap: var(--space-sm);
+      align-items: center;
+      gap: var(--space-xs);
       flex-wrap: wrap;
     }
+    .premium-report .date-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      margin-right: 4px;
+      margin-bottom: 4px;
+    }
+    .premium-report .date-badge--titre,
     .premium-report .date-titre {
-      background: rgba(45,91,255,0.12);
-      color: var(--color-accent);
+      background: #FEF3C7;
+      color: #92400E;
     }
+    .premium-report .date-badge--url,
     .premium-report .date-url {
-      background: rgba(217,119,6,0.12);
-      color: var(--color-warning);
+      background: #DBEAFE;
+      color: #1E40AF;
     }
+    .premium-report .date-badge--contenu,
     .premium-report .date-contenu {
-      background: rgba(107,102,96,0.12);
+      background: #F3F4F6;
+      color: #374151;
+    }
+    .premium-report .date-values {
       color: var(--color-text-secondary);
+      font-size: 13px;
     }
     .premium-report .opportunity-panel {
       display: grid;
@@ -1436,6 +1596,13 @@ def render_report_styles() -> str:
     .premium-report .appendix-head {
       grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
+    }
+    .premium-report .annexe-actions {
+      display: flex;
+      justify-content: center;
+      gap: var(--space-sm);
+      flex-wrap: wrap;
+      padding: var(--space-xl) 0 0;
     }
     .premium-report .annexe-toggle {
       border: 0;
@@ -1479,6 +1646,34 @@ def render_report_styles() -> str:
       min-width: 880px;
       border-collapse: collapse;
       font-size: 13px;
+    }
+    .premium-report .annexe-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .premium-report .annexe-table th {
+      text-align: left;
+      padding: 8px 12px;
+      background: var(--color-bg);
+      border-bottom: 2px solid var(--color-border);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--color-text-secondary);
+    }
+    .premium-report .annexe-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--color-border);
+      vertical-align: top;
+    }
+    .premium-report .annexe-table tr:hover td {
+      background: var(--color-bg);
+    }
+    .premium-report .points-releves {
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      max-width: 300px;
     }
     .premium-report th,
     .premium-report td {
@@ -1552,7 +1747,6 @@ def render_report_styles() -> str:
         page-break-before: auto;
         break-before: auto;
       }
-      .premium-report .executive-grid,
       .premium-report .timeline,
       .premium-report .matrix-grid,
       .premium-report .secondary-metrics,
@@ -1562,15 +1756,37 @@ def render_report_styles() -> str:
       .premium-report .card,
       .premium-report .priority-page-card,
       .premium-report .metric-card,
+      .premium-report .metriques-grid,
+      .premium-report .metrique-card,
       .premium-report .matrix-quadrant,
       .premium-report .matrix-action {
         page-break-inside: avoid;
         break-inside: avoid;
       }
+      .premium-report .synthese {
+        page-break-before: always;
+        page-break-inside: avoid;
+        break-before: page;
+        break-inside: avoid;
+      }
+      .premium-report .synthese-texte {
+        page-break-after: auto;
+        break-after: auto;
+      }
+      .premium-report .synthese-metriques {
+        page-break-before: auto;
+        page-break-inside: avoid;
+        break-before: auto;
+        break-inside: avoid;
+      }
       .premium-report .annexe,
+      .premium-report .annexe-actions,
       .premium-report .annexe-toggle,
       .premium-report button {
         display: none !important;
+      }
+      .print-with-annexe .premium-report .annexe {
+        display: grid !important;
       }
       .premium-report .card,
       .premium-report .timeline-step,
