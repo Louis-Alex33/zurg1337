@@ -199,6 +199,9 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
         if not file_path.exists():
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
             return
+        if file_path.suffix.lower() == ".html":
+            self._send_html(file_path.read_text("utf-8", errors="ignore"))
+            return
         self._send_html(render_file_page(file_path, variant=variant, lang=lang))
 
     def _serve_download(self, requested_path: str) -> None:

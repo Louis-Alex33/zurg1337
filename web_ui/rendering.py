@@ -202,11 +202,12 @@ def render_job_page(job_id: str) -> str:
     }.get(job.status, job.status)
     elapsed = format_duration(job_elapsed_seconds(job))
     runtime_hint = estimate_job_duration(job)
+    display_outputs = prioritize_job_outputs(job)
     outputs = "".join(
         f'<li><a href="/files?path={quote(path)}">{html.escape(path)}</a></li>'
-        for path in job.outputs
+        for path in display_outputs
     ) or "<li>Aucune sortie declaree</li>"
-    previews = "".join(render_data_preview(path, title=path) for path in job.outputs[:2])
+    previews = render_job_output_previews(job, display_outputs)
     summary = "".join(f"<li>{html.escape(line)}</li>" for line in job.summary_lines) or "<li>Pas de resume.</li>"
     log_block = html.escape(job.log.strip() or "Aucun log capture.")
     error_block = f'<div class="error-box">{html.escape(job.error)}</div>' if job.error else ""
@@ -279,6 +280,51 @@ def render_job_page(job_id: str) -> str:
     <div class="grid two">{previews}</div>
     """
     return page_shell(f"Job {job.job_id}", content)
+
+
+def prioritize_job_outputs(job: JobRecord) -> list[str]:
+    if job.kind != "gsc":
+        return job.outputs
+    ordered: list[str] = []
+    for suffix in (".html", ".csv", ".json"):
+        path = first_output_matching(job.outputs, suffix)
+        if path and path not in ordered:
+            ordered.append(path)
+    ordered.extend(path for path in job.outputs if path not in ordered)
+    return ordered
+
+
+def render_job_output_previews(job: JobRecord, display_outputs: list[str]) -> str:
+    if job.kind == "gsc":
+        html_report = first_output_matching(display_outputs, ".html")
+        csv_report = first_output_matching(display_outputs, ".csv")
+        cards: list[str] = []
+        if html_report:
+            cards.append(render_gsc_report_callout(html_report))
+        if csv_report:
+            cards.append(render_data_preview(csv_report, title=csv_report))
+        return "".join(cards)
+    return "".join(render_data_preview(path, title=path) for path in display_outputs[:2])
+
+
+def render_gsc_report_callout(relative_path: str) -> str:
+    exists_note = ""
+    if not (_root_dir() / relative_path).exists():
+        exists_note = f"<p class='muted'>Le fichier {html.escape(relative_path)} n'existe pas encore.</p>"
+    return f"""
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Plan d'action GSC</h2>
+          <p class="section-intro">C'est la sortie principale du job: elle regroupe les pages a traiter, les snippets faibles, les pages proches d'un gain et les chevauchements a verifier.</p>
+        </div>
+        <div class="panel-tools">
+          <a class="button" href="/files?path={quote(relative_path)}">Ouvrir le rapport</a>
+        </div>
+      </div>
+      {exists_note}
+    </section>
+    """
 
 
 def render_job_next_steps(job: JobRecord) -> str:

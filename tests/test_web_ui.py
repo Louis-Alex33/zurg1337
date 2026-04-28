@@ -185,6 +185,21 @@ class WebUITests(unittest.TestCase):
         self.assertIn("ouvrir le recap des audits", page)
         self.assertIn("le rapport complet du domaine", page)
 
+    def test_render_gsc_job_page_promotes_html_report(self) -> None:
+        job = create_job("gsc", {})
+        job.status = "done"
+        job.outputs = ["reports/gsc_report.csv", "reports/gsc_report.json", "reports/gsc_report.html"]
+
+        page = render_job_page(job.job_id)
+
+        html_index = page.find("reports/gsc_report.html")
+        csv_index = page.find("reports/gsc_report.csv")
+        self.assertNotEqual(html_index, -1)
+        self.assertNotEqual(csv_index, -1)
+        self.assertLess(html_index, csv_index)
+        self.assertIn("Plan d'action GSC", page)
+        self.assertIn("Ouvrir le rapport", page)
+
     def test_request_job_cancel_marks_running_job_and_recent_cards_show_it(self) -> None:
         with JOB_LOCK:
             JOBS.clear()
