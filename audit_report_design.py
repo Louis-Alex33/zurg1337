@@ -12,6 +12,54 @@ from urllib.parse import urlparse
 DEFAULT_TOOL_NAME = "AuditSEO Pro"
 DEFAULT_TOOL_TAGLINE = "L'audit SEO indépendant"
 DEFAULT_CONTACT_CTA = "contact@monagence.fr"
+DEFAULT_ANALYSTE_NOM = "Consultant SEO"
+DEFAULT_ANALYSTE_TITRE = "Consultant SEO indépendant"
+
+DEFAULT_OFFERS = [
+    {
+        "nom": "Audit ponctuel",
+        "prix": "149€",
+        "periode": "/ rapport",
+        "mise_en_avant": False,
+        "features": [
+            "1 rapport complet",
+            "3 pages prioritaires identifiées",
+            "Plan d'action 30/60/90j",
+        ],
+    },
+    {
+        "nom": "Suivi mensuel",
+        "prix": "249€",
+        "periode": "/ mois",
+        "mise_en_avant": True,
+        "features": [
+            "1 audit par mois",
+            "Suivi de progression",
+            "Briefs éditoriaux inclus",
+            "1 appel de 30min",
+        ],
+    },
+    {
+        "nom": "Accompagnement",
+        "prix": "Sur devis",
+        "periode": "",
+        "mise_en_avant": False,
+        "features": [
+            "Audit + rédaction",
+            "Gestion de contenu",
+            "Reporting mensuel",
+        ],
+    },
+]
+
+EFFORT_MAP = {
+    ("page", "court"): (1, 2, "1 à 2h de travail éditorial"),
+    ("page", "moyen"): (2, 4, "2 à 4h de travail éditorial"),
+    ("page", "long"): (3, 6, "3 à 6h de travail éditorial"),
+    ("article", "court"): (2, 3, "2 à 3h de rédaction"),
+    ("article", "moyen"): (3, 5, "3 à 5h de rédaction"),
+    ("article", "long"): (4, 8, "4 à 8h de rédaction"),
+}
 
 FRENCH_MONTHS = {
     1: "janvier",
@@ -129,10 +177,30 @@ def prepare_audit_report_context(source: Any, *, overrides: dict[str, Any] | Non
     domain = str(data.get("domain") or "Domaine audité")
     pages_analysees = get_int(data, "pages_analysees", get_int(data, "pages_crawled", get_int(summary, "pages_crawled", len(pages))))
     pages_erreur = get_int(data, "pages_erreur", get_int(summary, "pages_with_errors", 0))
+    signal_principal = str(data.get("signal_principal") or build_primary_signal(summary, business_signals))
+    pages_prioritaires = normalize_priority_pages(data.get("pages_prioritaires") or top_pages, pages_by_url)
+    dirigeant_defaults = build_dirigeant_texts(
+        domain=domain,
+        score=score,
+        pages_analysees=pages_analysees,
+        contenus_utiles=get_int(data, "contenus_utiles", get_int(summary, "content_like_pages", 0)),
+        score_moyen_page=get_int(data, "score_moyen_page", get_int(summary, "avg_page_health_score", 0)),
+        signal_principal=signal_principal,
+        dates_a_verifier=get_int(data, "dates_a_verifier", get_int(summary, "dated_content_signals", len(dated_content))),
+        pages_prioritaires=pages_prioritaires,
+    )
+    dirigeant_overrides = as_dict(data.get("dirigeant"))
+    benchmark = normalize_benchmark(data.get("benchmark"))
+    benchmark_disponible = get_bool(data.get("benchmark_disponible"), default=bool(benchmark)) and bool(benchmark)
+    offres_source = data.get("offres") if "offres" in data else DEFAULT_OFFERS
     context = {
         "tool_name": str(data.get("tool_name") or DEFAULT_TOOL_NAME),
         "tool_tagline": str(data.get("tool_tagline") or DEFAULT_TOOL_TAGLINE),
         "contact_cta": str(data.get("contact_cta") or DEFAULT_CONTACT_CTA),
+        "analyste_nom": str(data.get("analyste_nom") or DEFAULT_ANALYSTE_NOM),
+        "analyste_titre": str(data.get("analyste_titre") or DEFAULT_ANALYSTE_TITRE),
+        "analyste_linkedin": str(data.get("analyste_linkedin") or ""),
+        "analyste_photo": str(data.get("analyste_photo") or ""),
         "domain": domain,
         "audit_date": str(data.get("audit_date") or format_audit_date(str(data.get("audited_at") or ""))),
         "score_global": score,
@@ -150,16 +218,23 @@ def prepare_audit_report_context(source: Any, *, overrides: dict[str, Any] | Non
         "pages_peu_reliees": get_int(data, "pages_peu_reliees", get_int(summary, "weak_internal_linking_pages", 0)),
         "sujets_trop_proches": get_int(data, "sujets_trop_proches", get_int(summary, "possible_content_overlap_pairs", 0)),
         "dates_a_verifier": get_int(data, "dates_a_verifier", get_int(summary, "dated_content_signals", len(dated_content))),
-        "signal_principal": str(data.get("signal_principal") or build_primary_signal(summary, business_signals)),
+        "signal_principal": signal_principal,
+        "resume_dirigeant": str(data.get("resume_dirigeant") or dirigeant_overrides.get("resume_dirigeant") or dirigeant_defaults["resume_dirigeant"]),
+        "ou_vous_en_etes": str(data.get("ou_vous_en_etes") or dirigeant_overrides.get("ou_vous_en_etes") or dirigeant_defaults["ou_vous_en_etes"]),
+        "risque_attente": str(data.get("risque_attente") or dirigeant_overrides.get("risque_attente") or dirigeant_defaults["risque_attente"]),
+        "recommandation_courte": str(data.get("recommandation_courte") or dirigeant_overrides.get("recommandation_courte") or dirigeant_defaults["recommandation_courte"]),
+        "benchmark_disponible": benchmark_disponible,
+        "benchmark": benchmark,
         "ce_qui_fonctionne": list_or_default(data.get("ce_qui_fonctionne"), build_strengths(summary, pages_analysees, score)),
         "points_attention": list_or_default(data.get("points_attention"), build_attention_points(summary, business_signals, data)),
         "plan_action": as_dict(data.get("plan_action")) or build_plan_action(summary, top_pages),
         "matrice": normalize_matrix(as_dict(data.get("matrice")) or build_matrix(summary, top_pages)),
-        "pages_prioritaires": normalize_priority_pages(data.get("pages_prioritaires") or top_pages, pages_by_url),
+        "pages_prioritaires": pages_prioritaires,
         "signaux": normalize_signals(data.get("signaux") or dated_content),
         "opportunites": list_or_default(data.get("opportunites"), build_editorial_opportunities(summary, top_pages)),
         "urls_crawlees": normalize_crawled_urls(data.get("urls_crawlees") or pages),
         "methode": as_dict(data.get("methode")) or build_method(data, summary),
+        "offres": normalize_offers(offres_source),
     }
     context["gauge"] = score_gauge_values(score)
     context["actions_30j"] = build_conclusion_actions(context)
@@ -172,11 +247,14 @@ def render_report_body(context: dict[str, Any]) -> str:
     return f"""
 <main class="premium-report">
   {render_cover(context)}
+  {render_dirigeant_summary(context)}
   {render_executive_summary(context)}
+  {render_benchmark_section(context)}
   {render_action_plan(context)}
   {priority_pages}
   {signals}
   {render_final_section(context)}
+  {render_method_about(context)}
   {render_appendix(context)}
 </main>"""
 
@@ -212,6 +290,40 @@ def render_cover(context: dict[str, Any]) -> str:
       </div>
     </div>
     <footer>Rapport confidentiel — préparé pour {escape(context["domain"])}</footer>
+  </section>"""
+
+
+def render_dirigeant_summary(context: dict[str, Any]) -> str:
+    score = int(context["score_global"])
+    return f"""
+  <section class="report-page section-dirigeant">
+    <div class="section-label">POUR LE DIRIGEANT</div>
+    <div class="dirigeant-card">
+      <div class="dirigeant-header">
+        <div class="dirigeant-score-bloc">
+          <span class="dirigeant-score-value {score_color_class(score)}">{score}/100</span>
+          <span class="dirigeant-score-label">état général du site</span>
+        </div>
+        <div class="dirigeant-phrase">{escape(context["resume_dirigeant"])}</div>
+      </div>
+      <div class="dirigeant-trois-colonnes">
+        <div class="dirigeant-col">
+          <div class="dirigeant-col-icon">📍</div>
+          <div class="dirigeant-col-title">Où vous en êtes</div>
+          <div class="dirigeant-col-text">{escape(context["ou_vous_en_etes"])}</div>
+        </div>
+        <div class="dirigeant-col">
+          <div class="dirigeant-col-icon">⚠️</div>
+          <div class="dirigeant-col-title">Le risque si vous attendez</div>
+          <div class="dirigeant-col-text">{escape(context["risque_attente"])}</div>
+        </div>
+        <div class="dirigeant-col">
+          <div class="dirigeant-col-icon">✅</div>
+          <div class="dirigeant-col-title">Ce qu'on vous recommande</div>
+          <div class="dirigeant-col-text">{escape(context["recommandation_courte"])}</div>
+        </div>
+      </div>
+    </div>
   </section>"""
 
 
@@ -253,6 +365,51 @@ def render_executive_summary(context: dict[str, Any]) -> str:
         {''.join(render_metric_card(label, value, note, tone, warning=label == "Dates à vérifier") for label, value, note, tone in metrics)}
       </div>
     </div>
+  </section>"""
+
+
+def render_benchmark_section(context: dict[str, Any]) -> str:
+    benchmark = context.get("benchmark") or []
+    if not context.get("benchmark_disponible") or not benchmark:
+        return ""
+    competitor_rows = "".join(
+        f"""
+        <tr class="benchmark-row">
+          <td>{escape(item.get("domaine", "-"))}</td>
+          <td><span class="score-pill {score_color_class(get_int(item, "score_estime", 0))}">{get_int(item, "score_estime", 0)}/100</span></td>
+          <td>{get_int(item, "nb_pages_contenu", 0)} contenus</td>
+          <td>{escape(str(item.get("signal") or "-"))}</td>
+        </tr>"""
+        for item in benchmark[:3]
+    )
+    score = int(context["score_global"])
+    return f"""
+  <section class="report-page section-benchmark">
+    <div class="section-label">POSITIONNEMENT</div>
+    <h2>Votre position face à la concurrence</h2>
+    <p class="benchmark-intro">Comparaison indicative basée sur les signaux observés lors de l'analyse.</p>
+    <div class="benchmark-table-wrapper">
+      <table class="benchmark-table">
+        <thead>
+          <tr>
+            <th>Site</th>
+            <th>Score estimé</th>
+            <th>Volume de contenu</th>
+            <th>Signal principal</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="benchmark-row benchmark-row--vous">
+            <td><strong>{escape(context["domain"])}</strong><span class="benchmark-vous-badge">vous</span></td>
+            <td><span class="score-pill {score_color_class(score)}">{score}/100</span></td>
+            <td>{int(context["contenus_utiles"])} contenus</td>
+            <td>{escape(context["signal_principal"])}</td>
+          </tr>
+          {competitor_rows}
+        </tbody>
+      </table>
+    </div>
+    <p class="benchmark-disclaimer">Les données concurrentes sont des estimations indicatives issues d'une analyse de surface.</p>
   </section>"""
 
 
@@ -376,9 +533,15 @@ def render_priority_pages(pages: list[dict[str, Any]]) -> str:
           <p class="label fiche-section-label">Angle possible</p>
           <p>{escape(str(page.get("angle") or "Clarifier la promesse et renforcer l'intention principale."))}</p>
         </section>
-        <div class="impact-effort-row">
-          <span>Effort : {escape(str(page.get("effort") or "moyen"))}</span>
-          <span>Impact : {escape(str(page.get("impact") or "moyen"))}</span>
+        <div class="fiche-meta-bas">
+          <div class="fiche-effort-temps">
+            <span class="fiche-meta-icon">⏱</span>
+            <span>{escape(str(page.get("effort_temps") or get_effort_label(str(page.get("type") or "page"), get_int(page, "mots", 0))))}</span>
+          </div>
+          <div class="fiche-badges-ei impact-effort-row">
+            <span class="badge badge--effort">Effort : {escape(str(page.get("effort") or "moyen"))}</span>
+            <span class="badge badge--impact">Impact : {escape(str(page.get("impact") or "moyen"))}</span>
+          </div>
         </div>
       </article>"""
         )
@@ -556,10 +719,92 @@ def render_final_section(context: dict[str, Any]) -> str:
         </div>
       </div>
     </div>
+    {render_followup_offers(context)}
     <div class="rapport-footer">
       <span class="tool-name">{escape(context["tool_name"])}</span>
       <span class="footer-date">{escape(context["audit_date"])}</span>
       <span class="footer-mention">Rapport généré automatiquement — données issues d'un crawl réel</span>
+    </div>
+  </section>"""
+
+
+def render_followup_offers(context: dict[str, Any]) -> str:
+    offers = context.get("offres") or []
+    if not offers:
+        return ""
+    cards = []
+    for offer in offers:
+        featured = bool(offer.get("mise_en_avant"))
+        features = "".join(f"<li>{escape(str(feature))}</li>" for feature in offer.get("features", []))
+        badge = "<div class='offre-badge-featured'>Recommandé</div>" if featured else ""
+        card_class = "offre-card offre-card--featured" if featured else "offre-card"
+        cards.append(
+            f"""
+        <div class="{card_class}">
+          {badge}
+          <div class="offre-nom">{escape(offer.get("nom", "Formule"))}</div>
+          <div class="offre-prix">{escape(offer.get("prix", "-"))}<span class="offre-prix-periode">{escape(offer.get("periode", ""))}</span></div>
+          <ul class="offre-features">{features}</ul>
+        </div>"""
+        )
+    return f"""
+    <div class="offre-suivi">
+      <div class="offre-titre">Formules disponibles</div>
+      <div class="offre-grid">{''.join(cards)}</div>
+    </div>"""
+
+
+def render_method_about(context: dict[str, Any]) -> str:
+    method = as_dict(context.get("methode"))
+    pages_visitees = get_int(method, "pages_visitees", int(context["pages_analysees"]))
+    sitemap_urls = get_int(method, "sitemap_urls", 0)
+    analyste_nom = str(context["analyste_nom"])
+    analyste_photo = str(context.get("analyste_photo") or "")
+    analyste_linkedin = str(context.get("analyste_linkedin") or "")
+    analyste_visual = (
+        f'<img src="{escape(analyste_photo)}" alt="{escape(analyste_nom)}" class="analyste-photo">'
+        if analyste_photo
+        else f'<div class="analyste-avatar">{escape((analyste_nom.strip() or "A")[0].upper())}</div>'
+    )
+    linkedin = (
+        f'<a href="{escape(analyste_linkedin)}" class="analyste-linkedin" target="_blank" rel="noreferrer">Voir le profil LinkedIn →</a>'
+        if analyste_linkedin
+        else ""
+    )
+    return f"""
+  <section class="report-page section-methode">
+    <div class="section-label">MÉTHODE</div>
+    <div class="methode-grid">
+      <div class="methode-col">
+        <h2>Ce qui a été analysé</h2>
+        <ul class="methode-list">
+          <li><span class="methode-bullet">→</span><span><strong>{pages_visitees} pages</strong> crawlées depuis l'accueil et le sitemap</span></li>
+          <li><span class="methode-bullet">→</span><span>Réponses HTTP, redirections, temps de chargement</span></li>
+          <li><span class="methode-bullet">→</span><span>Titres, descriptions, structure des contenus</span></li>
+          <li><span class="methode-bullet">→</span><span>Dates visibles dans les titres, URLs et contenus</span></li>
+          <li><span class="methode-bullet">→</span><span>Maillage interne et accessibilité des pages</span></li>
+        </ul>
+        <div class="methode-limites">
+          <strong>Limites de cette analyse</strong>
+          <p>Ce rapport s'appuie sur un crawl de surface. Il ne couvre pas les données Search Console, les backlinks, ni les performances Core Web Vitals en conditions réelles. {pages_visitees} pages analysées sur {sitemap_urls} détectées dans le sitemap.</p>
+        </div>
+      </div>
+      <div class="methode-col">
+        <h2>Préparé par</h2>
+        <div class="analyste-card">
+          {analyste_visual}
+          <div class="analyste-info">
+            <div class="analyste-nom">{escape(analyste_nom)}</div>
+            <div class="analyste-titre">{escape(context["analyste_titre"])}</div>
+            {linkedin}
+          </div>
+        </div>
+        <div class="outil-card">
+          <div class="outil-nom">{escape(context["tool_name"])}</div>
+          <div class="outil-description">{escape(context["tool_tagline"])}</div>
+          <div class="outil-meta">Rapport généré le {escape(context["audit_date"])}</div>
+        </div>
+      </div>
     </div>
   </section>"""
 
@@ -715,6 +960,7 @@ def normalize_priority_pages(items: Any, pages_by_url: dict[str, dict[str, Any]]
         score = raw_score if raw_score >= 0 else 75
         word_count = get_int(item, "mots", get_int(item, "word_count", get_int(details, "word_count", 0)))
         priority_score = get_int(item, "priority_score", 0)
+        page_type = str(item.get("type") or item.get("page_type") or details.get("page_type") or "page")
         normalized.append(
             {
                 "slug": str(item.get("slug") or slug_from_url(url)),
@@ -722,13 +968,14 @@ def normalize_priority_pages(items: Any, pages_by_url: dict[str, dict[str, Any]]
                 "url": url,
                 "score": score,
                 "priorite": str(item.get("priorite") or priority_label(priority_score, score)),
-                "type": str(item.get("type") or item.get("page_type") or details.get("page_type") or "page"),
+                "type": page_type,
                 "mots": word_count,
                 "pourquoi": str(item.get("pourquoi") or ", ".join(reasons[:3]) or "Page prioritaire du crawl."),
                 "observation": str(item.get("observation") or build_page_observation(item, details, word_count)),
                 "action": str(item.get("action") or page_action_from_reasons(reasons)),
                 "angle": str(item.get("angle") or page_angle(url, details)),
                 "effort": str(item.get("effort") or page_effort(reasons)),
+                "effort_temps": str(item.get("effort_temps") or get_effort_label(page_type, word_count)),
                 "impact": str(item.get("impact") or page_impact(priority_score, reasons)),
             }
         )
@@ -788,6 +1035,159 @@ def normalize_matrix(matrix: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
                 }
             )
     return normalized
+
+
+def normalize_benchmark(items: Any) -> list[dict[str, Any]]:
+    normalized = []
+    for raw in items if isinstance(items, list) else []:
+        item = as_dict(raw)
+        domaine = str(item.get("domaine") or item.get("domain") or item.get("site") or "").strip()
+        if not domaine:
+            continue
+        normalized.append(
+            {
+                "domaine": domaine,
+                "score_estime": clamp_score(get_int(item, "score_estime", get_int(item, "score", 0))),
+                "nb_pages_contenu": get_int(item, "nb_pages_contenu", get_int(item, "content_like_pages", 0)),
+                "signal": str(item.get("signal") or "Signal à vérifier"),
+            }
+        )
+    return normalized[:3]
+
+
+def normalize_offers(items: Any) -> list[dict[str, Any]]:
+    normalized = []
+    for raw in items if isinstance(items, list) else []:
+        item = as_dict(raw)
+        features = [str(feature) for feature in item.get("features", []) if str(feature).strip()] if isinstance(item.get("features"), list) else []
+        if not item.get("nom") and not item.get("prix"):
+            continue
+        normalized.append(
+            {
+                "nom": str(item.get("nom") or "Formule"),
+                "prix": str(item.get("prix") or "-"),
+                "periode": str(item.get("periode") or ""),
+                "mise_en_avant": get_bool(item.get("mise_en_avant"), default=False),
+                "features": features,
+            }
+        )
+    return normalized
+
+
+def build_dirigeant_texts(
+    *,
+    domain: str,
+    score: int,
+    pages_analysees: int,
+    contenus_utiles: int,
+    score_moyen_page: int,
+    signal_principal: str,
+    dates_a_verifier: int,
+    pages_prioritaires: list[dict[str, Any]],
+) -> dict[str, str]:
+    simple_signal = plain_business_signal(signal_principal)
+    if score >= 90:
+        opening = "Votre site est dans un bon état général."
+    elif score >= 75:
+        opening = "Votre site part d'une base saine, avec quelques reprises utiles à prévoir."
+    else:
+        opening = "Votre site montre plusieurs points faciles à améliorer sans refonte complète."
+
+    priority_pages = pages_prioritaires[:3]
+    page_count = len(priority_pages) or min(3, max(1, contenus_utiles))
+    min_hours, max_hours = estimate_total_effort(priority_pages)
+    if priority_pages:
+        page_word = "page" if page_count == 1 else "pages"
+        recommendation = (
+            f"Reprendre {page_count} {page_word} en priorité. Effort estimé : {min_hours} à {max_hours}h au total, "
+            "pour améliorer la clarté et la fraîcheur sous 30 à 60 jours."
+        )
+    else:
+        recommendation = (
+            "Valider les pages commerciales clés avant d'engager un gros chantier. "
+            "Effort estimé : 2 à 4h pour cadrer les premières priorités."
+        )
+
+    if dates_a_verifier:
+        risk = (
+            "Des pages qui semblent anciennes peuvent réduire la confiance des visiteurs. "
+            "Plus on attend, plus cette impression peut s'installer."
+        )
+    elif pages_prioritaires:
+        risk = (
+            "Les pages à reprendre peuvent continuer à laisser filer des demandes utiles. "
+            "Le risque principal est de repousser des corrections simples."
+        )
+    else:
+        risk = (
+            "Le risque immédiat reste limité, mais une relecture régulière évite que le site vieillisse sans signal visible."
+        )
+
+    return {
+        "resume_dirigeant": f"{opening} Le principal frein aujourd'hui : {simple_signal}. Ce point peut être traité par étapes, sans refaire tout le site.",
+        "ou_vous_en_etes": f"{pages_analysees} pages analysées sur {domain}, dont {contenus_utiles} contenus exploitables. Le score moyen des pages est de {score_moyen_page}/100.",
+        "risque_attente": risk,
+        "recommandation_courte": recommendation,
+    }
+
+
+def plain_business_signal(signal: str) -> str:
+    text = signal.lower()
+    if "date" in text or "ancien" in text:
+        return "certaines pages donnent une impression de contenu ancien"
+    if "maillage" in text or "lien" in text or "reli" in text:
+        return "certaines pages importantes sont encore trop isolées"
+    if "contenu" in text and ("léger" in text or "leger" in text or "enrichir" in text):
+        return "certaines pages ne donnent pas encore assez d'informations"
+    if "proche" in text or "concurr" in text or "même intention" in text:
+        return "plusieurs pages semblent parler du même sujet"
+    if "titre" in text or "description" in text:
+        return "certains intitulés visibles doivent être clarifiés"
+    if "noindex" in text or "canonical" in text or "robots" in text:
+        return "certaines pages doivent être vérifiées avant d'être mises en avant"
+    cleaned = signal.strip().rstrip(".")
+    return cleaned[:1].lower() + cleaned[1:] if cleaned else "les priorités doivent être clarifiées"
+
+
+def estimate_total_effort(pages: list[dict[str, Any]]) -> tuple[int, int]:
+    if not pages:
+        return (2, 4)
+    minimum = 0
+    maximum = 0
+    for page in pages[:3]:
+        low, high = get_effort_bounds(str(page.get("type") or "page"), get_int(page, "mots", 0))
+        minimum += low
+        maximum += high
+    return (max(1, minimum), max(2, maximum))
+
+
+def get_effort_label(page_type: str, mots: int) -> str:
+    _, _, label = get_effort_entry(page_type, mots)
+    return label
+
+
+def get_effort_bounds(page_type: str, mots: int) -> tuple[int, int]:
+    minimum, maximum, _ = get_effort_entry(page_type, mots)
+    return minimum, maximum
+
+
+def get_effort_entry(page_type: str, mots: int) -> tuple[int, int, str]:
+    if mots < 500:
+        longueur = "court"
+    elif mots < 1200:
+        longueur = "moyen"
+    else:
+        longueur = "long"
+    key = (normalize_effort_page_type(page_type), longueur)
+    return EFFORT_MAP.get(key, (2, 4, "2 à 4h estimées"))
+
+
+def normalize_effort_page_type(page_type: str) -> str:
+    lowered = page_type.strip().lower()
+    article_markers = ("article", "blog", "post", "guide", "actualite", "actualité", "news")
+    if any(marker in lowered for marker in article_markers):
+        return "article"
+    return "page"
 
 
 def build_strengths(summary: dict[str, Any], pages: int, score: int) -> list[str]:
@@ -1061,6 +1461,20 @@ def get_int(mapping: dict[str, Any], key: str, default: int = 0) -> int:
         return default
 
 
+def get_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "oui", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "non", "off"}:
+            return False
+    return bool(value)
+
+
 def list_or_default(value: Any, default: list[str]) -> list[str]:
     if isinstance(value, list):
         cleaned = [str(item) for item in value if str(item).strip()]
@@ -1315,6 +1729,7 @@ def render_report_styles() -> str:
     .premium-report .urgency-badge,
     .premium-report .priority-badge,
     .premium-report .type-badge,
+    .premium-report .badge,
     .premium-report .page-tags span,
     .premium-report .impact-effort-row span {
       display: inline-flex;
@@ -1357,6 +1772,85 @@ def render_report_styles() -> str:
       color: var(--color-text-muted);
       font-size: 13px;
       text-align: center;
+    }
+    .premium-report .section-dirigeant {
+      break-before: page;
+      page-break-before: always;
+      align-content: start;
+    }
+    .premium-report .dirigeant-card {
+      background: var(--color-surface);
+      border: 2px solid var(--color-accent);
+      border-radius: 16px;
+      padding: var(--space-xl);
+      margin-top: var(--space-lg);
+      box-shadow: 0 10px 26px rgba(45,91,255,0.08);
+    }
+    .premium-report .dirigeant-header {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-xl);
+      margin-bottom: var(--space-xl);
+      padding-bottom: var(--space-xl);
+      border-bottom: 1px solid var(--color-border);
+    }
+    .premium-report .dirigeant-score-bloc {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+      background: var(--color-bg);
+      border-radius: 12px;
+      padding: var(--space-md) var(--space-lg);
+      min-width: 100px;
+    }
+    .premium-report .dirigeant-score-value {
+      background: transparent;
+      font-family: var(--font-display);
+      font-size: 40px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .premium-report .dirigeant-score-label {
+      margin-top: 4px;
+      color: var(--color-text-muted);
+      font-size: 11px;
+      line-height: 1.25;
+      text-align: center;
+    }
+    .premium-report .dirigeant-phrase {
+      color: var(--color-text-primary);
+      font-size: 16px;
+      font-weight: 500;
+      line-height: 1.6;
+    }
+    .premium-report .dirigeant-trois-colonnes {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: var(--space-lg);
+    }
+    .premium-report .dirigeant-col {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+    }
+    .premium-report .dirigeant-col-icon {
+      font-size: 24px;
+      line-height: 1;
+    }
+    .premium-report .dirigeant-col-title {
+      color: var(--color-text-primary);
+      font-family: var(--font-display);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      line-height: 1.25;
+      text-transform: uppercase;
+    }
+    .premium-report .dirigeant-col-text {
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      line-height: 1.6;
     }
     .premium-report .executive-grid {
       display: grid;
@@ -1468,6 +1962,62 @@ def render_report_styles() -> str:
     }
     .premium-report .metrique-card.is-warning .metrique-value {
       color: var(--color-warning);
+    }
+    .premium-report .section-benchmark {
+      align-content: start;
+    }
+    .premium-report .benchmark-intro {
+      color: var(--color-text-secondary);
+      max-width: 660px;
+    }
+    .premium-report .benchmark-table-wrapper {
+      margin-top: var(--space-lg);
+      overflow-x: auto;
+    }
+    .premium-report .benchmark-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .premium-report .benchmark-table th {
+      background: var(--color-bg);
+      border-bottom: 2px solid var(--color-border);
+      color: var(--color-text-secondary);
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      padding: 10px 14px;
+      text-align: left;
+      text-transform: uppercase;
+    }
+    .premium-report .benchmark-table td {
+      border-bottom: 1px solid var(--color-border);
+      padding: 12px 14px;
+      vertical-align: middle;
+    }
+    .premium-report .benchmark-row--vous td {
+      background: var(--color-accent-light);
+      font-weight: 500;
+    }
+    .premium-report .benchmark-vous-badge {
+      display: inline-block;
+      margin-left: 6px;
+      border-radius: 4px;
+      background: var(--color-accent);
+      color: white;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      line-height: 1.4;
+      padding: 1px 6px;
+      text-transform: uppercase;
+    }
+    .premium-report .benchmark-disclaimer {
+      margin-top: var(--space-md);
+      color: var(--color-text-muted);
+      font-size: 11px;
+      font-style: italic;
     }
     .premium-report .timeline {
       position: relative;
@@ -1604,6 +2154,32 @@ def render_report_styles() -> str:
     .premium-report .impact-effort-row span {
       background: var(--color-bg);
       color: var(--color-text-secondary);
+    }
+    .premium-report .fiche-meta-bas {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: var(--space-md);
+      padding-top: var(--space-md);
+      border-top: 1px solid var(--color-border);
+      flex-wrap: wrap;
+      gap: var(--space-sm);
+    }
+    .premium-report .fiche-effort-temps {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--color-accent);
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .premium-report .fiche-meta-icon {
+      font-size: 16px;
+      line-height: 1;
+    }
+    .premium-report .fiche-badges-ei {
+      justify-content: flex-end;
     }
     .premium-report .page-reason,
     .premium-report .recommended-action {
@@ -1832,6 +2408,94 @@ def render_report_styles() -> str:
       text-decoration: underline;
       opacity: 0.85;
     }
+    .premium-report .offre-suivi {
+      margin-top: var(--space-xl);
+      padding-top: var(--space-xl);
+      border-top: 1px solid var(--color-border);
+    }
+    .premium-report .offre-titre {
+      margin-bottom: var(--space-lg);
+      color: var(--color-text-muted);
+      font-family: var(--font-display);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+    .premium-report .offre-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: var(--space-md);
+    }
+    .premium-report .offre-card {
+      position: relative;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: var(--space-lg);
+    }
+    .premium-report .offre-card--featured {
+      background: var(--color-surface);
+      border-color: var(--color-accent);
+      border-width: 2px;
+    }
+    .premium-report .offre-badge-featured {
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--color-accent);
+      color: white;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      line-height: 1.4;
+      padding: 2px 10px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .premium-report .offre-nom {
+      margin-bottom: var(--space-sm);
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    .premium-report .offre-prix {
+      margin-bottom: var(--space-md);
+      color: var(--color-accent);
+      font-family: var(--font-display);
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1.1;
+    }
+    .premium-report .offre-prix-periode {
+      margin-left: 4px;
+      color: var(--color-text-muted);
+      font-size: 13px;
+      font-weight: 400;
+    }
+    .premium-report .offre-features {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .premium-report .offre-features li + li {
+      margin-top: 0;
+    }
+    .premium-report .offre-features li::before {
+      content: "✓ ";
+      color: var(--color-success);
+      font-weight: 700;
+    }
     .premium-report .rapport-footer {
       margin-top: var(--space-xl);
       padding-top: var(--space-lg);
@@ -1843,6 +2507,124 @@ def render_report_styles() -> str:
       flex-wrap: wrap;
       font-size: 12px;
       color: var(--color-text-muted);
+    }
+    .premium-report .methode-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-2xl);
+      margin-top: var(--space-xl);
+    }
+    .premium-report .methode-col {
+      display: grid;
+      align-content: start;
+      gap: var(--space-lg);
+    }
+    .premium-report .methode-list {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 var(--space-xl);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-md);
+    }
+    .premium-report .methode-list li {
+      display: flex;
+      gap: var(--space-sm);
+      margin: 0;
+      color: var(--color-text-primary);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .premium-report .methode-bullet {
+      color: var(--color-accent);
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .premium-report .methode-limites {
+      background: var(--color-bg);
+      border-radius: 10px;
+      padding: var(--space-md);
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .premium-report .methode-limites strong {
+      display: block;
+      margin-bottom: var(--space-sm);
+      color: var(--color-text-muted);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+    .premium-report .analyste-card {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: var(--space-lg);
+    }
+    .premium-report .analyste-photo,
+    .premium-report .analyste-avatar {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .premium-report .analyste-photo {
+      object-fit: cover;
+    }
+    .premium-report .analyste-avatar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--color-accent);
+      color: white;
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 800;
+    }
+    .premium-report .analyste-nom {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .premium-report .analyste-titre {
+      margin-top: 2px;
+      color: var(--color-text-secondary);
+      font-size: 13px;
+    }
+    .premium-report .analyste-linkedin {
+      display: inline-block;
+      margin-top: var(--space-sm);
+      color: var(--color-accent);
+      font-size: 12px;
+      text-decoration: none;
+    }
+    .premium-report .outil-card {
+      background: var(--color-bg);
+      border-radius: 10px;
+      padding: var(--space-md);
+    }
+    .premium-report .outil-nom {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    .premium-report .outil-description {
+      margin-top: 2px;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+    }
+    .premium-report .outil-meta {
+      margin-top: var(--space-sm);
+      color: var(--color-text-muted);
+      font-size: 11px;
     }
     .premium-report .appendix-head {
       grid-template-columns: minmax(0, 1fr) auto;
@@ -2029,6 +2811,16 @@ def render_report_styles() -> str:
       .premium-report .metrique-value {
         font-size: 28px;
       }
+      .premium-report .dirigeant-card {
+        padding: var(--space-lg);
+        border-width: 1.5px;
+      }
+      .premium-report .dirigeant-trois-colonnes {
+        gap: var(--space-md);
+      }
+      .premium-report .dirigeant-phrase {
+        font-size: 14px;
+      }
       .premium-report .pages-prioritaires-grid {
         grid-template-columns: 1fr 1fr;
         gap: 16px;
@@ -2065,6 +2857,9 @@ def render_report_styles() -> str:
       }
       .premium-report .rapport-footer {
         margin-top: var(--space-lg);
+      }
+      .premium-report .offre-suivi {
+        display: none !important;
       }
       .premium-report .dates-table {
         font-size: 11px;
@@ -2137,9 +2932,16 @@ def render_report_styles() -> str:
       .premium-report .matrix-grid,
       .premium-report .priority-card-head,
       .premium-report .secondary-metrics,
+      .premium-report .dirigeant-trois-colonnes,
+      .premium-report .offre-grid,
+      .premium-report .methode-grid,
       .premium-report .method-grid,
       .premium-report .appendix-head {
         grid-template-columns: 1fr;
+      }
+      .premium-report .dirigeant-header,
+      .premium-report .analyste-card {
+        flex-direction: column;
       }
       .premium-report .priority-score-stack {
         justify-items: start;

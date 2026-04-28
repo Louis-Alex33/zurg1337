@@ -495,6 +495,100 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertIn("Les autres quadrants ne présentent pas d'action prioritaire", page)
         self.assertLess(page.find("Prochaines étapes"), page.find("Annexe technique"))
 
+    def test_premium_report_v4_commercial_sections_are_rendered_in_order(self) -> None:
+        page = render_premium_audit_report(
+            {
+                "domain": "example.com",
+                "audited_at": "2026-04-15T00:47:42",
+                "observed_health_score": 82,
+                "summary": {
+                    "pages_crawled": 24,
+                    "content_like_pages": 9,
+                    "pages_ok": 24,
+                    "avg_page_health_score": 79,
+                    "dated_content_signals": 2,
+                    "canonical_to_other_url_pages": 1,
+                },
+                "business_priority_signals": [
+                    {"signal": "Canonicals à vérifier", "severity": "HIGH", "count": 1}
+                ],
+                "pages_prioritaires": [
+                    {
+                        "url": "https://example.com/blog/test",
+                        "titre": "Page test",
+                        "type": "article",
+                        "mots": 600,
+                        "score": 76,
+                    }
+                ],
+                "benchmark_disponible": True,
+                "benchmark": [
+                    {
+                        "domaine": "concurrent1.fr",
+                        "score_estime": 88,
+                        "nb_pages_contenu": 120,
+                        "signal": "Contenu dense, bon maillage",
+                    }
+                ],
+                "methode": {"pages_visitees": 24, "sitemap_urls": 58},
+                "analyste_nom": "Jean Dupont",
+                "analyste_titre": "Consultant SEO indépendant",
+                "analyste_linkedin": "https://linkedin.com/in/jean-dupont",
+            }
+        )
+
+        self.assertIn("POUR LE DIRIGEANT", page)
+        self.assertIn("Où vous en êtes", page)
+        self.assertIn("certaines pages doivent être vérifiées", page)
+        self.assertIn("3 à 5h de rédaction", page)
+        self.assertIn("Votre position face à la concurrence", page)
+        self.assertIn("concurrent1.fr", page)
+        self.assertIn("benchmark-vous-badge", page)
+        self.assertIn("Jean Dupont", page)
+        self.assertIn("Limites de cette analyse", page)
+        self.assertIn("Formules disponibles", page)
+        self.assertIn("Suivi mensuel", page)
+        self.assertIn(".premium-report .offre-suivi", page)
+        self.assertIn("display: none !important", page)
+
+        dirigeant = page.find("POUR LE DIRIGEANT")
+        synthese = page.find("Synthèse exécutive")
+        benchmark = page.find("Votre position face à la concurrence")
+        plan = page.find("Plan d’action 30 / 60 / 90 jours")
+        conclusion = page.find("Prochaines étapes")
+        methode = page.find("MÉTHODE")
+        annexe = page.find("Annexe technique")
+
+        self.assertLess(dirigeant, synthese)
+        self.assertLess(synthese, benchmark)
+        self.assertLess(benchmark, plan)
+        self.assertLess(conclusion, methode)
+        self.assertLess(methode, annexe)
+
+        dirigeant_block = page[dirigeant:synthese]
+        self.assertNotIn("canonical", dirigeant_block.lower())
+        self.assertNotIn("noindex", dirigeant_block.lower())
+
+    def test_premium_report_v4_hides_benchmark_when_disabled(self) -> None:
+        page = render_premium_audit_report(
+            {
+                "domain": "example.com",
+                "observed_health_score": 82,
+                "benchmark_disponible": False,
+                "benchmark": [
+                    {
+                        "domaine": "concurrent1.fr",
+                        "score_estime": 88,
+                        "nb_pages_contenu": 120,
+                        "signal": "Contenu dense",
+                    }
+                ],
+            }
+        )
+
+        self.assertNotIn("Votre position face à la concurrence", page)
+        self.assertNotIn("concurrent1.fr", page)
+
     def test_build_report_can_disable_overlap_for_light_mode(self) -> None:
         home = AuditPage(
             url="https://example.com/",
