@@ -526,31 +526,31 @@ def render_audit_card() -> str:
 def render_gsc_card() -> str:
     return """
     <section class="panel accent-gold">
-      <div class="panel-head"><h2>GSC</h2><span class="badge">exports client</span></div>
-      <p class="card-lede">Cette card sert surtout si tu travailles deja avec un client et que tu as ses exports Google Search Console.</p>
-      <div class="card-tip">Si tu n'as pas de fichiers GSC, tu peux ignorer cette card pour l'instant.</div>
+      <div class="panel-head"><h2>Audit GSC</h2><span class="badge">plan d'action</span></div>
+      <p class="card-lede">Transforme un export Google Search Console en liste de pages a retravailler: gains rapides, pertes, CTR faible et chevauchements possibles.</p>
+      <div class="card-tip">Tu peux uploader directement le ZIP complet exporte par GSC. Le tool trouvera automatiquement <strong>Pages.csv</strong> et <strong>Requetes.csv</strong>.</div>
       <form method="post" action="/run/gsc" class="stack" enctype="multipart/form-data">
-        <label>Current CSV
-          <input type="text" name="current_csv" value="" placeholder="exports/pages_recent.csv">
+        <label>1. Export GSC recent
+          <input type="text" name="current_csv" value="" placeholder="exports/performance-search.zip ou exports/pages_recent.csv">
         </label>
-        <label>Upload current CSV
-          <input type="file" name="current_upload" accept=".csv,.tsv,.txt,text/csv">
+        <label>Uploader l'export GSC recent
+          <input type="file" name="current_upload" accept=".zip,.csv,.tsv,.txt,text/csv,application/zip">
         </label>
-        <p class="field-help">Export recent des pages depuis GSC. C'est le fichier principal. Si tu uploades un fichier ici, il remplace le chemin texte au-dessus.</p>
-        <label>Previous CSV
+        <p class="field-help">Obligatoire. Le plus simple: upload le ZIP complet de Search Console. Sinon, mets seulement le CSV Pages.</p>
+        <label>2. Export Pages precedent
           <input type="text" name="previous_csv" value="" placeholder="exports/pages_old.csv">
         </label>
-        <label>Upload previous CSV
-          <input type="file" name="previous_upload" accept=".csv,.tsv,.txt,text/csv">
+        <label>Uploader l'export Pages precedent
+          <input type="file" name="previous_upload" accept=".zip,.csv,.tsv,.txt,text/csv,application/zip">
         </label>
-        <p class="field-help">Export plus ancien pour comparer les baisses. Tu peux le laisser vide si tu n'en as pas.</p>
-        <label>Queries CSV
+        <p class="field-help">Optionnel. Mets un export Pages ancien, ou un ancien ZIP GSC, seulement si tu veux comparer deux periodes.</p>
+        <label>3. Export Requetes
           <input type="text" name="queries_csv" value="" placeholder="exports/queries.csv">
         </label>
-        <label>Upload queries CSV
+        <label>Uploader l'export Requetes
           <input type="file" name="queries_upload" accept=".csv,.tsv,.txt,text/csv">
         </label>
-        <p class="field-help">Export des requetes. Il enrichit l'analyse, mais reste optionnel.</p>
+        <p class="field-help">Optionnel. Si tu as uploadé un ZIP complet en 1, tu peux laisser ce champ vide: les requetes seront lues automatiquement.</p>
         <label>Site label
           <input type="text" name="site_name" value="">
         </label>
@@ -572,8 +572,8 @@ def render_gsc_card() -> str:
         <label>Output HTML
           <input type="text" name="output_html" value="reports/gsc_report.html">
         </label>
-        <p class="field-help">Le HTML est souvent le plus simple a relire ensuite. Le CSV et le JSON servent surtout a retravailler la sortie.</p>
-        <button class="button" type="submit">4. Analyser Des Exports GSC</button>
+        <p class="field-help">Ouvre d'abord le HTML: il est maintenant pense comme un plan d'action. Le CSV et le JSON restent la pour retraiter les donnees.</p>
+        <button class="button" type="submit">4. Creer Le Plan D'Action GSC</button>
       </form>
     </section>
     """

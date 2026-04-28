@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
+import io
 import json
 import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import asdict
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 from config import GSC_CANNIBAL_STOPWORDS, GSC_STRUCTURAL_SLUGS, GSC_TECHNICAL_URL_PATTERNS, GSC_TECHNICAL_URL_SUFFIXES
 from io_helpers import ensure_parent_dir
@@ -52,16 +56,19 @@ def run_gsc_analysis(
 ) -> list[GSCPageAnalysis]:
     current = parse_pages_csv(current_csv)
     previous = parse_pages_csv(previous_csv) if previous_csv else None
+    effective_queries_csv = queries_csv
+    if not effective_queries_csv and gsc_archive_contains(current_csv, "queries"):
+        effective_queries_csv = current_csv
     extra_stopwords = {word.strip().lower() for word in niche_stopwords or [] if word.strip()}
     if auto_niche_stopwords:
         extra_stopwords.update(derive_auto_stopwords(current))
     possible_overlap = (
         detect_possible_query_overlap(
             current,
-            parse_queries_csv(queries_csv),
+            parse_queries_csv(effective_queries_csv),
             extra_stopwords=extra_stopwords,
         )
-        if queries_csv
+        if effective_queries_csv
         else {}
     )
     results = analyze_pages(current=current, previous=previous, possible_overlap=possible_overlap)
@@ -69,7 +76,13 @@ def run_gsc_analysis(
     if output_json:
         write_json(results, output_json)
     if output_html:
-        write_html(results, output_html, site_name=site_name)
+        write_html(
+            results,
+            output_html,
+            site_name=site_name,
+            has_previous=bool(previous_csv),
+            has_queries=bool(effective_queries_csv),
+        )
     return results
 
 
@@ -79,8 +92,61 @@ def detect_delimiter(filepath: str) -> str:
     return "\t" if "\t" in first_line else ","
 
 
+def detect_delimiter_from_text(text: str) -> str:
+    first_line = text.splitlines()[0] if text.splitlines() else ""
+    return "\t" if "\t" in first_line else ","
+
+
+def gsc_archive_contains(filepath: str | None, kind: str) -> bool:
+    if not filepath or Path(filepath).suffix.lower() != ".zip":
+        return False
+    try:
+        with ZipFile(filepath) as archive:
+            return find_gsc_csv_member(archive, kind) is not None
+    except (BadZipFile, FileNotFoundError):
+        return False
+
+
+def read_gsc_csv_text(filepath: str, kind: str) -> str:
+    path = Path(filepath)
+    if path.suffix.lower() != ".zip":
+        return path.read_text(encoding="utf-8-sig")
+
+    try:
+        with ZipFile(path) as archive:
+            member = find_gsc_csv_member(archive, kind)
+            if not member:
+                raise CLIError(f"Impossible de trouver le CSV {kind} dans l'export ZIP: {filepath}")
+            return archive.read(member).decode("utf-8-sig", errors="replace")
+    except BadZipFile as exc:
+        raise CLIError(f"Export ZIP GSC illisible: {filepath}") from exc
+
+
+def find_gsc_csv_member(archive: ZipFile, kind: str) -> str | None:
+    for name in archive.namelist():
+        normalized = normalize_archive_name(Path(name).name)
+        if not normalized.endswith(".csv"):
+            continue
+        if kind == "pages" and ("pages" in normalized or "top pages" in normalized):
+            return name
+        if kind == "queries" and (
+            "requete" in normalized
+            or "requetes" in normalized
+            or "queries" in normalized
+            or "query" in normalized
+        ):
+            return name
+    return None
+
+
+def normalize_archive_name(name: str) -> str:
+    normalized = unicodedata.normalize("NFKD", name)
+    ascii_name = normalized.encode("ascii", "ignore").decode("ascii")
+    return ascii_name.strip().lower()
+
+
 def normalize_header(header: str) -> str:
-    value = header.strip().lower().replace("\ufeff", "")
+    value = strip_accents(header).strip().lower().replace("\ufeff", "")
     mapping = {
         "average position": "position",
         "clics": "clicks",
@@ -106,12 +172,18 @@ def normalize_header(header: str) -> str:
     return mapping.get(value, value)
 
 
+def strip_accents(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    return normalized.encode("ascii", "ignore").decode("ascii")
+
+
 def parse_pages_csv(filepath: str | None) -> list[GSCPageData]:
     if not filepath:
         return []
-    delimiter = detect_delimiter(filepath)
+    text = read_gsc_csv_text(filepath, "pages")
+    delimiter = detect_delimiter_from_text(text)
     pages: list[GSCPageData] = []
-    with Path(filepath).open("r", encoding="utf-8-sig") as handle:
+    with io.StringIO(text) as handle:
         reader = csv.DictReader(handle, delimiter=delimiter)
         if not reader.fieldnames:
             raise CLIError(f"CSV GSC vide ou illisible: {filepath}")
@@ -146,9 +218,10 @@ def parse_pages_csv(filepath: str | None) -> list[GSCPageData]:
 def parse_queries_csv(filepath: str | None) -> list[GSCQueryData]:
     if not filepath:
         return []
-    delimiter = detect_delimiter(filepath)
+    text = read_gsc_csv_text(filepath, "queries")
+    delimiter = detect_delimiter_from_text(text)
     queries: list[GSCQueryData] = []
-    with Path(filepath).open("r", encoding="utf-8-sig") as handle:
+    with io.StringIO(text) as handle:
         reader = csv.DictReader(handle, delimiter=delimiter)
         if not reader.fieldnames:
             raise CLIError(f"CSV GSC vide ou illisible: {filepath}")
@@ -451,84 +524,214 @@ def write_json(results: list[GSCPageAnalysis], output_path: str) -> Path:
     return output_file
 
 
-def write_html(results: list[GSCPageAnalysis], output_path: str, site_name: str = "") -> Path:
+def write_html(
+    results: list[GSCPageAnalysis],
+    output_path: str,
+    site_name: str = "",
+    has_previous: bool = False,
+    has_queries: bool = False,
+) -> Path:
     output_file = ensure_parent_dir(output_path)
     high = [item for item in results if item.priority == "HIGH"]
     medium = [item for item in results if item.priority == "MEDIUM"]
     dead = [item for item in results if item.priority == "DEAD"]
     overlap = [item for item in results if item.possible_overlap_queries]
     total_recoverable = sum(item.estimated_recoverable_clicks or 0 for item in results)
-    title = f"Rapport GSC - {site_name}" if site_name else "Rapport GSC"
+    declining = [
+        item
+        for item in results
+        if (item.click_delta is not None and item.click_delta < 0)
+        or (item.impression_delta is not None and item.impression_delta < 0)
+        or (item.position_delta is not None and item.position_delta > 1)
+    ]
+    ctr_opportunities = [
+        item
+        for item in results
+        if item.impressions >= 100
+        and item.estimated_recoverable_clicks
+        and any("CTR" in action or "title" in action.lower() for action in item.actions)
+    ]
+    near_page_one = [
+        item
+        for item in results
+        if 4 <= item.position <= 20 and item.impressions >= 50 and item.priority != "DEAD"
+    ]
+    title = f"Plan d'action GSC - {site_name}" if site_name else "Plan d'action GSC"
 
-    def render_rows(items: list[GSCPageAnalysis]) -> str:
+    def metric_delta(item: GSCPageAnalysis) -> str:
+        parts: list[str] = []
+        if item.click_delta is not None:
+            parts.append(f"Clics: {item.click_delta:+d}")
+        if item.impression_delta is not None:
+            parts.append(f"Impr.: {item.impression_delta:+d}")
+        if item.position_delta is not None:
+            direction = "moins bien" if item.position_delta > 0 else "mieux"
+            parts.append(f"Position: {item.position_delta:+.1f} ({direction})")
+        return " | ".join(parts) if parts else "Pas de comparaison fournie"
+
+    def action_summary(item: GSCPageAnalysis) -> str:
+        if item.actions:
+            return item.actions[0]
+        return "Verifier la page et choisir l'action editoriale la plus simple"
+
+    def explain_reason(item: GSCPageAnalysis) -> str:
+        reasons: list[str] = []
+        if item.estimated_recoverable_clicks:
+            reasons.append(item.impact_label)
+        if 4 <= item.position <= 10:
+            reasons.append("La page est deja proche du haut de page 1.")
+        elif 10 < item.position <= 20:
+            reasons.append("La page est en page 2 ou bas de page 1: le contenu et le maillage peuvent faire levier.")
+        if item.ctr < 0.02 and item.impressions >= 100:
+            reasons.append("Beaucoup d'impressions, mais peu de clics: le snippet merite d'etre retravaille.")
+        if item.click_delta is not None and item.click_delta < 0:
+            reasons.append("La page perd des clics par rapport a la periode precedente.")
+        if item.possible_overlap_queries:
+            reasons.append("Plusieurs pages semblent toucher des requetes proches: a verifier avant modification.")
+        return " ".join(reasons) or "Signal faible: garder en surveillance plutot que traiter en priorite."
+
+    def render_rows(items: list[GSCPageAnalysis], limit: int = 12) -> str:
         rows: list[str] = []
-        for item in items:
+        for item in items[:limit]:
+            actions = "".join(f"<li>{html.escape(action)}</li>" for action in item.actions[:3])
+            overlap_note = (
+                f"<p class='mini-note'>Requetes a verifier: {html.escape(' | '.join(item.possible_overlap_queries[:4]))}</p>"
+                if item.possible_overlap_queries
+                else ""
+            )
             rows.append(
                 "<tr>"
-                f"<td><a href='{item.url}'>{item.url}</a></td>"
-                f"<td>{item.priority}</td>"
-                f"<td>{item.score}</td>"
+                f"<td><a href='{html.escape(item.url)}'>{html.escape(item.url)}</a></td>"
+                f"<td><span class='pill pill-{html.escape(item.priority.lower())}'>{html.escape(item.priority)}</span></td>"
+                f"<td><strong>{html.escape(action_summary(item))}</strong><ul>{actions}</ul>{overlap_note}</td>"
+                f"<td>{html.escape(explain_reason(item))}</td>"
                 f"<td>{item.position:.1f}</td>"
                 f"<td>{item.ctr:.1%}</td>"
                 f"<td>{item.clicks}</td>"
                 f"<td>{item.impressions}</td>"
-                f"<td>{item.estimated_recoverable_clicks or ''}</td>"
-                f"<td>{item.impact_label}</td>"
+                f"<td>{item.estimated_recoverable_clicks or '-'}</td>"
+                f"<td>{html.escape(metric_delta(item))}</td>"
                 "</tr>"
             )
-        return "\n".join(rows)
+        return "\n".join(rows) or "<tr><td colspan='10'>Aucun element prioritaire dans cette section.</td></tr>"
 
-    html = f"""<!DOCTYPE html>
+    def render_section(title_text: str, intro: str, items: list[GSCPageAnalysis]) -> str:
+        return f"""
+  <section class="report-section">
+    <h2>{html.escape(title_text)}</h2>
+    <p class="section-intro">{html.escape(intro)}</p>
+    <table>
+      <tr>
+        <th>Page</th>
+        <th>Priorite</th>
+        <th>Action conseillee</th>
+        <th>Pourquoi cette page ressort</th>
+        <th>Pos.</th>
+        <th>CTR</th>
+        <th>Clics</th>
+        <th>Impr.</th>
+        <th>Clics recup.</th>
+        <th>Evolution</th>
+      </tr>
+      {render_rows(items)}
+    </table>
+  </section>
+"""
+
+    source_notes = [
+        "Export Pages recent: obligatoire, c'est la photo actuelle.",
+        "Export Pages precedent: fourni, donc les pertes et progressions sont comparees."
+        if has_previous
+        else "Export Pages precedent: non fourni, donc le rapport ne juge pas les pertes dans le temps.",
+        "Export Requetes: fourni, donc le rapport signale les chevauchements possibles."
+        if has_queries
+        else "Export Requetes: non fourni, donc le rapport reste centre sur les pages.",
+    ]
+    priority_items = sorted(
+        high + medium,
+        key=lambda item: (item.estimated_recoverable_clicks or 0, item.score),
+        reverse=True,
+    )
+    declining = sorted(
+        declining,
+        key=lambda item: (
+            item.click_delta if item.click_delta is not None else 0,
+            item.impression_delta if item.impression_delta is not None else 0,
+        ),
+    )
+    ctr_opportunities = sorted(
+        ctr_opportunities,
+        key=lambda item: item.estimated_recoverable_clicks or 0,
+        reverse=True,
+    )
+    near_page_one = sorted(near_page_one, key=lambda item: (item.position, -item.impressions))
+
+    html_doc = f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{title}</title>
   <style>
-    body {{ font-family: Arial, sans-serif; margin: 32px; color: #17212b; background: #f7f7f2; }}
-    h1, h2 {{ color: #17313e; }}
-    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }}
-    .card {{ background: white; border: 1px solid #d8ddd3; border-radius: 10px; padding: 16px; }}
-    table {{ width: 100%; border-collapse: collapse; background: white; }}
-    th, td {{ padding: 10px; border: 1px solid #d8ddd3; text-align: left; vertical-align: top; }}
-    th {{ background: #ecf0e3; }}
-    a {{ color: #0b5c76; }}
-    .note {{ background: #fff9e8; border-left: 4px solid #c38b00; padding: 12px 16px; margin-bottom: 24px; }}
+    :root {{ --ink: #18212f; --muted: #64748b; --line: #dbe3ea; --soft: #f6f8fb; --blue: #1d4ed8; --green: #047857; --amber: #92400e; --red: #991b1b; }}
+    body {{ font-family: Inter, Arial, sans-serif; margin: 0; color: var(--ink); background: #eef3f7; }}
+    main {{ max-width: 1180px; margin: 0 auto; padding: 32px 20px 56px; }}
+    h1 {{ margin: 0 0 10px; font-size: 2.4rem; line-height: 1; color: #0f172a; }}
+    h2 {{ margin: 0 0 8px; color: #0f172a; }}
+    a {{ color: var(--blue); word-break: break-word; }}
+    .hero {{ background: white; border: 1px solid var(--line); border-radius: 8px; padding: 24px; margin-bottom: 18px; }}
+    .lede {{ color: var(--muted); max-width: 760px; line-height: 1.55; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 12px; margin: 18px 0; }}
+    .card {{ background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }}
+    .card strong {{ display: block; font-size: 1.7rem; color: #0f172a; }}
+    .note {{ background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px 16px; margin: 16px 0 0; }}
+    .source-list {{ margin: 10px 0 0; padding-left: 20px; color: var(--muted); }}
+    .report-section {{ background: white; border: 1px solid var(--line); border-radius: 8px; padding: 20px; margin-top: 18px; overflow-x: auto; }}
+    .section-intro {{ color: var(--muted); margin: 0 0 14px; }}
+    table {{ width: 100%; border-collapse: collapse; min-width: 1080px; }}
+    th, td {{ padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 0.92rem; }}
+    th {{ background: var(--soft); color: #334155; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }}
+    ul {{ margin: 8px 0 0; padding-left: 18px; color: var(--muted); }}
+    .pill {{ display: inline-block; border-radius: 999px; padding: 3px 8px; font-size: 0.75rem; font-weight: 700; }}
+    .pill-high {{ background: #fee2e2; color: var(--red); }}
+    .pill-medium {{ background: #fef3c7; color: var(--amber); }}
+    .pill-low {{ background: #dbeafe; color: var(--blue); }}
+    .pill-dead {{ background: #e5e7eb; color: #374151; }}
+    .mini-note {{ margin: 8px 0 0; color: var(--amber); font-size: 0.84rem; }}
   </style>
 </head>
 <body>
-  <h1>{title}</h1>
-  <div class="note">
-    Les estimations ci-dessous portent sur la periode analysee dans les exports fournis.
-    Les cas de chevauchement page/requete sont des heuristiques de verification, pas une preuve de cannibalisation.
-  </div>
-  <div class="grid">
-    <div class="card"><strong>{len(results)}</strong><br>Pages analysees</div>
-    <div class="card"><strong>{len(high)}</strong><br>Priorite haute</div>
-    <div class="card"><strong>{len(medium)}</strong><br>Priorite moyenne</div>
-    <div class="card"><strong>{len(dead)}</strong><br>Pages a reevaluer</div>
-    <div class="card"><strong>{len(overlap)}</strong><br>Chevauchements possibles</div>
-    <div class="card"><strong>+{total_recoverable}</strong><br>Clics recuperables estimes</div>
-  </div>
-  <h2>Pages a traiter en priorite</h2>
-  <table>
-    <tr>
-      <th>URL</th>
-      <th>Priorite</th>
-      <th>Score</th>
-      <th>Position</th>
-      <th>CTR</th>
-      <th>Clics</th>
-      <th>Impressions</th>
-      <th>Clics recuperables</th>
-      <th>Lecture commerciale prudente</th>
-    </tr>
-    {render_rows(high + medium)}
-  </table>
+  <main>
+    <section class="hero">
+      <h1>{html.escape(title)}</h1>
+      <p class="lede">Ce rapport transforme les exports Google Search Console en liste de pages a traiter. Il sert a reperer les pages proches d'un gain, les pertes a verifier et les snippets qui recoivent des impressions sans convertir en clics.</p>
+      <div class="grid">
+        <div class="card"><strong>{len(results)}</strong>Pages analysees</div>
+        <div class="card"><strong>{len(high)}</strong>Actions prioritaires</div>
+        <div class="card"><strong>{len(declining)}</strong>Pages en baisse</div>
+        <div class="card"><strong>{len(ctr_opportunities)}</strong>Snippets a retravailler</div>
+        <div class="card"><strong>{len(overlap)}</strong>Chevauchements a verifier</div>
+        <div class="card"><strong>+{total_recoverable}</strong>Clics recuperables estimes</div>
+      </div>
+      <div class="note">
+        Les gains sont des ordres de grandeur sur la periode exportee, pas une promesse. Les chevauchements sont des signaux de verification, pas une preuve automatique de cannibalisation.
+        <ul class="source-list">
+          {''.join(f'<li>{html.escape(note)}</li>' for note in source_notes)}
+        </ul>
+      </div>
+    </section>
+
+    {render_section("1. Pages a traiter en premier", "Commence ici: ce sont les pages avec le meilleur compromis volume, position et gain estime.", priority_items)}
+    {render_section("2. Pages qui perdent du terrain", "A utiliser seulement si tu as fourni un export precedent. Ces pages meritent une verification de fraicheur, SERP, contenu et maillage.", declining)}
+    {render_section("3. Snippets a retravailler", "Pages avec impressions mais CTR sous l'attendu. Souvent: title, meta description, angle ou promesse trop floue.", ctr_opportunities)}
+    {render_section("4. Pages proches d'un gain SEO", "Pages deja positionnees entre 4 et 20: enrichissement, maillage interne et mise a jour peuvent etre plus rentables qu'une creation de contenu.", near_page_one)}
+    {render_section("5. Pages faibles a reevaluer", "Pages sans traction suffisante: verifier si elles doivent etre fusionnees, redirigees ou laissees hors priorite.", dead)}
+    {render_section("6. Chevauchements possibles", "A regarder manuellement avant de parler de cannibalisation. Le rapport signale seulement des requetes qui semblent toucher plusieurs URLs.", overlap)}
+  </main>
 </body>
 </html>"""
     with output_file.open("w", encoding="utf-8") as handle:
-        handle.write(html)
+        handle.write(html_doc)
     return output_file
 
 

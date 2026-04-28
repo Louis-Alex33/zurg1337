@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from zipfile import ZipFile
 
 from gsc import (
     analyze_pages,
@@ -108,6 +109,62 @@ class GSCAnalysisTests(unittest.TestCase):
 
         self.assertTrue(results)
         self.assertTrue(all(not item.possible_overlap_queries for item in results))
+
+    def test_run_gsc_analysis_writes_action_oriented_html(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            output_csv = root / "report.csv"
+            output_html = root / "report.html"
+
+            run_gsc_analysis(
+                current_csv="tests/fixtures/pages_recent.csv",
+                previous_csv="tests/fixtures/pages_old.csv",
+                queries_csv="tests/fixtures/queries.csv",
+                output_csv=str(output_csv),
+                output_html=str(output_html),
+                site_name="Example",
+            )
+
+            report = output_html.read_text(encoding="utf-8")
+
+        self.assertIn("Plan d'action GSC - Example", report)
+        self.assertIn("1. Pages a traiter en premier", report)
+        self.assertIn("3. Snippets a retravailler", report)
+        self.assertIn("Export Pages precedent: fourni", report)
+
+    def test_run_gsc_analysis_accepts_full_search_console_zip(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            archive = root / "performance-search.zip"
+            output_csv = root / "report.csv"
+            output_html = root / "report.html"
+
+            with ZipFile(archive, "w") as zip_file:
+                zip_file.writestr(
+                    "Pages.csv",
+                    "Pages les plus populaires,Clics,Impressions,CTR,Position\n"
+                    "https://example.com/guide-padel,12,1000,1.2%,8.4\n"
+                    "https://example.com/test-padel,4,500,0.8%,12\n",
+                )
+                zip_file.writestr(
+                    "Requêtes.csv",
+                    "Requêtes les plus fréquentes,Clics,Impressions,CTR,Position\n"
+                    "guide padel,10,800,1.25%,7\n",
+                )
+                zip_file.writestr("Pays.csv", "Pays,Clics,Impressions,CTR,Position\nFrance,1,2,50%,1\n")
+
+            results = run_gsc_analysis(
+                current_csv=str(archive),
+                output_csv=str(output_csv),
+                output_html=str(output_html),
+            )
+
+            report = output_html.read_text(encoding="utf-8")
+            csv_exists = output_csv.exists()
+
+        self.assertEqual(len(results), 2)
+        self.assertTrue(csv_exists)
+        self.assertIn("Export Requetes: fourni", report)
 
 
 if __name__ == "__main__":

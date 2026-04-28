@@ -11,7 +11,7 @@ from . import _root_dir
 
 ROOT_DIR = _root_dir()
 UPLOAD_DIR = "uploads/gsc"
-ALLOWED_UPLOAD_SUFFIXES = {".csv", ".tsv", ".txt"}
+ALLOWED_UPLOAD_SUFFIXES = {".csv", ".tsv", ".txt", ".zip"}
 
 
 def resolve_local_file(requested_path: str) -> Path:
