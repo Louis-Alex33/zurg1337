@@ -54,8 +54,7 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             file_path = (query.get("path") or [""])[0]
             variant = (query.get("variant") or ["full"])[0]
-            lang = (query.get("lang") or ["fr"])[0]
-            self._serve_file(file_path, variant=variant, lang=lang)
+            self._serve_file(file_path, variant=variant)
             return
         if parsed.path == "/download":
             query = parse_qs(parsed.query)
@@ -153,7 +152,7 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
         self.send_header("Location", location)
         self.end_headers()
 
-    def _serve_file(self, requested_path: str, variant: str = "full", lang: str = "fr") -> None:
+    def _serve_file(self, requested_path: str, variant: str = "full") -> None:
         try:
             file_path = resolve_local_file(requested_path)
         except CLIError as exc:
@@ -162,7 +161,7 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
         if not file_path.exists():
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
             return
-        self._send_html(render_file_page(file_path, variant=variant, lang=lang))
+        self._send_html(render_file_page(file_path, variant=variant))
 
     def _serve_download(self, requested_path: str) -> None:
         try:

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from audit_report_design import render_premium_audit_report, sanitize_report_language, signal_label_from_key, translate_finding
+from audit_report_design import render_premium_audit_report
 from config import (
     AUDIT_MODE_CONFIGS,
     DEFAULT_CRAWL_SOURCE,
@@ -677,7 +677,7 @@ def render_csv_preview(path: Path, max_rows: int = 8) -> str:
     return f"<div class='table-wrap'><table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table></div>"
 
 
-def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str:
+def render_file_page(path: Path, variant: str = "full") -> str:
     root_dir = _root_dir()
     relative_path = path.relative_to(root_dir)
     file_size = human_file_size(path.stat().st_size)
@@ -725,7 +725,7 @@ def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str
 
     if path.suffix == ".json":
         if is_audit_report_json(relative_path):
-            return render_audit_report_page(path, relative_path=relative_path, file_size=file_size, variant=variant, lang=lang)
+            return render_audit_report_page(path, relative_path=relative_path, file_size=file_size, variant=variant)
         pretty_json = html.escape(json.dumps(json.loads(path.read_text("utf-8")), ensure_ascii=False, indent=2))
         content = f"""
         <section class="panel file-shell">
@@ -793,8 +793,8 @@ def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str
     return page_shell(f"File - {relative_path}", content)
 
 
-def file_view_link(path: str, variant: str, lang: str = "fr") -> str:
-    return f"/files?path={quote(path)}&variant={quote(variant)}&lang={quote(sanitize_report_language(lang))}"
+def file_view_link(path: str, variant: str) -> str:
+    return f"/files?path={quote(path)}&variant={quote(variant)}"
 
 
 def render_report_intro_cards(
@@ -826,22 +826,16 @@ def render_client_decision_block(actions: list[str]) -> str:
     )
 
 
-def render_score_donut(observed_score: int, pages_crawled: int, lang: str = "fr") -> str:
-    active_lang = sanitize_report_language(lang)
+def render_score_donut(observed_score: int, pages_crawled: int) -> str:
     score = max(0, min(100, observed_score))
     tone = "score-donut-low"
-    label = "Needs work" if active_lang == "en" else "À renforcer"
+    label = "À renforcer"
     if score >= 75:
         tone = "score-donut-high"
-        label = "Solid" if active_lang == "en" else "Solide"
+        label = "Solide"
     elif score >= 60:
         tone = "score-donut-mid"
-        label = "To watch" if active_lang == "en" else "À surveiller"
-    note = (
-        f"Read based on {pages_crawled} public page(s) visited. The {score}/100 indicator helps prioritize the site without claiming to summarize its full quality."
-        if active_lang == "en"
-        else client_score_note(score, pages_crawled)
-    )
+        label = "À surveiller"
     return (
         f"<div class='score-donut-widget {tone}'>"
         f"<div class='score-donut' style='--score-pct: {score}%;' aria-label='Score observé {score} sur 100'>"
@@ -852,7 +846,7 @@ def render_score_donut(observed_score: int, pages_crawled: int, lang: str = "fr"
         "</div>"
         "<div class='score-donut-copy'>"
         f"<span class='report-status-label'>{html.escape(label)}</span>"
-        f"<p>{html.escape(note)}</p>"
+        f"<p>{html.escape(client_score_note(score, pages_crawled))}</p>"
         "</div>"
         "</div>"
     )
@@ -1411,82 +1405,38 @@ def render_portfolio_report_layout(
     top_pages: list[dict[str, object]],
     critical_findings: list[str],
     pages_by_url: dict[str, dict[str, object]],
-    lang: str = "fr",
 ) -> str:
-    active_lang = sanitize_report_language(lang)
-    is_en = active_lang == "en"
     actions = build_client_actions(summary, business_signals, top_pages)
     method_lines = build_method_lines(summary, pages_crawled)
     client_findings = [client_finding_text(str(item)) for item in critical_findings]
-    if business_signals:
-        signal_label = (
-            signal_label_from_key(str(business_signals[0].get("key") or ""), active_lang)
-            or str(business_signals[0].get("signal") or "")
-            if is_en
-            else client_signal_label(str(business_signals[0].get("key") or ""), str(business_signals[0].get("signal") or ""))
-        )
-    else:
-        signal_label = "No clear priority" if is_en else "Aucune priorité nette"
-    if is_en:
-        actions = localize_portfolio_lines(actions)
-        method_lines = [
-            f"Read based on {pages_crawled} public pages visited.",
-            f"{_as_int(summary.get('content_like_pages'))} content page(s) were kept to define priorities."
-            if _as_int(summary.get("content_like_pages"))
-            else "The report is based on pages that were actually reachable during the analysis.",
-            "The goal is to prioritize useful rework, not produce an exhaustive site audit.",
-        ]
-        client_findings = [translate_finding(item, active_lang) for item in client_findings]
-    score_label = (
-        "Observed base: rather healthy"
-        if observed_score >= 75 and is_en
-        else "Observed base: healthy, with several useful improvements"
-        if observed_score >= 60 and is_en
-        else "Observed base: first signals to correct"
-        if is_en
-        else client_score_label(observed_score)
+    signal_label = (
+        client_signal_label(str(business_signals[0].get("key") or ""), str(business_signals[0].get("signal") or ""))
+        if business_signals
+        else "Aucune priorité nette"
     )
-    hero_summary = (
-        portfolio_hero_summary(observed_score, summary, business_signals, active_lang)
-        if is_en
-        else build_audit_hero_summary(observed_score, summary, business_signals)
-    )
-    labels = {
-        "eyebrow": "Portfolio extract" if is_en else "Extrait portfolio",
-        "first_signal": "First signal" if is_en else "Ce qui ressort en premier",
-        "main_signal": "Main signal" if is_en else "Signal principal",
-        "pages_visited": "Pages visited" if is_en else "Pages visitées",
-        "useful_content": "Useful content" if is_en else "Contenus utiles",
-        "marker": "Marker" if is_en else "Repère",
-        "analysis": "What the analysis reveals" if is_en else "Ce que l’analyse fait apparaître",
-        "actions": "First suggested actions" if is_en else "Premières actions suggérées",
-        "priority_pages": "Pages to review first" if is_en else "Pages à revoir en premier",
-        "empty_findings": "No clear priority point was isolated." if is_en else "Aucun point prioritaire net n’a été isolé.",
-        "empty_actions": "No simple action was isolated." if is_en else "Aucune action simple n’a été isolée.",
-    }
     return f"""
     <section class="report-page portfolio-page portfolio-cover">
       <div class="audit-report-topbar">
         <div class="audit-report-heading">
-          <p class="eyebrow">{html.escape(labels["eyebrow"])}</p>
+          <p class="eyebrow">Extrait portfolio</p>
           <h1>{html.escape(domain)}</h1>
           <p class="lede">{html.escape(subtitle)}</p>
         </div>
       </div>
       <div class="audit-hero-grid portfolio-hero-grid">
         <section class="audit-hero-card audit-hero-primary">
-          <p class="audit-hero-surtitle">{html.escape(labels["first_signal"])}</p>
-          <h2>{html.escape(score_label)}</h2>
-          <p class="audit-hero-copy">{html.escape(hero_summary)}</p>
+          <p class="audit-hero-surtitle">Ce qui ressort en premier</p>
+          <h2>{html.escape(client_score_label(observed_score))}</h2>
+          <p class="audit-hero-copy">{html.escape(build_audit_hero_summary(observed_score, summary, business_signals))}</p>
           <div class="portfolio-kpi-grid">
-            <article class="report-summary-card"><span class="report-summary-label">{html.escape(labels["main_signal"])}</span><strong>{html.escape(signal_label)}</strong></article>
-            <article class="report-summary-card"><span class="report-summary-label">{html.escape(labels["pages_visited"])}</span><strong>{pages_crawled}</strong></article>
-            <article class="report-summary-card"><span class="report-summary-label">{html.escape(labels["useful_content"])}</span><strong>{summary.get("content_like_pages", 0)}</strong></article>
+            <article class="report-summary-card"><span class="report-summary-label">Signal principal</span><strong>{html.escape(signal_label)}</strong></article>
+            <article class="report-summary-card"><span class="report-summary-label">Pages visitées</span><strong>{pages_crawled}</strong></article>
+            <article class="report-summary-card"><span class="report-summary-label">Contenus utiles</span><strong>{summary.get("content_like_pages", 0)}</strong></article>
           </div>
         </section>
         <aside class="audit-hero-card audit-hero-secondary">
-          <p class="audit-side-label">{html.escape(labels["marker"])}</p>
-          {render_score_donut(observed_score, pages_crawled, lang=active_lang)}
+          <p class="audit-side-label">Repère</p>
+          {render_score_donut(observed_score, pages_crawled)}
           {render_portfolio_method_strip(method_lines)}
         </aside>
       </div>
@@ -1495,25 +1445,24 @@ def render_portfolio_report_layout(
     <section class="report-page portfolio-page portfolio-details">
       <div class="grid two audit-report-grid">
         <section class="subpanel">
-          <h2>{html.escape(labels["analysis"])}</h2>
-          {render_string_list(client_findings[:4], empty_label=labels["empty_findings"])}
+          <h2>Ce que l’analyse fait apparaître</h2>
+          {render_string_list(client_findings[:4], empty_label="Aucun point prioritaire net n’a été isolé.")}
         </section>
         <section class="subpanel">
-          <h2>{html.escape(labels["actions"])}</h2>
-          {render_string_list(actions, empty_label=labels["empty_actions"])}
+          <h2>Premières actions suggérées</h2>
+          {render_string_list(actions, empty_label="Aucune action simple n’a été isolée.")}
         </section>
       </div>
       <section class="subpanel">
-        <h2>{html.escape(labels["priority_pages"])}</h2>
+        <h2>Pages à revoir en premier</h2>
         {render_portfolio_priority_grid(top_pages, pages_by_url)}
       </section>
     </section>
     """
 
 
-def render_audit_report_page(path: Path, relative_path: Path, file_size: str, variant: str = "full", lang: str = "fr") -> str:
+def render_audit_report_page(path: Path, relative_path: Path, file_size: str, variant: str = "full") -> str:
     active_variant = sanitize_report_variant(variant)
-    active_lang = sanitize_report_language(lang)
     payload = json.loads(path.read_text("utf-8"))
     domain = str(payload.get("domain") or relative_path.stem)
     summary = payload.get("summary") or {}
@@ -1524,34 +1473,18 @@ def render_audit_report_page(path: Path, relative_path: Path, file_size: str, va
     critical_findings = payload.get("critical_findings") or []
     dated_content = payload.get("dated_content_signals") or []
     observed_score = _as_int(payload.get("observed_health_score"))
-    subtitle = (
-        "Quick content-site analysis to identify the pages to rework first."
-        if active_lang == "en"
-        else client_report_subtitle()
-    )
+    subtitle = client_report_subtitle()
     pages_by_url = {
         str(page.get("url")): page
         for page in (payload.get("pages") or [])
         if isinstance(page, dict) and page.get("url")
     }
     switch_variant = "portfolio" if active_variant == "full" else "full"
-    switch_label = (
-        "Portfolio version"
-        if active_lang == "en" and active_variant == "full"
-        else "Full version"
-        if active_lang == "en"
-        else "Version portfolio"
-        if active_variant == "full"
-        else "Version complète"
-    )
-    language_switch = render_report_language_switch(str(relative_path), active_variant, active_lang)
-    print_label = "Export PDF" if active_lang == "en" else "Exporter en PDF"
-    home_label = "Back home" if active_lang == "en" else "Retour home"
+    switch_label = "Version portfolio" if active_variant == "full" else "Version complète"
     variant_content = (
         render_premium_audit_report(
             payload,
             standalone=False,
-            lang=active_lang,
         )
         if active_variant == "full"
         else render_portfolio_report_layout(
@@ -1564,76 +1497,19 @@ def render_audit_report_page(path: Path, relative_path: Path, file_size: str, va
             top_pages=top_pages,
             critical_findings=critical_findings,
             pages_by_url=pages_by_url,
-            lang=active_lang,
         )
     )
     content = f"""
     <section class="panel file-shell audit-report-shell audit-report-variant-{html.escape(active_variant)}">
       <div class="panel-actions audit-report-actions no-print report-toolbar">
-        <button class="button print-button" type="button" onclick="window.print()">{html.escape(print_label)}</button>
-        {language_switch}
-        <a class="button secondary" href="{file_view_link(str(relative_path), switch_variant, active_lang)}">{switch_label}</a>
-        <a class="button secondary" href="/">{html.escape(home_label)}</a>
+        <button class="button print-button" type="button" onclick="window.print()">Exporter en PDF</button>
+        <a class="button secondary" href="{file_view_link(str(relative_path), switch_variant)}">{switch_label}</a>
+        <a class="button secondary" href="/">Retour home</a>
       </div>
       {variant_content}
     </section>
     """
     return page_shell(f"Audit - {domain}", content)
-
-
-def render_report_language_switch(path: str, variant: str, active_lang: str) -> str:
-    items = []
-    for lang, label in (("fr", "FR"), ("en", "EN")):
-        active_class = " is-active" if lang == active_lang else ""
-        aria_current = ' aria-current="true"' if lang == active_lang else ""
-        items.append(
-            f'<a class="button secondary language-toggle{active_class}" href="{file_view_link(path, variant, lang)}"{aria_current}>{label}</a>'
-        )
-    return "<span class='language-toggle-group'>" + "".join(items) + "</span>"
-
-
-def portfolio_hero_summary(
-    score: int,
-    summary: dict[str, object],
-    business_signals: list[dict[str, object]],
-    lang: str,
-) -> str:
-    if sanitize_report_language(lang) != "en":
-        return build_audit_hero_summary(score, summary, business_signals)
-    if score >= 75:
-        intro = "The site gives a rather reassuring first impression."
-    elif score >= 60:
-        intro = "The site has a credible base, with several improvements that are easy to illustrate."
-    else:
-        intro = "The site shows several visible points that can support an outreach angle."
-    if business_signals:
-        top_signal = signal_label_from_key(str(business_signals[0].get("key") or ""), lang)
-        if top_signal:
-            intro += f" The clearest topic today is {top_signal.lower()}."
-    content_pages = _as_int(summary.get("content_like_pages"))
-    if content_pages:
-        intro += f" The analysis is based on {content_pages} content pieces identified on the site."
-    return intro
-
-
-def localize_portfolio_lines(items: list[str]) -> list[str]:
-    replacements = [
-        ("Vérifier les pages de contenu marquées noindex avant toute reprise éditoriale.", "Check noindex content pages before any editorial rework."),
-        ("Contrôler les canonicals qui pointent vers une autre URL.", "Check canonicals that point to another URL."),
-        ("Vérifier que les dates visibles correspondent bien à l’état réel des contenus importants.", "Check that visible dates still match the real state of important content."),
-        ("Retravailler d’abord les pages les plus légères avant d’ouvrir de nouveaux sujets.", "Rework the thinnest pages before opening new topics."),
-        ("Clarifier l’angle des contenus qui semblent répondre au même besoin.", "Clarify the angle of content that seems to answer the same need."),
-        ("Renforcer le maillage interne depuis les pages déjà visibles ou déjà bien positionnées.", "Strengthen internal linking from pages that are already visible or well positioned."),
-        ("Prioriser 2 à 3 pages à reprendre en premier pour montrer rapidement un avant / après.", "Prioritize 2 to 3 pages to rework first so a before/after can be shown quickly."),
-        ("Vérifier manuellement les pages les plus visibles avant de décider d’un plan de reprise.", "Manually check the most visible pages before deciding on a rework plan."),
-    ]
-    localized: list[str] = []
-    for item in items:
-        translated = item
-        for source, target in replacements:
-            translated = translated.replace(source, target)
-        localized.append(translated)
-    return localized
 
 
 def render_string_list(items: list[str], empty_label: str) -> str:

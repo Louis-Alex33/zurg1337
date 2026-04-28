@@ -429,53 +429,6 @@ class WebUITests(unittest.TestCase):
         self.assertNotIn("JSON brut", page)
         self.assertNotIn("automatisation", page)
 
-    def test_render_file_page_for_audit_json_supports_english_language(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            audits_dir = root / "reports" / "audits"
-            audits_dir.mkdir(parents=True, exist_ok=True)
-            audit_json = audits_dir / "example.com.json"
-            audit_json.write_text(
-                """
-                {
-                  "domain": "example.com",
-                  "audited_at": "2026-04-15T00:47:42",
-                  "pages_crawled": 12,
-                  "observed_health_score": 68,
-                  "summary": {
-                    "content_like_pages": 5,
-                    "pages_ok": 12,
-                    "missing_meta_descriptions": 2,
-                    "weak_internal_linking_pages": 3,
-                    "dated_content_signals": 1
-                  },
-                  "business_priority_signals": [{"key": "dated_content_signals", "signal": "Contenus qui paraissent datés", "severity": "HIGH", "count": 1}],
-                  "top_pages_to_rework": [{"url": "https://example.com/blog/test", "priority_score": 6, "word_count": 180, "depth": 2, "reasons": ["date visible à actualiser"], "confidence": "medium"}],
-                  "dated_content_signals": [{"url": "https://example.com/blog/test", "references": ["Date visible dans le titre: 2024"]}]
-                }
-                """,
-                encoding="utf-8",
-            )
-
-            import web_ui
-
-            original_root = web_ui.ROOT_DIR
-            try:
-                web_ui.ROOT_DIR = root.resolve()
-                page = render_file_page(audit_json.resolve(), lang="en")
-            finally:
-                web_ui.ROOT_DIR = original_root
-
-        self.assertIn("SEO REPORT", page)
-        self.assertIn("FOR THE DECISION MAKER", page)
-        self.assertIn("Executive Summary", page)
-        self.assertIn("30 / 60 / 90 Day Action Plan", page)
-        self.assertIn("Technical Appendix", page)
-        self.assertIn("lang=en", page)
-        self.assertIn(">FR</a>", page)
-        self.assertIn(">EN</a>", page)
-        self.assertNotIn("Synthèse exécutive", page)
-
     def test_render_file_page_for_audit_json_supports_portfolio_variant(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
