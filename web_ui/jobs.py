@@ -212,6 +212,8 @@ def run_gsc_job(job_id: str) -> None:
     announce_job_outputs(job, [output_csv, output_json, output_html])
 
     def action() -> tuple[list[str], list[str]]:
+        if not current_csv:
+            raise CLIError("Ajoute un Current CSV GSC, via upload ou chemin local.")
         results = run_gsc_analysis(
             current_csv=current_csv,
             previous_csv=previous_csv,

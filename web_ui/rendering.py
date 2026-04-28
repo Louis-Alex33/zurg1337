@@ -529,17 +529,26 @@ def render_gsc_card() -> str:
       <div class="panel-head"><h2>GSC</h2><span class="badge">exports client</span></div>
       <p class="card-lede">Cette card sert surtout si tu travailles deja avec un client et que tu as ses exports Google Search Console.</p>
       <div class="card-tip">Si tu n'as pas de fichiers GSC, tu peux ignorer cette card pour l'instant.</div>
-      <form method="post" action="/run/gsc" class="stack">
+      <form method="post" action="/run/gsc" class="stack" enctype="multipart/form-data">
         <label>Current CSV
-          <input type="text" name="current_csv" value="exports/pages_recent.csv">
+          <input type="text" name="current_csv" value="" placeholder="exports/pages_recent.csv">
         </label>
-        <p class="field-help">Export recent des pages depuis GSC. C'est le fichier principal.</p>
+        <label>Upload current CSV
+          <input type="file" name="current_upload" accept=".csv,.tsv,.txt,text/csv">
+        </label>
+        <p class="field-help">Export recent des pages depuis GSC. C'est le fichier principal. Si tu uploades un fichier ici, il remplace le chemin texte au-dessus.</p>
         <label>Previous CSV
-          <input type="text" name="previous_csv" value="exports/pages_old.csv">
+          <input type="text" name="previous_csv" value="" placeholder="exports/pages_old.csv">
+        </label>
+        <label>Upload previous CSV
+          <input type="file" name="previous_upload" accept=".csv,.tsv,.txt,text/csv">
         </label>
         <p class="field-help">Export plus ancien pour comparer les baisses. Tu peux le laisser vide si tu n'en as pas.</p>
         <label>Queries CSV
-          <input type="text" name="queries_csv" value="exports/queries.csv">
+          <input type="text" name="queries_csv" value="" placeholder="exports/queries.csv">
+        </label>
+        <label>Upload queries CSV
+          <input type="file" name="queries_upload" accept=".csv,.tsv,.txt,text/csv">
         </label>
         <p class="field-help">Export des requetes. Il enrichit l'analyse, mais reste optionnel.</p>
         <label>Site label

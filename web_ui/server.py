@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import ipaddress
 import threading
+from email.parser import BytesParser
+from email.policy import default
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
 from utils import CLIError
 
-from .fs_ops import delete_managed_file, reset_pipeline_outputs, resolve_local_file
+from .fs_ops import delete_managed_file, reset_pipeline_outputs, resolve_local_file, save_uploaded_gsc_file
 from .jobs import (
     clear_finished_jobs,
     create_job,
@@ -21,7 +23,7 @@ from .jobs import (
 )
 from .rendering import render_dashboard, render_file_page, render_job_page
 
-MAX_POST_BODY_BYTES = 1_048_576
+MAX_POST_BODY_BYTES = 52_428_800
 
 
 def launch_ui(host: str = "127.0.0.1", port: int = 8787) -> None:
@@ -79,8 +81,12 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
         if content_length > MAX_POST_BODY_BYTES:
             self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Payload too large")
             return
-        payload = self.rfile.read(content_length).decode("utf-8")
-        form = {key: values[0] for key, values in parse_qs(payload, keep_blank_values=True).items()}
+        payload = self.rfile.read(content_length)
+        try:
+            form = self._parse_post_form(payload, content_length)
+        except CLIError as exc:
+            self._redirect(f"/?flash={quote(str(exc))}")
+            return
 
         if parsed.path == "/run/discover":
             job = create_job("discover", form)
@@ -119,6 +125,37 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Unknown action")
+
+    def _parse_post_form(self, payload: bytes, content_length: int) -> dict[str, str]:
+        content_type = self.headers.get("Content-Type", "")
+        if content_type.startswith("multipart/form-data"):
+            raw_message = (
+                f"Content-Type: {content_type}\r\n"
+                "MIME-Version: 1.0\r\n\r\n"
+            ).encode("utf-8") + payload
+            message = BytesParser(policy=default).parsebytes(raw_message)
+            form: dict[str, str] = {}
+            upload_fields = {"current_upload", "previous_upload", "queries_upload"}
+            upload_targets = {
+                "current_upload": "current_csv",
+                "previous_upload": "previous_csv",
+                "queries_upload": "queries_csv",
+            }
+            for part in message.iter_parts():
+                name = part.get_param("name", header="content-disposition")
+                if not name:
+                    continue
+                filename = part.get_filename()
+                if name in upload_fields and filename:
+                    saved_path = save_uploaded_gsc_file(filename, part.get_payload(decode=True) or b"")
+                    form[upload_targets[name]] = saved_path
+                elif not filename:
+                    charset = part.get_content_charset() or "utf-8"
+                    form[name] = (part.get_payload(decode=True) or b"").decode(charset, errors="replace")
+            return form
+
+        payload_text = payload.decode("utf-8")
+        return {key: values[0] for key, values in parse_qs(payload_text, keep_blank_values=True).items()}
 
     def log_message(self, format: str, *args: object) -> None:
         return

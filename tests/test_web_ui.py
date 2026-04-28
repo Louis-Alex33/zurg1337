@@ -612,7 +612,7 @@ class WebUITests(unittest.TestCase):
         handler, errors = self._make_post_handler(
             "/unknown",
             headers={
-                "Content-Length": "2000000",
+                "Content-Length": "60000000",
                 "Origin": "http://127.0.0.1:8787",
             },
         )
@@ -648,6 +648,39 @@ class WebUITests(unittest.TestCase):
 
         self.assertTrue(errors)
         self.assertNotEqual(errors[0][0], HTTPStatus.FORBIDDEN)
+
+    def test_multipart_gsc_upload_saves_file_and_maps_to_current_csv(self) -> None:
+        boundary = "----prospect-machine-test"
+        csv_body = b"Page,Clicks,Impressions,CTR,Position\nhttps://example.com/a,1,20,5%,8\n"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="current_csv"\r\n\r\n'
+            "exports/pages_recent.csv\r\n"
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="current_upload"; filename="pages recent.csv"\r\n'
+            "Content-Type: text/csv\r\n\r\n"
+        ).encode("utf-8") + csv_body + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        import web_ui
+
+        original_root = web_ui.ROOT_DIR
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                web_ui.ROOT_DIR = Path(tmp_dir).resolve()
+                handler = ProspectMachineUIHandler.__new__(ProspectMachineUIHandler)
+                handler.headers = {
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    "Content-Length": str(len(body)),
+                }
+
+                form = handler._parse_post_form(body, len(body))
+            finally:
+                web_ui.ROOT_DIR = original_root
+
+            uploaded_path = Path(tmp_dir) / form["current_csv"]
+            self.assertTrue(form["current_csv"].startswith("uploads/gsc/"))
+            self.assertTrue(uploaded_path.exists())
+            self.assertEqual(uploaded_path.read_bytes(), csv_body)
 
     def test_post_accepts_localhost_when_server_is_bound_to_loopback(self) -> None:
         handler, errors = self._make_post_handler(
