@@ -703,6 +703,8 @@ def render_performance_section(context: dict[str, Any]) -> str:
     temps_max = optional_float(perf.get("temps_max"))
     pct_lentes = get_int(perf, "pct_lentes", 0)
     pct_class = "score-low" if pct_lentes > 50 else "score-mid" if pct_lentes > 20 else "score-high"
+    slow_pages = [as_dict(page) for page in perf.get("pages_lentes", []) if isinstance(page, dict)]
+    action_cards = render_performance_action_cards(slow_pages[:4], str(context["domain"]))
     rows = []
     for page in perf.get("top_10_lentes", []) if isinstance(perf.get("top_10_lentes"), list) else []:
         item = as_dict(page)
@@ -774,45 +776,89 @@ def render_performance_section(context: dict[str, Any]) -> str:
       <tbody>{''.join(rows)}</tbody>
     </table>
 
-    <div class="perf-actions">
-      <div class="perf-actions-title">Comment améliorer la vitesse</div>
-      <div class="perf-actions-grid">
-        <div class="perf-action-card">
-          <div class="perf-action-icon">🖼</div>
-          <div class="perf-action-content">
-            <div class="perf-action-title">Compresser les images</div>
-            <div class="perf-action-text">Les images non compressées sont la première cause de lenteur. Passer au format WebP et réduire la taille à moins de 150 Ko par image. Outils : Squoosh, TinyPNG, ShortPixel.</div>
-            <div class="perf-action-effort">Effort : faible — Impact : élevé</div>
-          </div>
-        </div>
-        <div class="perf-action-card">
-          <div class="perf-action-icon">↪️</div>
-          <div class="perf-action-content">
-            <div class="perf-action-title">Réduire les redirections</div>
-            <div class="perf-action-text">Chaque redirection ajoute un aller-retour réseau. Les pages avec 1+ redirection observée gagnent à être liées directement vers leur URL finale.</div>
-            <div class="perf-action-effort">Effort : moyen — Impact : moyen</div>
-          </div>
-        </div>
-        <div class="perf-action-card">
-          <div class="perf-action-icon">⚡</div>
-          <div class="perf-action-content">
-            <div class="perf-action-title">Activer la mise en cache</div>
-            <div class="perf-action-text">Un plugin de cache (WP Rocket, W3 Total Cache, LiteSpeed Cache) permet de servir des pages pré-générées sans recalcul serveur à chaque visite.</div>
-            <div class="perf-action-effort">Effort : faible — Impact : élevé</div>
-          </div>
-        </div>
-        <div class="perf-action-card">
-          <div class="perf-action-icon">🌐</div>
-          <div class="perf-action-content">
-            <div class="perf-action-title">Utiliser un CDN</div>
-            <div class="perf-action-text">Un CDN (Cloudflare, BunnyCDN) distribue les fichiers statiques depuis des serveurs proches de vos visiteurs. Gratuit chez Cloudflare pour la formule de base.</div>
-            <div class="perf-action-effort">Effort : moyen — Impact : élevé</div>
-          </div>
-        </div>
-      </div>
-    </div>
+    {action_cards}
     {render_page_footer(context)}
   </section>"""
+
+
+def render_performance_action_cards(pages: list[dict[str, Any]], domain: str) -> str:
+    if not pages:
+        return ""
+    cards = []
+    for page in pages:
+        action = build_page_performance_action(page, domain)
+        cards.append(
+            f"""
+        <div class="perf-action-card">
+          <div class="perf-action-icon">{escape(action["icon"])}</div>
+          <div class="perf-action-content">
+            <div class="perf-action-title">{escape(action["title"])}</div>
+            <div class="perf-action-text">{escape(action["text"])}</div>
+            <div class="perf-action-effort">{escape(action["effort"])}</div>
+          </div>
+        </div>"""
+        )
+    return f"""
+    <div class="perf-actions">
+      <div class="perf-actions-title">Actions ciblées sur les pages lentes</div>
+      <div class="perf-actions-grid">
+        {''.join(cards)}
+      </div>
+    </div>"""
+
+
+def build_page_performance_action(page: dict[str, Any], domain: str) -> dict[str, str]:
+    url = str(page.get("url") or "")
+    label = display_url_label(url, domain, empty_label="Accueil")
+    load_time = optional_float(page.get("load_time"))
+    load_label = format_seconds(load_time)
+    redirects = get_int(page, "redirections", 0)
+    images_total = get_int(page, "images_total", 0)
+    page_type = str(page.get("type") or "").lower()
+
+    if redirects > 0:
+        redirect_label = f"{redirects} redirection" + ("s" if redirects > 1 else "")
+        return {
+            "icon": "↪",
+            "title": f"{label} : supprimer la redirection mesurée",
+            "text": (
+                f"Sur {label}, le crawl observe {load_label} avec {redirect_label}. "
+                "Mettre à jour les liens internes, le menu, le sitemap et les canonicals pour pointer directement vers l'URL finale de cette page."
+            ),
+            "effort": "Effort : faible à moyen — Impact : immédiat sur cette URL",
+        }
+
+    if images_total >= 8:
+        return {
+            "icon": "IMG",
+            "title": f"{label} : auditer les {images_total} images de cette page",
+            "text": (
+                f"Sur {label}, {images_total} images sont détectées et le chargement atteint {load_label}. "
+                "Contrôler les visuels réellement présents sur cette URL : image d'en-tête aux dimensions affichées, WebP/AVIF, lazy-load des images sous l'introduction."
+            ),
+            "effort": "Effort : moyen — Impact : élevé sur cette page",
+        }
+
+    if "article" in page_type:
+        return {
+            "icon": "JS",
+            "title": f"{label} : isoler les ressources de l'article",
+            "text": (
+                f"Sur {label}, l'article charge en {load_label}. Dans DevTools, filtrer les ressources de cette URL et vérifier en priorité "
+                "l'image d'en-tête, les embeds, les scripts d'affiliation/commentaires et les fichiers CSS ou JS chargés uniquement pour cet article."
+            ),
+            "effort": "Effort : moyen — Impact : ciblé sur cet article",
+        }
+
+    return {
+        "icon": "URL",
+        "title": f"{label} : analyser le premier écran",
+        "text": (
+            f"Sur {label}, la page charge en {load_label}. Mesurer cette URL seule avec Lighthouse ou WebPageTest, puis différer les ressources qui "
+            "n'apparaissent pas dans le premier écran de cette page."
+        ),
+        "effort": "Effort : moyen — Impact : ciblé sur cette page",
+    }
 
 
 def render_seo_suggestions_section(context: dict[str, Any]) -> str:
@@ -1407,6 +1453,8 @@ def normalize_crawled_urls(items: Any) -> list[dict[str, Any]]:
                 "points": str(issues),
                 "load_time": load_time,
                 "redirections": redirections,
+                "images_total": get_int(item, "images_total", 0),
+                "images_without_alt": get_int(item, "images_without_alt", 0),
                 "liens_internes_sortants": [str(link) for link in outgoing_links if str(link).strip()],
                 "titre_google": title,
                 "description_google": description,

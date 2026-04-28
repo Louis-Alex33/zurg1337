@@ -694,6 +694,7 @@ class AuditHeuristicsTests(unittest.TestCase):
                         "redirect_count": 1,
                         "title": "Cutest Planners For Keeping Your Life Organized In 2026 With Extra Details And Ideas",
                         "meta_description": "",
+                        "images_total": 18,
                         "internal_links_out": [],
                     },
                     {
@@ -705,6 +706,7 @@ class AuditHeuristicsTests(unittest.TestCase):
                         "redirect_count": 0,
                         "title": "Medium Page Example",
                         "meta_description": "Une description suffisamment claire pour cette page moyenne du site Example.",
+                        "images_total": 3,
                         "internal_links_out": [],
                     },
                 ],
@@ -730,7 +732,12 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertIn("Vitesse de chargement", page)
         perf_block = page[page.find("Vitesse de chargement") : page.find("Titres et descriptions à corriger")]
         self.assertLess(perf_block.find("4.4s"), perf_block.find("3.2s"))
-        self.assertEqual(page.count('class="perf-action-card"'), 4)
+        self.assertIn("Actions ciblées sur les pages lentes", perf_block)
+        self.assertEqual(page.count('class="perf-action-card"'), 2)
+        self.assertIn(f"{long_slug} : supprimer la redirection mesurée", perf_block)
+        self.assertIn("blog/medium-page : isoler les ressources", perf_block)
+        self.assertNotIn("Compresser les images", perf_block)
+        self.assertNotIn("Les images non compressées sont la première cause de lenteur", perf_block)
 
         self.assertIn("Titres et descriptions à corriger", page)
         self.assertIn("suggestion-actuel", page)
