@@ -1477,84 +1477,205 @@ def render_report(report: dict[str, object]) -> str:
   <title>{html.escape(title)}</title>
   <style>
     :root {{
-      --bg: #F7F8FA;
-      --card: #FFFFFF;
-      --line: #DDE3EA;
-      --soft: #EEF3F7;
-      --primary: #155E75;
-      --accent: #7C3AED;
-      --text: #172026;
-      --muted: #5C6873;
-      --red-bg: #FFE5E1;
-      --red-text: #9F2B1D;
-      --amber-bg: #FFF2CC;
-      --amber-text: #7A4B00;
-      --green-bg: #DDF7EA;
-      --green-text: #086142;
+      --color-bg: #FAFAF8;
+      --color-surface: #FFFFFF;
+      --color-border: #E8E5DE;
+      --color-border-light: #F0EDE6;
+      --color-text-primary: #1A1A18;
+      --color-text-secondary: #6B6B68;
+      --color-text-muted: #9B9B98;
+      --color-accent: #1E40AF;
+      --color-accent-light: #EFF3FF;
+      --color-accent-mid: #BFCBF5;
+      --color-high: #991B1B;
+      --color-high-bg: #FEF2F2;
+      --color-high-border: #FECACA;
+      --color-medium: #92400E;
+      --color-medium-bg: #FFFBEB;
+      --color-medium-border: #FDE68A;
+      --color-low: #065F46;
+      --color-low-bg: #F0FDF4;
+      --color-low-border: #A7F3D0;
+      --color-positive: #059669;
+      --color-positive-bg: #ECFDF5;
+      --color-warning: #D97706;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: system-ui, -apple-system, sans-serif;
-      line-height: 1.5;
+      padding: 0;
+      background: var(--color-bg);
+      color: var(--color-text-primary);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 13px;
+      line-height: 1.7;
     }}
-    main {{ max-width: 1120px; margin: 0 auto; padding: 30px 20px 56px; }}
-    a {{ color: var(--primary); overflow-wrap: anywhere; word-break: break-word; }}
-    h1, h2, h3, p {{ margin-top: 0; }}
-    h1 {{ font-size: 2.35rem; line-height: 1.08; margin-bottom: 10px; letter-spacing: 0; max-width: 820px; }}
-    h2 {{ font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }}
-    h3 {{ letter-spacing: 0; }}
-    .report-header {{
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 20px;
-      align-items: start;
-      margin-bottom: 24px;
-      padding: 34px;
-      border: 1px solid var(--line);
-      background: var(--card);
-      border-radius: 8px;
+    .report-container {{
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 32px 64px;
     }}
-    .eyebrow {{ color: var(--primary); font-size: 0.78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px; }}
-    .subtitle {{ font-size: 1.1rem; color: var(--muted); max-width: 820px; margin-bottom: 18px; }}
-    .cover-meta {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 20px; }}
-    .cover-meta div {{ background: var(--soft); border-radius: 8px; padding: 12px; min-width: 0; }}
-    .cover-meta span, .kpi-card span, .mini-label {{ display: block; color: var(--muted); font-size: 12px; margin-bottom: 5px; }}
-    .cover-meta strong {{ display: block; overflow-wrap: anywhere; }}
-    .meta, .section-heading p, .source-list, .empty-state, .why, .footer-note, .small-note {{ color: var(--muted); }}
+    a {{ color: var(--color-accent); overflow-wrap: anywhere; word-break: break-word; }}
+    h1, h2, h3, h4, p {{ margin-top: 0; }}
+    h1, h2, h3, h4, .label, .badge, .stat-label, .section-title,
+    .cover-label, .cover-meta-label, .cover-meta-value, .btn-export,
+    .kpi-label, .kpi-value, .section-tag, .page-slug, .priority-badge,
+    .metric-label, .metric-value, .constat-label, .actions-label,
+    .effort-tag, .type-tag, .priority-number, .position-bar-label,
+    .position-bar-value, .mini-label, .data-label, .query-card h3,
+    .appendix-card h3 {{
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      letter-spacing: 0;
+    }}
+    p, li, .page-description, .constat, .page-constat {{ font-family: Georgia, serif; }}
+    h1 {{ font-size: 32px; font-weight: 700; line-height: 1.2; }}
+    h2 {{ font-size: 22px; font-weight: 600; line-height: 1.3; margin-bottom: 4px; }}
+    h3 {{ font-size: 16px; font-weight: 600; }}
+    h4 {{
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-secondary);
+    }}
     .btn-export {{
       border: 0;
       border-radius: 8px;
-      background: var(--primary);
-      color: white;
+      background: rgba(255,255,255,0.16);
+      color: #FFFFFF;
       cursor: pointer;
       font-weight: 700;
       padding: 11px 16px;
       white-space: nowrap;
+      align-self: flex-start;
+      border: 1px solid rgba(255,255,255,0.25);
+    }}
+    .cover-page {{
+      background: var(--color-accent);
+      color: #FFFFFF;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 64px 48px;
+      margin: 0 -32px;
+      page-break-after: always;
+      break-after: page;
+    }}
+    .cover-label {{
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      opacity: 0.7;
+      margin-bottom: 24px;
+    }}
+    .cover-title {{
+      font-size: 52px;
+      font-weight: 700;
+      line-height: 1.1;
+      color: #FFFFFF;
+      margin: 0 0 16px;
+    }}
+    .cover-subtitle {{
+      font-size: 18px;
+      opacity: 0.8;
+      font-family: Georgia, serif;
+      max-width: 480px;
+      margin: 0 0 48px;
+    }}
+    .cover-meta {{
+      display: flex;
+      gap: 40px;
+      border-top: 1px solid rgba(255,255,255,0.2);
+      padding-top: 32px;
+      flex-wrap: wrap;
+    }}
+    .cover-meta-item {{
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 140px;
+    }}
+    .cover-meta-label {{
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      opacity: 0.6;
+    }}
+    .cover-meta-value {{
+      font-size: 15px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }}
+    .cover-footer {{
+      font-size: 12px;
+      opacity: 0.5;
+      border-top: 1px solid rgba(255,255,255,0.15);
+      padding-top: 16px;
     }}
     .kpi-grid {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(150px, 1fr));
-      gap: 10px;
-      margin: 18px 0;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin: 24px 0;
     }}
     .kpi-card {{
-      background: var(--soft);
-      border-radius: 8px;
-      padding: 14px;
-      min-height: 86px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      min-height: 98px;
     }}
-    .kpi-card strong {{ display: block; font-size: 24px; font-weight: 650; line-height: 1.1; }}
+    .kpi-card--warning {{ background: var(--color-medium-bg); border-color: var(--color-medium-border); }}
+    .kpi-card--positive {{ background: var(--color-positive-bg); border-color: #6EE7B7; }}
+    .kpi-card--accent {{ background: var(--color-accent-light); border-color: var(--color-accent-mid); }}
+    .kpi-label {{
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-secondary);
+      margin-bottom: 6px;
+    }}
+    .kpi-value {{
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--color-text-primary);
+      line-height: 1.1;
+    }}
+    .kpi-note {{ font-size: 11px; color: var(--color-text-muted); margin-top: 3px; }}
+    .executive-summary {{
+      background: var(--color-accent-light);
+      border-left: 3px solid var(--color-accent);
+      padding: 16px 20px;
+      border-radius: 0 8px 8px 0;
+      margin-top: 8px;
+    }}
+    .executive-summary p {{
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--color-text-primary);
+    }}
     .report-panel, .report-section, .source-box {{
-      border: 1px solid var(--line);
-      background: var(--card);
-      border-radius: 8px;
-      padding: 22px;
-      margin-top: 20px;
+      margin-top: 56px;
+      padding-top: 32px;
+      border-top: 2px solid var(--color-accent);
     }}
-    .source-list {{ margin: 0; padding-left: 18px; }}
+    .report-section + .report-section,
+    .report-panel + .report-section,
+    .report-section + .report-panel {{
+      margin-top: 64px;
+    }}
+    .source-box {{
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-left: 3px solid var(--color-accent);
+      padding: 16px 20px;
+      border-radius: 0 8px 8px 0;
+    }}
+    .source-list {{ margin: 0; padding-left: 18px; color: var(--color-text-secondary); }}
     nav {{
       position: sticky;
       top: 0;
@@ -1562,132 +1683,361 @@ def render_report(report: dict[str, object]) -> str:
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-      background: rgba(250, 250, 249, 0.96);
-      border-top: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
+      background: rgba(250, 250, 248, 0.96);
+      border-top: 1px solid var(--color-border);
+      border-bottom: 1px solid var(--color-border);
       padding: 12px 0;
-      margin-bottom: 20px;
+      margin: 24px 0 0;
     }}
     nav a {{
-      color: var(--text);
+      color: var(--color-text-primary);
       text-decoration: none;
-      background: var(--card);
-      border: 1px solid var(--line);
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
       border-radius: 8px;
       padding: 8px 10px;
-      font-size: 0.9rem;
+      font-size: 12px;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-weight: 600;
     }}
-    .section-heading {{
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      align-items: end;
-      margin-bottom: 12px;
+    .section-header {{ margin-bottom: 24px; }}
+    .section-tag {{
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-accent);
+      background: var(--color-accent-light);
+      padding: 3px 10px;
+      border-radius: 20px;
+      margin-bottom: 8px;
     }}
-    .section-heading h2 {{ margin-bottom: 4px; font-size: 1.45rem; }}
-    .summary-copy {{ font-size: 1.05rem; max-width: 880px; margin-bottom: 0; }}
-    .cards-grid, .priority-list {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 12px;
+    .section-title {{ margin: 0 0 8px; color: var(--color-text-primary); }}
+    .section-intro {{
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      margin: 0 0 24px;
+      max-width: 600px;
     }}
-    .priority-item, .page-card, .snippet-card {{
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 16px;
+    .cards-grid, .priority-list, .data-card-list {{
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 20px;
+    }}
+    .page-card, .snippet-card, .query-card, .appendix-card, .origin-card, .chart-card {{
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+      position: relative;
+      overflow: hidden;
       min-width: 0;
     }}
-    .priority-item {{ background: #FBFCFE; }}
-    .priority-item h3 {{ font-size: 1rem; margin-bottom: 8px; }}
-    .priority-item p {{ margin-bottom: 8px; }}
-    .card-head {{
+    .page-card::before, .snippet-card::before {{
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 4px;
+    }}
+    .page-card--high::before {{ background: var(--color-high); }}
+    .page-card--medium::before {{ background: var(--color-warning); }}
+    .page-card--low::before, .page-card--dead::before {{ background: var(--color-low); }}
+    .snippet-card::before {{ background: var(--color-accent); }}
+    .page-card-header, .card-head {{
       display: flex;
+      align-items: flex-start;
       justify-content: space-between;
-      gap: 10px;
-      align-items: start;
+      gap: 16px;
+      margin-bottom: 16px;
     }}
-    .card-head h3 {{ font-size: 1rem; line-height: 1.3; margin-bottom: 4px; overflow-wrap: anywhere; }}
-    .url-full {{ color: var(--muted); font-size: 0.88rem; line-height: 1.35; overflow-wrap: anywhere; word-break: break-word; }}
-    .badge {{
-      border-radius: 999px;
-      display: inline-flex;
-      align-items: center;
-      min-height: 24px;
-      padding: 3px 9px;
-      font-size: 12px;
-      font-weight: 800;
+    .page-slug {{
+      font-family: "Helvetica Neue", monospace;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--color-text-primary);
+      display: block;
+      overflow-wrap: anywhere;
+    }}
+    .page-url, .url-full {{
+      font-size: 11px;
+      color: var(--color-accent);
+      text-decoration: none;
+      display: block;
+      margin-top: 2px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .priority-badge, .badge {{
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      padding: 4px 12px;
+      border-radius: 20px;
       white-space: nowrap;
+      flex-shrink: 0;
     }}
-    .badge-p1 {{ background: var(--red-bg); color: var(--red-text); }}
-    .badge-p2 {{ background: var(--amber-bg); color: var(--amber-text); }}
-    .badge-p3, .badge-dead {{ background: var(--green-bg); color: var(--green-text); }}
-    .metric-row {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(94px, 1fr));
-      gap: 8px;
+    .priority-badge--high, .badge-p1 {{
+      background: var(--color-high-bg);
+      color: var(--color-high);
+      border: 1px solid var(--color-high-border);
     }}
-    .metric {{ background: var(--soft); border-radius: 8px; padding: 8px; min-width: 0; }}
-    .metric span {{ color: var(--muted); display: block; font-size: 11px; }}
-    .metric strong {{ display: block; font-size: 0.95rem; line-height: 1.25; overflow-wrap: anywhere; }}
-    .actions {{ margin: 0; padding-left: 18px; }}
-    .actions li + li {{ margin-top: 5px; }}
-    .insight-grid {{
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 8px;
-      border: 1px solid var(--line);
+    .priority-badge--medium, .badge-p2 {{
+      background: var(--color-medium-bg);
+      color: var(--color-medium);
+      border: 1px solid var(--color-medium-border);
+    }}
+    .priority-badge--low, .priority-badge--dead, .badge-p3, .badge-dead {{
+      background: var(--color-low-bg);
+      color: var(--color-low);
+      border: 1px solid var(--color-low-border);
+    }}
+    .page-metrics, .metric-row {{
+      display: flex;
+      gap: 0;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border-light);
       border-radius: 8px;
-      padding: 10px;
-      background: #FBFCFE;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }}
+    .metric {{
+      flex: 1;
+      padding: 12px 16px;
+      border-right: 1px solid var(--color-border-light);
+      text-align: center;
+      min-width: 0;
+      background: transparent;
+    }}
+    .metric:last-child {{ border-right: none; }}
+    .metric--warning {{ background: var(--color-medium-bg); }}
+    .metric--positive {{ background: var(--color-positive-bg); }}
+    .metric-label, .metric span {{
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-muted);
+      display: block;
+      margin-bottom: 4px;
+    }}
+    .metric-value, .metric strong {{
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--color-text-primary);
+      display: block;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }}
+    .metric--warning .metric-value, .metric--warning strong {{ color: var(--color-warning); }}
+    .metric--positive .metric-value, .metric--positive strong {{ color: var(--color-positive); }}
+    .position-bar {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: -8px 0 18px;
+    }}
+    .position-bar-label {{
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-muted);
+      min-width: 120px;
+    }}
+    .position-bar-track {{
+      flex: 1;
+      height: 6px;
+      background: var(--color-border);
+      border-radius: 3px;
+      overflow: hidden;
+    }}
+    .position-bar-fill {{
+      height: 100%;
+      border-radius: 3px;
+      background: var(--color-positive);
+    }}
+    .position-bar-value {{
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      min-width: 28px;
+      text-align: right;
+    }}
+    .page-constat {{
+      font-size: 13px;
+      color: var(--color-text-secondary);
+      line-height: 1.6;
+      font-style: italic;
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--color-border-light);
+    }}
+    .constat-label, .mini-label {{
+      font-style: normal;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-muted);
+      display: block;
+      margin-bottom: 4px;
+    }}
+    .actions-label {{
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-secondary);
+      margin-bottom: 10px;
+    }}
+    .actions, .actions-list {{
+      margin: 0;
+      padding-left: 20px;
+      list-style: none;
+    }}
+    .actions li, .actions-list li {{
+      position: relative;
+      padding-left: 16px;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: var(--color-text-primary);
+      line-height: 1.5;
+    }}
+    .actions li::before, .actions-list li::before {{
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: var(--color-accent);
+      font-style: normal;
+      font-family: sans-serif;
+    }}
+    .insight-grid {{
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--color-border-light);
     }}
     .insight {{
-      display: grid;
-      grid-template-columns: 112px minmax(0, 1fr);
-      gap: 10px;
-      align-items: start;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
       min-width: 0;
     }}
     .insight strong {{
-      font-size: 0.95rem;
+      font-size: 13px;
       line-height: 1.35;
       overflow-wrap: anywhere;
     }}
     .chip-row {{ display: flex; flex-wrap: wrap; gap: 6px; }}
-    .chip {{ border: 1px solid var(--line); background: var(--soft); border-radius: 999px; padding: 3px 8px; font-size: 11px; color: var(--text); }}
-    .why {{ font-style: italic; margin: 0; }}
+    .chip, .type-tag {{
+      font-size: 11px;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      background: var(--color-accent-light);
+      color: var(--color-accent);
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 500;
+    }}
+    .why {{ font-style: italic; margin: 0; color: var(--color-text-secondary); }}
     .query-note {{
-      color: var(--amber-text);
-      background: var(--amber-bg);
+      color: var(--color-medium);
+      background: var(--color-medium-bg);
+      border: 1px solid var(--color-medium-border);
       border-radius: 8px;
       padding: 8px 10px;
-      font-size: 0.9rem;
+      font-size: 12px;
       margin: 0;
     }}
+    .priorities-list {{
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }}
+    .priority-item {{
+      display: flex;
+      gap: 28px;
+      padding: 28px 0;
+      border-bottom: 1px solid var(--color-border-light);
+      align-items: flex-start;
+    }}
+    .priority-item:last-child {{ border-bottom: none; }}
+    .priority-number {{
+      font-size: 48px;
+      font-weight: 800;
+      color: var(--color-accent-mid);
+      line-height: 1;
+      min-width: 64px;
+      letter-spacing: 0;
+    }}
+    .priority-body h3 {{
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0 0 12px;
+      color: var(--color-text-primary);
+    }}
+    .priority-meta {{
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }}
+    .priority-meta span {{
+      font-size: 13px;
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+    }}
+    .priority-meta strong {{
+      color: var(--color-text-primary);
+      font-family: "Helvetica Neue", Arial, sans-serif;
+    }}
     .empty-state {{
-      background: var(--card);
-      border: 1px dashed var(--line);
+      background: var(--color-surface);
+      border: 1px dashed var(--color-border);
       border-radius: 10px;
       padding: 18px;
+      color: var(--color-text-secondary);
     }}
-    table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
-    th, td {{ border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }}
-    th {{ color: var(--muted); font-size: 12px; }}
-    .table-wrap {{ overflow-x: auto; }}
-    .appendix table {{ font-size: 0.88rem; }}
+    .query-card h3, .appendix-card h3 {{ margin: 0 0 10px; color: var(--color-text-primary); }}
+    .data-grid {{
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0;
+      border: 1px solid var(--color-border-light);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 12px 0;
+    }}
+    .data-item {{
+      padding: 10px 12px;
+      border-right: 1px solid var(--color-border-light);
+      background: var(--color-bg);
+    }}
+    .data-item:last-child {{ border-right: none; }}
+    .data-label {{
+      display: block;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-muted);
+      margin-bottom: 4px;
+    }}
+    .data-value {{
+      display: block;
+      font-size: 13px;
+      color: var(--color-text-primary);
+      overflow-wrap: anywhere;
+    }}
     .reliability-note {{
-      color: var(--muted);
-      font-size: 0.9rem;
+      color: var(--color-text-muted);
+      font-size: 12px;
       margin: 12px 0 0;
-    }}
-    .chart-card, .origin-card {{
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 16px;
     }}
     .chart-svg {{ width: 100%; height: auto; display: block; }}
     .origin-grid {{
@@ -1696,20 +2046,26 @@ def render_report(report: dict[str, object]) -> str:
       gap: 14px;
     }}
     .bar-row {{ display: flex; gap: 10px; align-items: center; margin-top: 12px; }}
-    .bar-label {{ width: 96px; font-size: 0.92rem; overflow-wrap: anywhere; }}
-    .bar-track {{ flex: 1; background: var(--soft); border-radius: 4px; height: 8px; }}
-    .bar-fill {{ height: 100%; background: var(--primary); border-radius: 4px; }}
-    .bar-value {{ width: 92px; text-align: right; color: var(--muted); font-size: 0.88rem; }}
-    .footer-note {{ margin-top: 28px; border-top: 1px solid var(--line); padding-top: 18px; }}
+    .bar-label {{ width: 96px; font-size: 12px; overflow-wrap: anywhere; }}
+    .bar-track {{ flex: 1; background: var(--color-border-light); border-radius: 4px; height: 8px; }}
+    .bar-fill {{ height: 100%; background: var(--color-accent); border-radius: 4px; }}
+    .bar-value {{ width: 92px; text-align: right; color: var(--color-text-muted); font-size: 12px; }}
+    .footer-note {{
+      margin-top: 56px;
+      border-top: 1px solid var(--color-border);
+      padding-top: 18px;
+      color: var(--color-text-muted);
+    }}
     @media (max-width: 820px) {{
-      main {{ padding: 24px 14px 42px; }}
-      .report-header {{ grid-template-columns: 1fr; }}
-      .cover-meta {{ grid-template-columns: 1fr; }}
+      .report-container {{ padding: 0 18px 42px; }}
+      .cover-page {{ margin: 0 -18px; padding: 48px 28px; }}
+      .cover-title {{ font-size: 40px; }}
+      .cover-meta {{ gap: 18px; }}
       .insight {{ grid-template-columns: 1fr; }}
-      .kpi-grid {{ grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }}
-      .cards-grid, .priority-list {{ grid-template-columns: 1fr; }}
-      .section-heading {{ display: block; }}
-      .metric-row {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .kpi-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .page-card-header, .card-head, .priority-item {{ flex-direction: column; }}
+      .page-metrics, .metric-row, .data-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .metric, .data-item {{ border-right: 0; border-bottom: 1px solid var(--color-border-light); }}
       .bar-label, .bar-value {{ width: auto; min-width: 64px; }}
     }}
     @media print {{
@@ -1718,47 +2074,71 @@ def render_report(report: dict[str, object]) -> str:
       .no-print {{ display: none !important; }}
       @page {{
         size: A4;
-        margin: 20mm 15mm;
+        margin: 16mm 14mm;
       }}
-      body {{
-        font-size: 11pt;
-        background: white !important;
-        color: black !important;
-      }}
-      main {{ max-width: none; padding: 0; }}
-      .page-card, .priority-item, .snippet-card, .report-panel, .report-section {{
-        break-inside: avoid;
-        page-break-inside: avoid;
-        border: 1px solid #ccc !important;
-        box-shadow: none !important;
-      }}
-      a[href]::after {{ content: ""; }}
-      .kpi-card, .metric, .insight {{
-        background: #F5F5F5 !important;
+      * {{
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }}
+      body {{
+        font-size: 12px;
+        background: var(--color-bg) !important;
+        color: var(--color-text-primary) !important;
+      }}
+      .report-container {{ max-width: none; padding: 0; }}
+      .cover-page {{
+        background: #1E40AF !important;
+        color: #FFFFFF !important;
+        min-height: 265mm;
+        margin: 0;
+        page-break-after: always;
+        break-after: page;
+      }}
+      .cover-title {{ font-size: 44px; color: #FFFFFF !important; }}
+      .page-card, .priority-item, .snippet-card, .report-panel, .report-section, .kpi-grid {{
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }}
+      .page-card::before {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+      .priority-badge--high, .priority-badge--medium, .priority-badge--low,
+      .kpi-card--warning, .kpi-card--positive, .kpi-card--accent,
+      .metric--warning, .metric--positive, .executive-summary, .type-tag {{
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }}
+      .page-url::after, a[href]::after {{ content: none; }}
+      .kpi-value {{ font-size: 22px; }}
       .page-card {{ display: block !important; }}
-      .report-section, .report-panel {{ page-break-before: auto; }}
+      .report-section, .report-panel {{ break-before: auto; page-break-before: auto; }}
       .appendix {{ break-inside: auto; page-break-inside: auto; }}
     }}
   </style>
 </head>
 <body>
-  <main>
-    <header class="report-header">
-      <div>
-        <p class="eyebrow">Audit SEO GSC</p>
-        <h1>{html.escape(title)}</h1>
-        <p class="subtitle">{html.escape(str(report.get("subtitle", "")))}</p>
+  <main class="report-container">
+    <section class="cover-page">
+      <div class="cover-content">
+        <div class="cover-label">Rapport SEO · Google Search Console</div>
+        <h1 class="cover-title">Audit SEO GSC</h1>
+        <p class="cover-subtitle">Plan d'action basé sur les données Google Search Console</p>
         <div class="cover-meta">
-          <div><span>Domaine analysé</span><strong>{html.escape(str(report.get("site_name") or "Non précisé"))}</strong></div>
-          <div><span>Période analysée</span><strong>{html.escape(str(report.get("period_label", "")).replace("Période analysée: ", ""))}</strong></div>
-          <div><span>Date de génération</span><strong>{html.escape(str(report["generated_at"]))}</strong></div>
+          <div class="cover-meta-item">
+            <span class="cover-meta-label">Domaine</span>
+            <span class="cover-meta-value">{html.escape(str(report.get("site_name") or "Non précisé"))}</span>
+          </div>
+          <div class="cover-meta-item">
+            <span class="cover-meta-label">Période</span>
+            <span class="cover-meta-value">{html.escape(str(report.get("period_label", "")).replace("Période analysée: ", ""))}</span>
+          </div>
+          <div class="cover-meta-item">
+            <span class="cover-meta-label">Généré le</span>
+            <span class="cover-meta-value">{html.escape(str(report["generated_at"]))}</span>
+          </div>
         </div>
+        <button onclick="exportPDF()" class="btn-export no-print">Exporter en PDF</button>
       </div>
-      <button onclick="exportPDF()" class="btn-export">Exporter en PDF</button>
-    </header>
+      <div class="cover-footer">Analyse basée sur les données Google Search Console exportées.</div>
+    </section>
 
     <section class="source-box">
       <ul class="source-list">{source_notes}</ul>
@@ -1766,25 +2146,25 @@ def render_report(report: dict[str, object]) -> str:
 
     <nav aria-label="Navigation du rapport">{nav}</nav>
 
-    <section class="report-panel" id="synthese">
-      <div class="section-heading"><div><h2>Synthèse exécutive</h2><p>Les indicateurs à retenir avant d’entrer dans le détail.</p></div></div>
+    <section class="report-section" id="synthese">
+      <div class="section-header"><h2 class="section-title">Synthèse exécutive</h2><p class="section-intro">Les indicateurs à retenir avant d’entrer dans le détail.</p></div>
       <section class="kpi-grid" aria-label="Indicateurs clés">{kpis}</section>
-      <p class="summary-copy">{html.escape(str(report.get("executive_summary", "")))}</p>
+      <div class="executive-summary"><p>{html.escape(str(report.get("executive_summary", "")))}</p></div>
     </section>
 
-    <section class="report-panel" id="priorites">
-      <div class="section-heading"><div><h2>Les 3 priorités du mois</h2><p>Un plan d’action volontairement court pour décider vite.</p></div></div>
+    <section class="report-section priorities-section" id="priorites">
+      <div class="section-header"><h2 class="section-title">Les 3 priorités du mois</h2><p class="section-intro">Un plan d’action volontairement court pour décider vite.</p></div>
       {priorities}
     </section>
 
     <section class="report-section" id="pages-prioritaires">
-      <div class="section-heading"><div><h2>Top pages à traiter en premier</h2><p>Les pages avec le meilleur rapport visibilité, effort et potentiel.</p></div></div>
+      <div class="section-header"><div class="section-tag">Priorité 1</div><h2 class="section-title">Top pages à traiter en premier</h2><p class="section-intro">Les pages avec le meilleur rapport visibilité, effort et potentiel.</p></div>
       {priority_cards}
       <p class="reliability-note">Les clics récupérables estimés sont un ordre de grandeur, pas une promesse. À confirmer après mise en ligne et suivi dans Google Search Console.</p>
     </section>
 
     <section class="report-section" id="requetes">
-      <div class="section-heading"><div><h2>Exploitation des requêtes</h2><p>Une sélection limitée aux requêtes utiles pour orienter les titles, FAQ et contenus.</p></div></div>
+      <div class="section-header"><h2 class="section-title">Exploitation des requêtes</h2><p class="section-intro">Une sélection limitée aux requêtes utiles pour orienter les titles, FAQ et contenus.</p></div>
       {query_sections}
     </section>
 
@@ -1810,10 +2190,24 @@ def render_report(report: dict[str, object]) -> str:
 
 
 def render_kpi_card(kpi: dict[str, object]) -> str:
+    label = str(kpi.get("label", ""))
+    value = str(kpi.get("value", ""))
+    label_lower = strip_accents(label).lower()
+    classes = ["kpi-card"]
+    note = ""
+    if "ctr" in label_lower:
+        classes.append("kpi-card--warning")
+        note = "<div class='kpi-note'>À surveiller selon la position moyenne</div>"
+    elif "prioritaires" in label_lower:
+        classes.append("kpi-card--accent")
+    elif "recuperables" in label_lower or value.startswith("+"):
+        classes.append("kpi-card--positive")
+        note = "<div class='kpi-note'>clics récupérables</div>"
     return (
-        "<div class='kpi-card'>"
-        f"<span>{html.escape(str(kpi.get('label', '')))}</span>"
-        f"<strong>{html.escape(str(kpi.get('value', '')))}</strong>"
+        f"<div class='{' '.join(classes)}'>"
+        f"<div class='kpi-label'>{html.escape(label)}</div>"
+        f"<div class='kpi-value'>{html.escape(value)}</div>"
+        f"{note}"
         "</div>"
     )
 
@@ -1825,13 +2219,18 @@ def render_monthly_priorities(items: list[dict[str, str]]) -> str:
     for index, item in enumerate(items[:3], start=1):
         cards.append(
             "<article class='priority-item'>"
-            f"<h3>Priorité {index} — {html.escape(item.get('title', ''))}</h3>"
-            f"<p><strong>Pourquoi :</strong> {html.escape(item.get('why', ''))}</p>"
-            f"<p><strong>Action :</strong> {html.escape(item.get('action', ''))}</p>"
-            f"<p><strong>Impact :</strong> {html.escape(item.get('impact', ''))}</p>"
+            f"<div class='priority-number'>{index:02d}</div>"
+            "<div class='priority-body'>"
+            f"<h3>{html.escape(item.get('title', ''))}</h3>"
+            "<div class='priority-meta'>"
+            f"<span class='priority-why'><strong>Pourquoi :</strong> {html.escape(item.get('why', ''))}</span>"
+            f"<span class='priority-action'><strong>Action :</strong> {html.escape(item.get('action', ''))}</span>"
+            f"<span class='priority-impact'><strong>Impact :</strong> {html.escape(item.get('impact', ''))}</span>"
+            "</div>"
+            "</div>"
             "</article>"
         )
-    return f"<div class='priority-list'>{''.join(cards)}</div>"
+    return f"<div class='priorities-list'>{''.join(cards)}</div>"
 
 
 def render_priority_page_cards(pages: list[dict[str, object]]) -> str:
@@ -1841,42 +2240,112 @@ def render_priority_page_cards(pages: list[dict[str, object]]) -> str:
 
 
 def render_client_page_card(page: dict[str, object]) -> str:
+    position = parse_position_value(dict(page.get("metrics", {})).get("Position", ""))
+    priority_class = page_priority_class(str(page.get("priority", "p3")))
+    position_width = position_fill_width(position)
+    position_color = position_bar_color(position)
     metrics = "".join(
-        "<div class='metric'>"
-        f"<span>{html.escape(str(label))}</span>"
-        f"<strong>{html.escape(str(value))}</strong>"
+        f"<div class='metric {metric_state_class(str(label))}'>"
+        f"<span class='metric-label'>{html.escape(str(label))}</span>"
+        f"<span class='metric-value'>{html.escape(str(value))}</span>"
         "</div>"
         for label, value in dict(page.get("metrics", {})).items()
     )
     actions = "".join(f"<li>{html.escape(str(action))}</li>" for action in page.get("actions", []))  # type: ignore[arg-type]
-    action_labels = "".join(f"<span class='chip'>{html.escape(str(label))}</span>" for label in page.get("action_type_labels", []))  # type: ignore[arg-type]
+    action_labels = "".join(f"<span class='type-tag'>{html.escape(str(label))}</span>" for label in page.get("action_type_labels", []))  # type: ignore[arg-type]
     overlap = ""
     if page.get("overlap_queries"):
         queries = " · ".join(str(query) for query in page["overlap_queries"])  # type: ignore[index]
         overlap = f"<p class='query-note'>Cannibalisation à vérifier sur: {html.escape(queries)}</p>"
     return f"""
-      <article class="page-card">
-        <div class="card-head">
-          <div>
-            <h3>Page : {html.escape(str(page.get("slug", "")))}</h3>
-            <a class="url-full" href="{html.escape(str(page.get("url", "")))}">{html.escape(str(page.get("url", "")))}</a>
+      <article class="page-card page-card--{priority_class}">
+        <div class="page-card-header">
+          <div class="page-info">
+            <span class="page-slug">{html.escape(str(page.get("slug", "")))}</span>
+            <a class="page-url" href="{html.escape(str(page.get("url", "")))}">{html.escape(str(page.get("url", "")))} ↗</a>
           </div>
-          <span class="badge badge-{html.escape(str(page.get("priority", "p3")))}">{html.escape(str(page.get("priority_label", "")))}</span>
+          <span class="priority-badge priority-badge--{priority_class}">{html.escape(priority_display_label(str(page.get("priority", "p3")), str(page.get("priority_label", ""))))}</span>
         </div>
-        <div class="metric-row">{metrics}</div>
-        <p><strong>Constat :</strong> {html.escape(str(page.get("diagnostic", "")))}</p>
-        <div>
-          <strong>Action recommandée</strong>
-          <ul class="actions">{actions}</ul>
+        <div class="page-metrics">{metrics}</div>
+        <div class="position-bar">
+          <div class="position-bar-label">Position dans Google</div>
+          <div class="position-bar-track"><div class="position-bar-fill" style="width: {position_width:.0f}%; background: {position_color}"></div></div>
+          <span class="position-bar-value">{html.escape(format_position_value(position))}</span>
+        </div>
+        <div class="page-constat"><span class="constat-label">Constat</span>{html.escape(str(page.get("diagnostic", "")))}</div>
+        <div class="page-actions">
+          <div class="actions-label">Ce qu'on recommande</div>
+          <ul class="actions-list">{actions}</ul>
         </div>
         <div class="insight-grid">
           <div class="insight"><span class="mini-label">Effort estimé</span><strong>{html.escape(str(page.get("effort", "")))}</strong></div>
-          <div class="insight"><span class="mini-label">Type d’action</span><div class="chip-row">{action_labels}</div></div>
+          <div class="insight"><span class="mini-label">Type d'action</span><div class="chip-row">{action_labels}</div></div>
           <div class="insight"><span class="mini-label">Impact attendu</span><strong>{html.escape(str(page.get("impact", "")))}</strong></div>
         </div>
         {overlap}
       </article>
 """
+
+
+def render_data_item(label: str, value: object) -> str:
+    return (
+        "<div class='data-item'>"
+        f"<span class='data-label'>{html.escape(str(label))}</span>"
+        f"<span class='data-value'>{html.escape(str(value))}</span>"
+        "</div>"
+    )
+
+
+def metric_state_class(label: str) -> str:
+    label_normalized = strip_accents(label).lower()
+    if "ctr" in label_normalized:
+        return "metric--warning"
+    if "gain" in label_normalized:
+        return "metric--positive"
+    return ""
+
+
+def page_priority_class(priority: str) -> str:
+    if priority == "p1":
+        return "high"
+    if priority == "p2":
+        return "medium"
+    if priority == "dead":
+        return "dead"
+    return "low"
+
+
+def priority_display_label(priority: str, fallback: str) -> str:
+    if priority == "p1":
+        return "Priorité haute"
+    if priority == "p2":
+        return "Priorité moyenne"
+    if priority == "dead":
+        return "À arbitrer"
+    return fallback or "Priorité faible"
+
+
+def parse_position_value(value: object) -> float:
+    try:
+        return float(str(value).replace(",", "."))
+    except ValueError:
+        return 20.0
+
+
+def format_position_value(position: float) -> str:
+    return f"{position:.1f}".replace(".", ",")
+
+
+def position_fill_width(position: float) -> float:
+    return max(0.0, min(100.0, ((20.0 - position) / 19.0) * 100.0))
+
+
+def position_bar_color(position: float) -> str:
+    if position <= 3:
+        return "#059669"
+    if position <= 10:
+        return "#D97706"
+    return "#991B1B"
 
 
 def render_query_sections(sections: list[dict[str, object]], has_queries: bool) -> str:
@@ -1886,7 +2355,7 @@ def render_query_sections(sections: list[dict[str, object]], has_queries: bool) 
     for section in sections:
         rows = section.get("rows", [])
         rendered.append(
-            "<div class='report-panel'>"
+            "<div class='query-card'>"
             f"<h3>{html.escape(str(section.get('title', '')))}</h3>"
             f"{render_query_table(rows)}"
             "</div>"
@@ -1898,22 +2367,21 @@ def render_query_table(rows: object) -> str:
     if not rows:
         return render_empty_state()
     typed_rows = list(rows)  # type: ignore[arg-type]
-    body = "".join(
-        "<tr>"
-        f"<td>{html.escape(str(row.get('query', '')))}</td>"
-        f"<td>{html.escape(str(row.get('clicks', '')))}</td>"
-        f"<td>{html.escape(str(row.get('impressions', '')))}</td>"
-        f"<td>{html.escape(str(row.get('ctr', '')))}</td>"
-        f"<td>{html.escape(str(row.get('position', '')))}</td>"
-        f"<td>{html.escape(str(row.get('recommendation', '')))}</td>"
-        "</tr>"
-        for row in typed_rows
-    )
-    return (
-        "<div class='table-wrap'><table><thead><tr>"
-        "<th>Requête</th><th>Clics</th><th>Impressions</th><th>CTR</th><th>Position</th><th>Recommandation</th>"
-        f"</tr></thead><tbody>{body}</tbody></table></div>"
-    )
+    cards = []
+    for row in typed_rows:
+        cards.append(
+            "<article class='appendix-card'>"
+            f"<h3>{html.escape(str(row.get('query', '')))}</h3>"
+            "<div class='data-grid'>"
+            f"{render_data_item('Clics', row.get('clicks', ''))}"
+            f"{render_data_item('Impressions', row.get('impressions', ''))}"
+            f"{render_data_item('CTR', row.get('ctr', ''))}"
+            f"{render_data_item('Position', row.get('position', ''))}"
+            f"{render_data_item('Recommandation', row.get('recommendation', ''))}"
+            "</div>"
+            "</article>"
+        )
+    return f"<div class='data-card-list'>{''.join(cards)}</div>"
 
 
 def render_snippet_section(snippets: list[dict[str, object]]) -> str:
@@ -1924,7 +2392,7 @@ def render_snippet_section(snippets: list[dict[str, object]]) -> str:
     )
     return f"""
     <section class="report-section" id="snippets">
-      <div class="section-heading"><div><h2>Snippets à retravailler</h2><p>Des propositions concrètes pour rendre les résultats Google plus cliquables.</p></div></div>
+      <div class="section-header"><h2 class="section-title">Snippets à retravailler</h2><p class="section-intro">Des propositions concrètes pour rendre les résultats Google plus cliquables.</p></div>
       {body}
     </section>
 """
@@ -1933,14 +2401,21 @@ def render_snippet_section(snippets: list[dict[str, object]]) -> str:
 def render_snippet_card(item: dict[str, object]) -> str:
     return f"""
       <article class="snippet-card">
-        <h3>{html.escape(str(item.get("slug", "")))}</h3>
-        <a class="url-full" href="{html.escape(str(item.get("url", "")))}">{html.escape(str(item.get("url", "")))}</a>
+        <div class="page-card-header">
+          <div class="page-info">
+            <span class="page-slug">{html.escape(str(item.get("slug", "")))}</span>
+            <a class="page-url" href="{html.escape(str(item.get("url", "")))}">{html.escape(str(item.get("url", "")))} ↗</a>
+          </div>
+          <span class="priority-badge priority-badge--medium">Snippet</span>
+        </div>
         <p class="small-note">{html.escape(str(item.get("metrics", "")))}</p>
-        <p><strong>Problème :</strong> {html.escape(str(item.get("problem", "")))}</p>
-        <p><strong>Intention probable :</strong> {html.escape(str(item.get("intent", "")))}</p>
-        <p><strong>Angle recommandé :</strong> {html.escape(str(item.get("angle", "")))}</p>
-        <p><strong>Exemple de title :</strong> {html.escape(str(item.get("title_example", "")))}</p>
-        <p><strong>Exemple de meta :</strong> {html.escape(str(item.get("meta_example", "")))}</p>
+        <div class="page-constat"><span class="constat-label">Problème</span>{html.escape(str(item.get("problem", "")))}</div>
+        <div class="data-grid">
+          {render_data_item("Intention", item.get("intent", ""))}
+          {render_data_item("Angle", item.get("angle", ""))}
+          {render_data_item("Title", item.get("title_example", ""))}
+          {render_data_item("Meta", item.get("meta_example", ""))}
+        </div>
       </article>
 """
 
@@ -1949,26 +2424,24 @@ def render_breakthrough_section(pages: list[dict[str, object]]) -> str:
     if not pages:
         body = render_empty_state()
     else:
-        body_rows = "".join(
-            "<tr>"
-            f"<td><a href='{html.escape(str(row.get('url', '')))}'>{html.escape(str(row.get('slug', '')))}</a></td>"
-            f"<td>{html.escape(str(row.get('position', '')))}</td>"
-            f"<td>{html.escape(str(row.get('impressions', '')))}</td>"
-            f"<td>{html.escape(str(row.get('clicks', '')))}</td>"
-            f"<td>{html.escape(str(row.get('action', '')))}</td>"
-            f"<td>{html.escape(str(row.get('effort', '')))}</td>"
-            f"<td>{html.escape(str(row.get('impact', '')))}</td>"
-            "</tr>"
+        body_cards = "".join(
+            "<article class='appendix-card'>"
+            f"<h3><a href='{html.escape(str(row.get('url', '')))}'>{html.escape(str(row.get('slug', '')))}</a></h3>"
+            "<div class='data-grid'>"
+            f"{render_data_item('Position', row.get('position', ''))}"
+            f"{render_data_item('Impressions', row.get('impressions', ''))}"
+            f"{render_data_item('Clics', row.get('clicks', ''))}"
+            f"{render_data_item('Effort', row.get('effort', ''))}"
+            f"{render_data_item('Impact', row.get('impact', ''))}"
+            "</div>"
+            f"<div class='page-constat'><span class='constat-label'>Action principale</span>{html.escape(str(row.get('action', '')))}</div>"
+            "</article>"
             for row in pages
         )
-        body = (
-            "<div class='table-wrap'><table><thead><tr>"
-            "<th>URL</th><th>Position</th><th>Impressions</th><th>Clics</th><th>Action principale</th><th>Effort</th><th>Impact</th>"
-            f"</tr></thead><tbody>{body_rows}</tbody></table></div>"
-        )
+        body = f"<div class='data-card-list'>{body_cards}</div>"
     return f"""
     <section class="report-section" id="renforcer">
-      <div class="section-heading"><div><h2>Pages déjà visibles à renforcer</h2><p>Ces pages ont déjà une base SEO: les améliorer est souvent plus rentable que repartir de zéro.</p></div></div>
+      <div class="section-header"><h2 class="section-title">Pages déjà visibles à renforcer</h2><p class="section-intro">Ces pages ont déjà une base SEO: les améliorer est souvent plus rentable que repartir de zéro.</p></div>
       {body}
     </section>
 """
@@ -1976,10 +2449,8 @@ def render_breakthrough_section(pages: list[dict[str, object]]) -> str:
 
 def render_traffic_section(traffic_chart: str) -> str:
     return f"""
-    <section class="report-panel chart-panel">
-      <div class="section-heading">
-        <div><h2>Évolution du trafic</h2><p>Évolution quotidienne des clics, si l’export Graphique est disponible.</p></div>
-      </div>
+    <section class="report-section chart-panel">
+      <div class="section-header"><h2 class="section-title">Évolution du trafic</h2><p class="section-intro">Évolution quotidienne des clics, si l’export Graphique est disponible.</p></div>
       {traffic_chart}
     </section>
 """
@@ -1995,8 +2466,8 @@ def render_methodology_section() -> str:
     ]
     body = "".join(f"<li>{html.escape(item)}</li>" for item in items)
     return f"""
-    <section class="report-panel" id="methodologie">
-      <div class="section-heading"><div><h2>Comment lire ce rapport</h2><p>Les règles de lecture pour éviter les mauvaises interprétations.</p></div></div>
+    <section class="report-section" id="methodologie">
+      <div class="section-header"><h2 class="section-title">Comment lire ce rapport</h2><p class="section-intro">Les règles de lecture pour éviter les mauvaises interprétations.</p></div>
       <ul class="actions">{body}</ul>
     </section>
 """
@@ -2007,7 +2478,7 @@ def render_appendices(pages: list[dict[str, object]], queries: list[dict[str, ob
     queries_table = render_appendix_table(queries) if queries else render_empty_state("Aucun export Requêtes exploitable dans cette analyse.")
     return f"""
     <section class="report-section appendix" id="annexes">
-      <div class="section-heading"><div><h2>Annexes</h2><p>Données complètes et limites méthodologiques.</p></div></div>
+      <div class="section-header"><h2 class="section-title">Annexes</h2><p class="section-intro">Données complètes et limites méthodologiques.</p></div>
       <h3>Tableau complet des pages analysées</h3>
       {pages_table}
       <h3>Tableau complet des requêtes</h3>
@@ -2026,12 +2497,18 @@ def render_appendix_table(rows: list[dict[str, object]]) -> str:
     if not rows:
         return render_empty_state()
     headers = list(rows[0].keys())
-    head = "".join(f"<th>{html.escape(str(header))}</th>" for header in headers)
-    body = "".join(
-        "<tr>" + "".join(f"<td>{html.escape(str(row.get(header, '')))}</td>" for header in headers) + "</tr>"
-        for row in rows
-    )
-    return f"<div class='table-wrap'><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>"
+    cards = []
+    for row in rows:
+        title_key = "URL" if "URL" in row else "Requête" if "Requête" in row else headers[0]
+        title = row.get(title_key, "")
+        details = "".join(render_data_item(header, row.get(header, "")) for header in headers if header != title_key)
+        cards.append(
+            "<article class='appendix-card'>"
+            f"<h3>{html.escape(str(title))}</h3>"
+            f"<div class='data-grid'>{details}</div>"
+            "</article>"
+        )
+    return f"<div class='data-card-list'>{''.join(cards)}</div>"
 
 
 def render_empty_state(message: str = "Aucun signal prioritaire détecté sur cette catégorie dans l’export fourni.") -> str:
@@ -2067,11 +2544,9 @@ def render_report_section(section: dict[str, object]) -> str:
     )
     return f"""
     <section class="report-section" id="{html.escape(section_id)}">
-      <div class="section-heading">
-        <div>
-          <h2>{html.escape(str(section["title"]))}</h2>
-          <p>{html.escape(str(section["intro"]))}</p>
-        </div>
+      <div class="section-header">
+        <h2 class="section-title">{html.escape(str(section["title"]))}</h2>
+        <p class="section-intro">{html.escape(str(section["intro"]))}</p>
       </div>
       {render_filter_bar(section_id)}
       {body}
@@ -2107,35 +2582,7 @@ def filter_button(section_id: str, kind: str, value: str, label: str, active: bo
 
 
 def render_page_card(page: dict[str, object]) -> str:
-    metrics = "".join(
-        "<div class='metric'>"
-        f"<span>{html.escape(str(label))}</span>"
-        f"<strong>{html.escape(str(value))}</strong>"
-        "</div>"
-        for label, value in page["metrics"].items()  # type: ignore[union-attr]
-    )
-    actions = "".join(f"<li>{html.escape(str(action))}</li>" for action in page.get("actions", []))  # type: ignore[arg-type]
-    overlap = ""
-    if page.get("overlap_queries"):
-        queries = " · ".join(str(query) for query in page["overlap_queries"])  # type: ignore[index]
-        overlap = f"<p class='query-note'>Requêtes à vérifier: {html.escape(queries)}</p>"
-    return f"""
-      <article class="page-card" data-priority="{html.escape(str(page["priority"]))}" data-actions="{html.escape(str(page["action_types"]))}">
-        <div class="card-head">
-          <div>
-            <h3><a href="{html.escape(str(page["url"]))}">{html.escape(str(page["slug"]))}</a></h3>
-          </div>
-          <span class="badge badge-{html.escape(str(page["priority"]))}">{html.escape(str(page["priority_label"]))}</span>
-        </div>
-        <div class="metric-row">{metrics}</div>
-        <div>
-          <strong>{html.escape(translate("Action conseillée"))}</strong>
-          <ul class="actions">{actions}</ul>
-        </div>
-        <p class="why">{html.escape(str(page["why"]))}</p>
-        {overlap}
-      </article>
-"""
+    return render_client_page_card(page)
 
 
 def render_traffic_chart(points: list[dict[str, object]]) -> str:
@@ -2180,13 +2627,8 @@ def render_origin_section(pays_data: list[dict[str, object]], appareils_data: li
         else "<p class='empty-state'>Aucune donnée appareil disponible.</p>"
     )
     return f"""
-    <section class="report-panel">
-      <div class="section-heading">
-        <div>
-          <h2>Origine du trafic</h2>
-          <p>Répartition des clics par pays et par appareil.</p>
-        </div>
-      </div>
+    <section class="report-section">
+      <div class="section-header"><h2 class="section-title">Origine du trafic</h2><p class="section-intro">Répartition des clics par pays et par appareil.</p></div>
       <div class="origin-grid">
         <div class="origin-card">
           <h3>Par pays</h3>
