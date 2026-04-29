@@ -44,6 +44,34 @@ EXPECTED_CTR_BY_POSITION = {
     19: 0.005,
     20: 0.004,
 }
+GSC_CSV_KIND_ALIASES = {
+    "pages": ("pages", "page", "top pages", "url"),
+    "queries": ("requetes", "requete", "queries", "query", "top queries", "mots cles", "keywords"),
+    "graphique": ("graphique", "date", "dates", "chart", "courbe"),
+    "pays": ("pays", "country", "countries"),
+    "appareils": ("appareil", "appareils", "device", "devices"),
+    "filters": ("filtres", "filtre", "filters", "filter"),
+}
+GSC_KIND_DIMENSIONS = {
+    "pages": "page",
+    "queries": "query",
+    "graphique": "date",
+    "pays": "country",
+    "appareils": "device",
+    "filters": "filter",
+}
+QUERY_QUESTION_STARTERS = (
+    "comment",
+    "combien",
+    "pourquoi",
+    "quand",
+    "quel",
+    "quelle",
+    "quels",
+    "quelles",
+    "ou",
+    "où",
+)
 
 
 def run_gsc_analysis(
@@ -77,13 +105,14 @@ def run_gsc_analysis(
     extra_stopwords = {word.strip().lower() for word in niche_stopwords or [] if word.strip()}
     if auto_niche_stopwords:
         extra_stopwords.update(derive_auto_stopwords(current))
+    queries = parse_queries_csv(effective_queries_csv) if effective_queries_csv else []
     possible_overlap = (
         detect_possible_query_overlap(
             current,
-            parse_queries_csv(effective_queries_csv),
+            queries,
             extra_stopwords=extra_stopwords,
         )
-        if effective_queries_csv
+        if queries
         else {}
     )
     results = analyze_pages(current=current, previous=previous, possible_overlap=possible_overlap)
@@ -96,10 +125,12 @@ def run_gsc_analysis(
             output_html,
             site_name=site_name,
             has_previous=bool(previous_csv),
-            has_queries=bool(effective_queries_csv),
+            has_queries=bool(queries),
+            queries_data=queries,
             graphique_data=load_graphique(effective_graphique_csv),
             pays_data=load_pays(effective_pays_csv),
             appareils_data=load_appareils(effective_appareils_csv),
+            filters_data=load_filters(current_csv),
         )
     return results
 
@@ -141,46 +172,82 @@ def read_gsc_csv_text(filepath: str, kind: str) -> str:
 
 
 def find_gsc_csv_member(archive: ZipFile, kind: str) -> str | None:
+    candidates: list[tuple[int, str]] = []
     for name in archive.namelist():
-        normalized = normalize_archive_name(Path(name).name)
-        if not normalized.endswith(".csv"):
+        if not normalize_archive_name(Path(name).name).endswith(".csv"):
             continue
-        if kind == "pages" and ("pages" in normalized or "top pages" in normalized):
-            return name
-        if kind == "queries" and (
-            "requete" in normalized
-            or "requetes" in normalized
-            or "queries" in normalized
-            or "query" in normalized
-        ):
-            return name
-        if kind == "graphique" and (
-            "graphique" in normalized
-            or "dates" in normalized
-            or "date" in normalized
-            or "chart" in normalized
-        ):
-            return name
-        if kind == "pays" and ("pays" in normalized or "country" in normalized or "countries" in normalized):
-            return name
-        if kind == "appareils" and (
-            "appareil" in normalized
-            or "appareils" in normalized
-            or "device" in normalized
-            or "devices" in normalized
-        ):
-            return name
-    return None
+        score = score_gsc_csv_member(archive, name, kind)
+        if score > 0:
+            candidates.append((score, name))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def score_gsc_csv_member(archive: ZipFile, name: str, kind: str) -> int:
+    normalized_names = normalize_archive_name_variants(Path(name).name)
+    score = 0
+    aliases = GSC_CSV_KIND_ALIASES.get(kind, ())
+    if any(alias in normalized for alias in aliases for normalized in normalized_names):
+        score += 40
+    headers = read_gsc_member_headers(archive, name)
+    normalized_headers = {normalize_header(header) for header in headers}
+    dimension = GSC_KIND_DIMENSIONS.get(kind, "")
+    metric_headers = {"clicks", "impressions", "ctr", "position"}
+    if dimension and dimension in normalized_headers:
+        score += 70
+    if kind in {"pages", "queries", "pays", "appareils"} and metric_headers.issubset(normalized_headers):
+        score += 25
+    if kind == "graphique" and {"date", "clicks"}.issubset(normalized_headers):
+        score += 30
+    if kind == "filters" and {"filter", "value"}.issubset(normalized_headers):
+        score += 80
+    if kind == "pages" and "query" in normalized_headers:
+        score -= 60
+    if kind == "queries" and "page" in normalized_headers:
+        score -= 60
+    return score
+
+
+def read_gsc_member_headers(archive: ZipFile, name: str) -> list[str]:
+    try:
+        text = archive.read(name).decode("utf-8-sig", errors="replace")
+    except (KeyError, UnicodeDecodeError):
+        return []
+    if not text.strip():
+        return []
+    delimiter = detect_delimiter_from_text(text)
+    with io.StringIO(text) as handle:
+        reader = csv.reader(handle, delimiter=delimiter)
+        try:
+            return next(reader)
+        except StopIteration:
+            return []
 
 
 def normalize_archive_name(name: str) -> str:
     normalized = unicodedata.normalize("NFKD", name)
     ascii_name = normalized.encode("ascii", "ignore").decode("ascii")
-    return ascii_name.strip().lower()
+    return re.sub(r"[\s_]+", " ", ascii_name).strip().lower()
+
+
+def normalize_archive_name_variants(name: str) -> set[str]:
+    variants = {name}
+    for encoding in ("cp437", "latin1"):
+        try:
+            variants.add(name.encode(encoding, errors="ignore").decode("utf-8", errors="ignore"))
+        except UnicodeError:
+            pass
+    try:
+        variants.add(name.encode("utf-8", errors="ignore").decode("latin1", errors="ignore"))
+    except UnicodeError:
+        pass
+    return {normalize_archive_name(variant) for variant in variants if variant}
 
 
 def normalize_header(header: str) -> str:
-    value = strip_accents(header).strip().lower().replace("\ufeff", "")
+    value = re.sub(r"\s+", " ", strip_accents(header).strip().lower().replace("\ufeff", ""))
     mapping = {
         "average position": "position",
         "appareil": "device",
@@ -191,6 +258,8 @@ def normalize_header(header: str) -> str:
         "ctr": "ctr",
         "date": "date",
         "device": "device",
+        "filtre": "filter",
+        "filter": "filter",
         "jour": "date",
         "impressions": "impressions",
         "page": "page",
@@ -209,6 +278,8 @@ def normalize_header(header: str) -> str:
         "top pages": "page",
         "top queries": "query",
         "url": "page",
+        "valeur": "value",
+        "value": "value",
     }
     return mapping.get(value, value)
 
@@ -333,6 +404,30 @@ def load_pays(filepath: str | None) -> list[dict[str, object]]:
 def load_appareils(filepath: str | None) -> list[dict[str, object]]:
     """Retourne liste de dicts {appareil, clics, impressions, ctr, position}."""
     return _load_dimension(filepath, kind="appareils", dimension_key="device", output_key="appareil")
+
+
+def load_filters(filepath: str | None) -> dict[str, str]:
+    if not filepath:
+        return {}
+    try:
+        text = read_gsc_csv_text(str(filepath), "filters")
+    except (FileNotFoundError, CLIError):
+        return {}
+    delimiter = detect_delimiter_from_text(text)
+    filters: dict[str, str] = {}
+    with io.StringIO(text) as handle:
+        reader = csv.DictReader(handle, delimiter=delimiter)
+        if not reader.fieldnames:
+            return {}
+        headers = {normalize_header(name): name for name in reader.fieldnames}
+        if "filter" not in headers or "value" not in headers:
+            return {}
+        for row in reader:
+            label = (row.get(headers["filter"]) or "").strip()
+            value = (row.get(headers["value"]) or "").strip()
+            if label and value:
+                filters[strip_accents(label).strip().lower()] = value.replace("\xa0", " ")
+    return filters
 
 
 def _load_dimension(
@@ -658,26 +753,45 @@ def build_report(
     site_name: str = "",
     has_previous: bool | None = None,
     has_queries: bool | None = None,
+    queries_data: list[GSCQueryData] | None = None,
     graphique_data: list[dict[str, object]] | None = None,
     pays_data: list[dict[str, object]] | None = None,
     appareils_data: list[dict[str, object]] | None = None,
+    filters_data: dict[str, str] | None = None,
 ) -> dict[str, object]:
     if isinstance(pages_csv, list):
         results = pages_csv
+        queries = queries_data or []
     elif pages_csv:
         current = parse_pages_csv(str(pages_csv))
-        queries = parse_queries_csv(str(queries_csv)) if queries_csv else []
+        effective_queries_csv = (
+            str(queries_csv)
+            if queries_csv
+            else str(pages_csv)
+            if gsc_archive_contains(str(pages_csv), "queries")
+            else ""
+        )
+        queries = queries_data if queries_data is not None else parse_queries_csv(effective_queries_csv) if effective_queries_csv else []
         overlap = detect_possible_query_overlap(current, queries) if queries else {}
         previous = parse_pages_csv(str(previous_csv)) if previous_csv else None
         results = analyze_pages(current=current, previous=previous, possible_overlap=overlap)
     else:
         results = []
+        queries = queries_data or []
 
     graphique = graphique_data if graphique_data is not None else load_graphique(str(graphique_csv)) if graphique_csv else []
     pays = pays_data if pays_data is not None else load_pays(str(pays_csv)) if pays_csv else []
     appareils = appareils_data if appareils_data is not None else load_appareils(str(appareils_csv)) if appareils_csv else []
+    filters = (
+        filters_data
+        if filters_data is not None
+        else load_filters(str(pages_csv))
+        if pages_csv and not isinstance(pages_csv, list)
+        else {}
+    )
 
-    title = f"Rapport SEO — {site_name}" if site_name else "Rapport SEO"
+    domain = site_name or infer_domain_from_results(results)
+    title = "Plan d’action SEO basé sur Google Search Console"
     total_clicks = sum(item.clicks for item in results)
     total_impressions = sum(item.impressions for item in results)
     avg_ctr = (total_clicks / total_impressions) if total_impressions else 0.0
@@ -688,38 +802,294 @@ def build_report(
     )
     total_recoverable = sum(item.estimated_recoverable_clicks or 0 for item in results)
 
+    priority_count = sum(1 for item in results if item.priority in {"HIGH", "MEDIUM"} and not is_dead_gsc_page(item))
+    snippet_count = sum(1 for item in results if is_snippet_opportunity(item))
     sections = assign_report_sections(results)
+    has_query_export = has_queries if has_queries is not None else bool(queries)
     return {
         "title": title,
-        "site_name": site_name,
+        "subtitle": "Opportunités de croissance, pages prioritaires et actions recommandées",
+        "site_name": domain,
         "generated_at": datetime.now().strftime("%d/%m/%Y"),
-        "period_label": "Période analysée: export Google Search Console fourni",
+        "period_label": build_period_label(filters),
+        "executive_summary": build_executive_summary(results, priority_count, snippet_count, bool(queries)),
+        "monthly_priorities": build_monthly_priorities(results, queries),
         "source_notes": [
-            "Export Pages récent: obligatoire, c'est la photo actuelle.",
+            "Analyse basée sur les données Google Search Console exportées.",
             (
-                "Export Pages précédent: fourni, les pages à surveiller peuvent être comparées."
+                "Export Pages précédent: fourni, les variations peuvent être contextualisées."
                 if (has_previous if has_previous is not None else bool(previous_csv))
-                else "Export Pages précédent: non fourni, la surveillance temporelle reste limitée."
+                else "Export Pages précédent: non fourni, la lecture reste centrée sur la période actuelle."
             ),
             (
-                "Export Requêtes: fourni, les conflits de mots-clés potentiels sont signalés."
-                if (has_queries if has_queries is not None else bool(queries_csv))
-                else "Export Requêtes: non fourni, le rapport reste centré sur les pages."
+                "Export Requêtes: fourni et exploité pour qualifier les intentions de recherche."
+                if has_query_export
+                else "Export Requêtes: non fourni, les recommandations s’appuient surtout sur les pages."
             ),
         ],
         "kpis": [
+            {"label": "Pages analysées", "value": format_number(len(results))},
             {"label": "Clics totaux", "value": format_number(total_clicks)},
             {"label": "Impressions totales", "value": format_number(total_impressions)},
             {"label": "CTR moyen", "value": format_percent(avg_ctr)},
             {"label": "Position moyenne", "value": f"{avg_position:.1f}" if avg_position else "-"},
-            {"label": translate("Pages analysées"), "value": format_number(len(results))},
-            {"label": translate("Clics récupérables estimés"), "value": f"+{format_number(total_recoverable)}"},
+            {"label": "Pages prioritaires", "value": format_number(priority_count)},
+            {"label": "Snippets à retravailler", "value": format_number(snippet_count)},
+            {"label": "Clics récupérables estimés", "value": f"+{format_number(total_recoverable)}"},
         ],
         "sections": sections,
+        "priority_pages": build_priority_page_cards(results)[:10],
+        "snippet_pages": build_snippet_cards(results)[:8],
+        "breakthrough_pages": build_breakthrough_cards(results)[:10],
+        "query_sections": build_query_sections(queries, results),
+        "appendix_pages": [page_to_appendix_row(item) for item in results],
+        "appendix_queries": [query_to_appendix_row(query, results) for query in queries],
+        "has_queries": bool(queries),
         "graphique_data": graphique,
         "pays_data": pays,
         "appareils_data": appareils,
+        "filters": filters,
     }
+
+
+def infer_domain_from_results(results: list[GSCPageAnalysis]) -> str:
+    for item in results:
+        parsed = urlparse(item.url)
+        if parsed.netloc:
+            return parsed.netloc.replace("www.", "")
+    return "Domaine non précisé"
+
+
+def build_period_label(filters: dict[str, str]) -> str:
+    date_value = filters.get("date")
+    if date_value:
+        return f"Période analysée: {date_value}"
+    return "Période analysée: export Google Search Console fourni"
+
+
+def build_executive_summary(
+    results: list[GSCPageAnalysis],
+    priority_count: int,
+    snippet_count: int,
+    has_queries: bool,
+) -> str:
+    if not results:
+        return "L’export fourni ne contient pas assez de pages exploitables pour établir une priorisation fiable."
+    high_impression_low_ctr = sum(1 for item in results if item.impressions >= 100 and item.ctr < 0.02)
+    near_top = sum(1 for item in results if 4 <= item.position <= 12 and item.impressions >= 50)
+    if high_impression_low_ctr >= max(1, len(results) * 0.15):
+        base = (
+            "Le site dispose déjà de pages visibles dans Google, mais plusieurs pages génèrent beaucoup "
+            "d’impressions sans obtenir un taux de clic satisfaisant. La priorité est donc d’améliorer "
+            "les pages déjà exposées avant de produire davantage de contenus."
+        )
+    elif near_top:
+        base = (
+            "Le site possède des pages déjà placées près des premières positions. Le meilleur levier à court "
+            "terme consiste à renforcer ces pages avec un contenu plus complet, de meilleurs liens internes "
+            "et des réponses plus nettes aux intentions de recherche."
+        )
+    elif priority_count:
+        base = (
+            "L’export fait ressortir quelques opportunités ciblées plutôt qu’un problème généralisé. "
+            "Le plan d’action doit rester sélectif pour concentrer l’effort sur les pages avec un potentiel mesurable."
+        )
+    else:
+        base = (
+            "Aucun signal critique ne ressort massivement de l’export. Le rapport sert surtout à identifier "
+            "des ajustements progressifs et à poser une base de suivi dans Google Search Console."
+        )
+    query_note = (
+        " Les requêtes fournies permettent aussi d’affiner les angles éditoriaux et les questions à intégrer."
+        if has_queries
+        else " L’absence de l’export Requêtes limite l’analyse fine de l’intention de recherche."
+    )
+    snippet_note = (
+        f" {format_count(snippet_count, 'snippet ressort', 'snippets ressortent')} comme candidats à une réécriture prioritaire."
+        if snippet_count
+        else ""
+    )
+    return base + query_note + snippet_note
+
+
+def build_monthly_priorities(results: list[GSCPageAnalysis], queries: list[GSCQueryData]) -> list[dict[str, str]]:
+    snippet_count = sum(1 for item in results if is_snippet_opportunity(item))
+    near_count = sum(1 for item in results if is_near_breakthrough(item) or 4 <= item.position <= 12)
+    query_count = len([query for query in queries if query.impressions >= 50])
+    priorities = [
+        {
+            "title": "Améliorer les snippets des pages à fortes impressions",
+            "why": (
+                f"{format_count(snippet_count, 'page est déjà visible mais sous-cliquée', 'pages sont déjà visibles mais sous-cliquées')}."
+                if snippet_count
+                else "Les pages visibles doivent donner une raison plus claire de cliquer."
+            ),
+            "action": "Réécrire les titles, les meta descriptions et l’angle d’entrée des pages prioritaires.",
+            "impact": "Potentiel d’amélioration du CTR sans attendre une progression de position.",
+        },
+        {
+            "title": "Renforcer les pages proches du haut des résultats",
+            "why": (
+                f"{format_count(near_count, 'page est déjà en page 1 ou au début de la page 2', 'pages sont déjà en page 1 ou au début de la page 2')}."
+                if near_count
+                else "Les pages avec une base SEO existante sont souvent plus rentables à améliorer que des contenus neufs."
+            ),
+            "action": "Enrichir le contenu, ajouter une FAQ, mettre à jour les informations et renforcer le maillage interne.",
+            "impact": "Gain potentiel plus rapide car les pages ont déjà une visibilité Google.",
+        },
+        {
+            "title": "Exploiter les requêtes sous-utilisées",
+            "why": (
+                f"{format_count(query_count, 'requête exploitable révèle une intention précise', 'requêtes exploitables révèlent des intentions précises')}."
+                if queries
+                else "Cette piste sera à confirmer dès qu’un export Requêtes sera disponible."
+            ),
+            "action": "Ajouter des sections ciblées dans les pages existantes ou créer des contenus satellites lorsque l’intention est distincte.",
+            "impact": "Potentiel de trafic plus qualifié, à valider après mise en ligne et suivi GSC.",
+        },
+    ]
+    priorities.sort(
+        key=lambda item: (
+            0 if "snippets" in item["title"].lower() and snippet_count else 1,
+            0 if "haut" in item["title"].lower() and near_count else 1,
+        )
+    )
+    return priorities[:3]
+
+
+def format_count(count: int, singular: str, plural: str) -> str:
+    return f"{format_number(count)} {singular if count == 1 else plural}"
+
+
+def build_priority_page_cards(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
+    ordered = sorted(
+        [item for item in results if not is_weak_page(item)],
+        key=lambda item: (item.estimated_recoverable_clicks or 0, item.score, item.impressions),
+        reverse=True,
+    )
+    return [page_to_report_dict(item) for item in ordered if item.priority in {"HIGH", "MEDIUM"} or item.estimated_recoverable_clicks]
+
+
+def build_snippet_cards(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
+    return [snippet_to_report_dict(item) for item in sorted(results, key=lambda row: row.impressions, reverse=True) if is_snippet_opportunity(item)]
+
+
+def build_breakthrough_cards(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
+    candidates = [
+        item
+        for item in results
+        if 4 <= item.position <= 20 and item.impressions >= 50 and item.priority != "DEAD"
+    ]
+    return [page_to_breakthrough_dict(item) for item in sorted(candidates, key=lambda row: (row.position, -row.impressions))]
+
+
+def build_query_sections(queries: list[GSCQueryData], results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
+    if not queries:
+        return []
+    under_clicked = sorted(
+        [query for query in queries if query.impressions >= 50 and query.ctr < expected_ctr_for_position(query.position) * 0.65],
+        key=lambda query: (query.impressions, -query.clicks),
+        reverse=True,
+    )[:10]
+    near_gain = sorted(
+        [query for query in queries if 3.5 <= query.position <= 12 and query.impressions >= 30],
+        key=lambda query: (query.position, -query.impressions),
+    )[:10]
+    existing = sorted(
+        [query for query in queries if query.position <= 20 and query.impressions >= 20],
+        key=lambda query: (query.impressions, -query.position),
+        reverse=True,
+    )[:10]
+    new_content = sorted(
+        [query for query in queries if should_consider_new_content(query, results)],
+        key=lambda query: (query.impressions, query.position),
+        reverse=True,
+    )[:10]
+    return [
+        {
+            "id": "queries-impressions",
+            "title": "Top requêtes avec beaucoup d’impressions et peu de clics",
+            "rows": [query_to_report_dict(query, results, forced_recommendation="à utiliser dans un title/meta") for query in under_clicked],
+        },
+        {
+            "id": "queries-gain",
+            "title": "Top requêtes déjà proches d’un gain",
+            "rows": [query_to_report_dict(query, results, forced_recommendation="à intégrer dans une page existante") for query in near_gain],
+        },
+        {
+            "id": "queries-existing",
+            "title": "Requêtes à intégrer dans les pages existantes",
+            "rows": [query_to_report_dict(query, results, forced_recommendation="à intégrer dans une page existante") for query in existing],
+        },
+        {
+            "id": "queries-new",
+            "title": "Requêtes pouvant justifier un nouveau contenu",
+            "rows": [query_to_report_dict(query, results, forced_recommendation="à considérer comme nouveau contenu") for query in new_content],
+        },
+    ]
+
+
+def expected_ctr_for_position(position: float) -> float:
+    return EXPECTED_CTR_BY_POSITION.get(max(1, min(20, round(position))), 0.004)
+
+
+def should_consider_new_content(query: GSCQueryData, results: list[GSCPageAnalysis]) -> bool:
+    if query.impressions < 20 or query.position <= 8:
+        return False
+    query_tokens = query_token_set(query.query)
+    if not query_tokens:
+        return False
+    page_token_sets = [extract_slug_keywords(item.url, stopwords=set(GSC_CANNIBAL_STOPWORDS)) for item in results]
+    best_overlap = max((len(query_tokens & tokens) / max(1, len(query_tokens)) for tokens in page_token_sets), default=0)
+    return best_overlap < 0.45 or query.position > 18
+
+
+def query_token_set(query: str) -> set[str]:
+    stopwords = {word.lower() for word in GSC_CANNIBAL_STOPWORDS}
+    return {
+        strip_accents(word).lower()
+        for word in re.findall(r"[\w'-]+", query)
+        if len(word) > 3 and strip_accents(word).lower() not in stopwords
+    }
+
+
+def query_to_report_dict(
+    query: GSCQueryData,
+    results: list[GSCPageAnalysis],
+    forced_recommendation: str = "",
+) -> dict[str, object]:
+    recommendation = forced_recommendation or classify_query_recommendation(query, results)
+    return {
+        "query": query.query,
+        "clicks": format_number(query.clicks),
+        "impressions": format_number(query.impressions),
+        "ctr": format_percent(query.ctr),
+        "position": f"{query.position:.1f}",
+        "recommendation": recommendation,
+    }
+
+
+def query_to_appendix_row(query: GSCQueryData, results: list[GSCPageAnalysis]) -> dict[str, object]:
+    row = query_to_report_dict(query, results)
+    return {
+        "Requête": row["query"],
+        "Clics": row["clicks"],
+        "Impressions": row["impressions"],
+        "CTR": row["ctr"],
+        "Position": row["position"],
+        "Recommandation": row["recommendation"],
+    }
+
+
+def classify_query_recommendation(query: GSCQueryData, results: list[GSCPageAnalysis]) -> str:
+    lowered = query.query.strip().lower()
+    if lowered.startswith(QUERY_QUESTION_STARTERS) or len(lowered.split()) >= 5:
+        return "à traiter en FAQ"
+    if query.ctr < expected_ctr_for_position(query.position) * 0.65 and query.position <= 12:
+        return "à utiliser dans un title/meta"
+    if should_consider_new_content(query, results):
+        return "à considérer comme nouveau contenu"
+    return "à intégrer dans une page existante"
 
 
 def assign_report_sections(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
@@ -798,21 +1168,26 @@ def is_weak_page(item: GSCPageAnalysis) -> bool:
 
 
 def page_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
-    actions = [translate(action) for action in list(dict.fromkeys(item.actions))]
+    actions = precise_actions_for_page(item)
+    action_types = action_types_for_page(actions)
     return {
         "url": item.url,
         "slug": display_slug(item.url),
-        "priority": item.priority.lower(),
-        "priority_label": translate(item.priority),
+        "priority": priority_css_class(item),
+        "priority_label": client_priority_label(item),
+        "diagnostic": diagnostic_for_page(item),
         "metrics": {
             "Clics": format_number(item.clicks),
             "Impressions": format_number(item.impressions),
             "CTR": format_percent(item.ctr),
             "Position": f"{item.position:.1f}",
-            "Gain estimé": f"+{format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "-",
+            "Gain estimé": f"+{format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "à confirmer",
         },
         "actions": actions,
-        "action_types": ",".join(action_types_for_page(item.actions)),
+        "action_types": ",".join(css_action_type(value) for value in action_types),
+        "action_type_labels": action_types,
+        "effort": effort_for_page(item),
+        "impact": impact_for_page(item),
         "why": explain_reason(item),
         "overlap_queries": item.possible_overlap_queries[:4],
     }
@@ -822,12 +1197,186 @@ def action_types_for_page(actions: list[str]) -> list[str]:
     types: list[str] = []
     joined = " ".join(actions).lower()
     if "title" in joined or "méta" in joined or "meta" in joined or "ctr" in joined:
-        types.append("snippet")
+        types.append("Snippet")
     if "contenu" in joined or "faq" in joined or "fraîcheur" in joined or "fraicheur" in joined:
-        types.append("contenu")
+        types.append("Contenu")
     if "maillage" in joined or "liens internes" in joined:
-        types.append("liens")
-    return list(dict.fromkeys(types)) or ["autre"]
+        types.append("Maillage interne")
+    if "technique" in joined or "redirection" in joined or "supprimer" in joined:
+        types.append("Technique")
+    if "cannibalisation" in joined or "chevauchement" in joined:
+        types.append("Cannibalisation")
+    return list(dict.fromkeys(types)) or ["Contenu"]
+
+
+def css_action_type(label: str) -> str:
+    return strip_accents(label).lower().replace(" ", "-")
+
+
+def client_priority_label(item: GSCPageAnalysis) -> str:
+    if item.priority == "HIGH":
+        return "Priorité 1"
+    if item.priority == "MEDIUM":
+        return "Priorité 2"
+    if item.priority == "DEAD":
+        return "À arbitrer"
+    return "Priorité 3"
+
+
+def priority_css_class(item: GSCPageAnalysis) -> str:
+    if item.priority == "HIGH":
+        return "p1"
+    if item.priority == "MEDIUM":
+        return "p2"
+    if item.priority == "DEAD":
+        return "dead"
+    return "p3"
+
+
+def effort_for_page(item: GSCPageAnalysis) -> str:
+    if is_dead_gsc_page(item) or item.possible_overlap_queries:
+        return "Élevé"
+    if 4 <= item.position <= 10 and is_snippet_opportunity(item):
+        return "Faible"
+    if item.position <= 20:
+        return "Moyen"
+    return "Moyen"
+
+
+def diagnostic_for_page(item: GSCPageAnalysis) -> str:
+    if is_dead_gsc_page(item):
+        return "La page ne capte presque pas de trafic et doit être arbitrée plutôt qu’optimisée à l’aveugle."
+    if is_snippet_opportunity(item):
+        return "La page reçoit beaucoup d’impressions mais son CTR reste faible par rapport à sa visibilité."
+    if 4 <= item.position <= 10:
+        return "La page est déjà proche des premières positions et peut progresser avec un renforcement ciblé."
+    if 10 < item.position <= 20:
+        return "La page est visible mais manque probablement de profondeur ou de soutien interne pour passer un cap."
+    if item.possible_overlap_queries:
+        return "Plusieurs URLs semblent répondre à des requêtes proches, à vérifier avant optimisation."
+    return "La page présente un signal utile mais moins urgent que les priorités principales."
+
+
+def impact_for_page(item: GSCPageAnalysis) -> str:
+    if item.impact_label:
+        return item.impact_label
+    if is_snippet_opportunity(item):
+        return "Hausse potentielle du CTR, à confirmer après mise en ligne et suivi dans GSC."
+    if item.position <= 20:
+        return "Potentiel de gain progressif si la page gagne en pertinence et en liens internes."
+    return "Impact à confirmer: le signal actuel reste limité."
+
+
+def precise_actions_for_page(item: GSCPageAnalysis) -> list[str]:
+    actions: list[str] = []
+    keyword = keyword_phrase_from_url(item.url)
+    if is_dead_gsc_page(item):
+        return [
+            "vérifier si la page répond encore à une intention utile",
+            "fusionner avec une page plus forte si le sujet est déjà couvert",
+            "prévoir une redirection 301 ou un retrait propre si la page n’a plus de rôle",
+        ]
+    if is_snippet_opportunity(item):
+        actions.extend(
+            [
+                f"réécrire le title autour de l’intention « {keyword} »",
+                "clarifier la promesse dès la meta description",
+                "aligner l’introduction avec la question principale de l’internaute",
+            ]
+        )
+    if 4 <= item.position <= 10:
+        actions.extend(
+            [
+                "ajouter une FAQ courte sur les questions récurrentes du sujet",
+                "mettre à jour les informations clés et les exemples",
+                "ajouter des liens internes depuis les pages thématiquement proches",
+            ]
+        )
+    elif 10 < item.position <= 20:
+        actions.extend(
+            [
+                "enrichir la page avec une structure plus complète",
+                "créer des liens internes depuis les contenus déjà visibles",
+                "traiter les sous-intentions manquantes dans des sections dédiées",
+            ]
+        )
+    if item.click_delta is not None and item.click_delta < -10:
+        actions.append("contrôler la fraîcheur du contenu et les changements visibles dans les résultats Google")
+    if item.possible_overlap_queries:
+        actions.append("vérifier manuellement la cannibalisation possible avant de modifier les pages")
+    return list(dict.fromkeys(actions)) or ["garder la page en suivi et réévaluer lors du prochain export GSC"]
+
+
+def keyword_phrase_from_url(url: str) -> str:
+    slug = display_slug(url).strip("/")
+    if not slug:
+        return "la requête principale"
+    last_segment = slug.split("/")[-1]
+    words = [word for word in re.split(r"[-_]+", last_segment) if word and not word.isdigit()]
+    return " ".join(words[:6]) or "la requête principale"
+
+
+def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
+    keyword = keyword_phrase_from_url(item.url)
+    title_keyword = keyword[:1].upper() + keyword[1:]
+    return {
+        "url": item.url,
+        "slug": display_slug(item.url),
+        "problem": "Beaucoup d’impressions, mais le résultat affiché ne donne probablement pas assez envie de cliquer.",
+        "intent": probable_intent_from_keyword(keyword),
+        "angle": f"Répondre clairement à l’intention « {keyword} » avec une promesse plus concrète.",
+        "title_example": f"{title_keyword} : guide clair, conseils et points clés",
+        "meta_example": (
+            f"Découvrez les informations essentielles sur {keyword}, les points à vérifier et les conseils "
+            "pour avancer plus simplement."
+        ),
+        "metrics": f"{format_number(item.impressions)} impressions · CTR {format_percent(item.ctr)} · position {item.position:.1f}",
+    }
+
+
+def probable_intent_from_keyword(keyword: str) -> str:
+    lower = keyword.lower()
+    if any(word in lower for word in ("prix", "tarif", "meilleur", "avis", "comparatif")):
+        return "Comparaison ou décision d’achat"
+    if any(word in lower for word in ("comment", "guide", "niveau", "points", "inscription")):
+        return "Recherche d’explication pratique"
+    return "Recherche d’information sur le sujet"
+
+
+def page_to_breakthrough_dict(item: GSCPageAnalysis) -> dict[str, object]:
+    return {
+        "url": item.url,
+        "slug": display_slug(item.url),
+        "position": f"{item.position:.1f}",
+        "impressions": format_number(item.impressions),
+        "clicks": format_number(item.clicks),
+        "action": main_action_for_page(item),
+        "effort": effort_for_page(item),
+        "impact": impact_for_page(item),
+    }
+
+
+def main_action_for_page(item: GSCPageAnalysis) -> str:
+    if is_snippet_opportunity(item):
+        return "Retravailler le snippet"
+    if 4 <= item.position <= 10:
+        return "Renforcer contenu, FAQ et maillage interne"
+    if item.possible_overlap_queries:
+        return "Vérifier la cannibalisation possible"
+    return "Enrichir la page et créer des liens internes"
+
+
+def page_to_appendix_row(item: GSCPageAnalysis) -> dict[str, object]:
+    return {
+        "URL": item.url,
+        "Priorité": client_priority_label(item),
+        "Clics": format_number(item.clicks),
+        "Impressions": format_number(item.impressions),
+        "CTR": format_percent(item.ctr),
+        "Position": f"{item.position:.1f}",
+        "Gain estimé": f"+{format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "",
+        "Action principale": main_action_for_page(item),
+    }
 
 
 def explain_reason(item: GSCPageAnalysis) -> str:
@@ -867,9 +1416,11 @@ def write_html(
     site_name: str = "",
     has_previous: bool = False,
     has_queries: bool = False,
+    queries_data: list[GSCQueryData] | None = None,
     graphique_data: list[dict[str, object]] | None = None,
     pays_data: list[dict[str, object]] | None = None,
     appareils_data: list[dict[str, object]] | None = None,
+    filters_data: dict[str, str] | None = None,
 ) -> Path:
     output_file = ensure_parent_dir(output_path)
     report = build_report(
@@ -877,9 +1428,11 @@ def write_html(
         site_name=site_name,
         has_previous=has_previous,
         has_queries=has_queries,
+        queries_data=queries_data,
         graphique_data=graphique_data,
         pays_data=pays_data,
         appareils_data=appareils_data,
+        filters_data=filters_data,
     )
     html_doc = render_report(report)
     with output_file.open("w", encoding="utf-8") as handle:
@@ -889,39 +1442,33 @@ def write_html(
 
 def render_report(report: dict[str, object]) -> str:
     title = str(report["title"])
-    sections = report.get("sections", [])
-    nav = "".join(
-        f"<a href='#{html.escape(str(section['id']))}'>{html.escape(nav_label(str(section['title'])))}</a>"
-        for section in sections  # type: ignore[union-attr]
-    )
-    kpis = "".join(
-        "<div class='kpi-card'>"
-        f"<span>{html.escape(str(kpi['label']))}</span>"
-        f"<strong>{html.escape(str(kpi['value']))}</strong>"
-        "</div>"
-        for kpi in report.get("kpis", [])  # type: ignore[union-attr]
-    )
-    source_notes = "".join(
-        f"<li>{html.escape(str(note))}</li>" for note in report.get("source_notes", [])  # type: ignore[union-attr]
-    )
+    nav_items = [
+        ("synthese", "Synthèse"),
+        ("priorites", "Priorités"),
+        ("pages-prioritaires", "Pages"),
+        ("requetes", "Requêtes"),
+        ("snippets", "Snippets"),
+        ("renforcer", "À renforcer"),
+        ("methodologie", "Méthode"),
+        ("annexes", "Annexes"),
+    ]
+    nav = "".join(f"<a href='#{anchor}'>{label}</a>" for anchor, label in nav_items)
+    kpis = "".join(render_kpi_card(kpi) for kpi in report.get("kpis", []))  # type: ignore[arg-type]
+    source_notes = "".join(f"<li>{html.escape(str(note))}</li>" for note in report.get("source_notes", []))  # type: ignore[union-attr]
     traffic_chart = render_traffic_chart(report.get("graphique_data", []))  # type: ignore[arg-type]
-    traffic_section = (
-        f"""
-    <section class="report-panel chart-panel">
-      <div class="section-heading">
-        <h2>Trafic sur 90 jours</h2>
-        <p>Évolution quotidienne des clics, si l'export Graphique est disponible.</p>
-      </div>
-      {traffic_chart}
-    </section>
-"""
-        if traffic_chart
-        else ""
-    )
-    sections_html = "".join(render_report_section(section) for section in sections)  # type: ignore[arg-type]
+    traffic_section = render_traffic_section(traffic_chart) if traffic_chart else ""
     origin_section = render_origin_section(
         report.get("pays_data", []),  # type: ignore[arg-type]
         report.get("appareils_data", []),  # type: ignore[arg-type]
+    )
+    priority_cards = render_priority_page_cards(report.get("priority_pages", []))  # type: ignore[arg-type]
+    snippets = render_snippet_section(report.get("snippet_pages", []))  # type: ignore[arg-type]
+    query_sections = render_query_sections(report.get("query_sections", []), bool(report.get("has_queries")))  # type: ignore[arg-type]
+    breakthrough = render_breakthrough_section(report.get("breakthrough_pages", []))  # type: ignore[arg-type]
+    priorities = render_monthly_priorities(report.get("monthly_priorities", []))  # type: ignore[arg-type]
+    appendices = render_appendices(
+        report.get("appendix_pages", []),  # type: ignore[arg-type]
+        report.get("appendix_queries", []),  # type: ignore[arg-type]
     )
 
     return f"""<!DOCTYPE html>
@@ -932,19 +1479,20 @@ def render_report(report: dict[str, object]) -> str:
   <title>{html.escape(title)}</title>
   <style>
     :root {{
-      --bg: #FAFAF9;
+      --bg: #F7F8FA;
       --card: #FFFFFF;
-      --line: #E5E3DC;
-      --soft: #F3F2EE;
-      --primary: #1D4ED8;
-      --text: #1C1C1A;
-      --muted: #6B6B6A;
-      --red-bg: #FEE2E2;
-      --red-text: #991B1B;
-      --amber-bg: #FEF3C7;
-      --amber-text: #92400E;
-      --green-bg: #D1FAE5;
-      --green-text: #065F46;
+      --line: #DDE3EA;
+      --soft: #EEF3F7;
+      --primary: #155E75;
+      --accent: #7C3AED;
+      --text: #172026;
+      --muted: #5C6873;
+      --red-bg: #FFE5E1;
+      --red-text: #9F2B1D;
+      --amber-bg: #FFF2CC;
+      --amber-text: #7A4B00;
+      --green-bg: #DDF7EA;
+      --green-text: #086142;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -954,30 +1502,30 @@ def render_report(report: dict[str, object]) -> str:
       font-family: system-ui, -apple-system, sans-serif;
       line-height: 1.5;
     }}
-    main {{ max-width: 1180px; margin: 0 auto; padding: 32px 20px 56px; }}
-    a {{ color: var(--primary); overflow-wrap: anywhere; }}
+    main {{ max-width: 1120px; margin: 0 auto; padding: 30px 20px 56px; }}
+    a {{ color: var(--primary); overflow-wrap: anywhere; word-break: break-word; }}
     h1, h2, h3, p {{ margin-top: 0; }}
+    h1 {{ font-size: 2.35rem; line-height: 1.08; margin-bottom: 10px; letter-spacing: 0; max-width: 820px; }}
+    h2 {{ font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }}
+    h3 {{ letter-spacing: 0; }}
     .report-header {{
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 20px;
       align-items: start;
-      margin-bottom: 22px;
+      margin-bottom: 24px;
+      padding: 34px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      border-radius: 8px;
     }}
-    .brand-mark {{
-      width: 44px;
-      height: 44px;
-      border-radius: 10px;
-      background: var(--primary);
-      color: white;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      margin-bottom: 14px;
-    }}
-    h1 {{ font-size: 2.25rem; line-height: 1.08; margin-bottom: 8px; letter-spacing: 0; }}
-    .meta, .section-heading p, .source-list, .empty-state, .why, .footer-note {{ color: var(--muted); }}
+    .eyebrow {{ color: var(--primary); font-size: 0.78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px; }}
+    .subtitle {{ font-size: 1.1rem; color: var(--muted); max-width: 820px; margin-bottom: 18px; }}
+    .cover-meta {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 20px; }}
+    .cover-meta div {{ background: var(--soft); border-radius: 8px; padding: 12px; min-width: 0; }}
+    .cover-meta span, .kpi-card span, .mini-label {{ display: block; color: var(--muted); font-size: 12px; margin-bottom: 5px; }}
+    .cover-meta strong {{ display: block; overflow-wrap: anywhere; }}
+    .meta, .section-heading p, .source-list, .empty-state, .why, .footer-note, .small-note {{ color: var(--muted); }}
     .btn-export {{
       border: 0;
       border-radius: 8px;
@@ -990,7 +1538,7 @@ def render_report(report: dict[str, object]) -> str:
     }}
     .kpi-grid {{
       display: grid;
-      grid-template-columns: repeat(6, minmax(145px, 1fr));
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
       gap: 10px;
       margin: 18px 0;
     }}
@@ -1000,14 +1548,13 @@ def render_report(report: dict[str, object]) -> str:
       padding: 14px;
       min-height: 86px;
     }}
-    .kpi-card span {{ display: block; color: var(--muted); font-size: 12px; margin-bottom: 7px; }}
     .kpi-card strong {{ display: block; font-size: 24px; font-weight: 650; line-height: 1.1; }}
-    .source-box {{
+    .report-panel, .report-section, .source-box {{
       border: 1px solid var(--line);
       background: var(--card);
-      border-radius: 10px;
-      padding: 14px 16px;
-      margin-bottom: 18px;
+      border-radius: 8px;
+      padding: 22px;
+      margin-top: 20px;
     }}
     .source-list {{ margin: 0; padding-left: 18px; }}
     nav {{
@@ -1032,10 +1579,6 @@ def render_report(report: dict[str, object]) -> str:
       padding: 8px 10px;
       font-size: 0.9rem;
     }}
-    .report-panel, .report-section {{
-      margin-top: 22px;
-      padding-top: 4px;
-    }}
     .section-heading {{
       display: flex;
       justify-content: space-between;
@@ -1044,45 +1587,25 @@ def render_report(report: dict[str, object]) -> str:
       margin-bottom: 12px;
     }}
     .section-heading h2 {{ margin-bottom: 4px; font-size: 1.45rem; }}
-    .filter-bar {{
-      display: flex;
-      gap: 14px;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      border: 1px solid var(--line);
-      background: var(--card);
-      border-radius: 10px;
-      padding: 10px;
-      margin-bottom: 12px;
-    }}
-    .filter-group {{ display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }}
-    .filter-label {{ color: var(--muted); font-size: 12px; font-weight: 700; margin-right: 2px; }}
-    .filter-btn {{
-      border: 1px solid var(--line);
-      background: var(--soft);
-      border-radius: 8px;
-      color: var(--text);
-      cursor: pointer;
-      padding: 7px 10px;
-      font-size: 0.86rem;
-    }}
-    .filter-btn.is-active {{ background: var(--primary); border-color: var(--primary); color: white; }}
-    .cards-grid {{
+    .summary-copy {{ font-size: 1.05rem; max-width: 880px; margin-bottom: 0; }}
+    .cards-grid, .priority-list {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 12px;
     }}
-    .page-card {{
+    .priority-item, .page-card, .snippet-card {{
       background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 8px;
       padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 12px;
       min-width: 0;
     }}
+    .priority-item {{ background: #FBFCFE; }}
+    .priority-item h3 {{ font-size: 1rem; margin-bottom: 8px; }}
+    .priority-item p {{ margin-bottom: 8px; }}
     .card-head {{
       display: flex;
       justify-content: space-between;
@@ -1090,6 +1613,7 @@ def render_report(report: dict[str, object]) -> str:
       align-items: start;
     }}
     .card-head h3 {{ font-size: 1rem; line-height: 1.3; margin-bottom: 4px; overflow-wrap: anywhere; }}
+    .url-full {{ color: var(--muted); font-size: 0.88rem; line-height: 1.35; overflow-wrap: anywhere; word-break: break-word; }}
     .badge {{
       border-radius: 999px;
       display: inline-flex;
@@ -1100,12 +1624,12 @@ def render_report(report: dict[str, object]) -> str:
       font-weight: 800;
       white-space: nowrap;
     }}
-    .badge-high {{ background: var(--red-bg); color: var(--red-text); }}
-    .badge-medium {{ background: var(--amber-bg); color: var(--amber-text); }}
-    .badge-low, .badge-dead {{ background: var(--green-bg); color: var(--green-text); }}
+    .badge-p1 {{ background: var(--red-bg); color: var(--red-text); }}
+    .badge-p2 {{ background: var(--amber-bg); color: var(--amber-text); }}
+    .badge-p3, .badge-dead {{ background: var(--green-bg); color: var(--green-text); }}
     .metric-row {{
       display: grid;
-      grid-template-columns: repeat(5, minmax(72px, 1fr));
+      grid-template-columns: repeat(5, minmax(82px, 1fr));
       gap: 8px;
     }}
     .metric {{ background: var(--soft); border-radius: 8px; padding: 8px; min-width: 0; }}
@@ -1113,6 +1637,10 @@ def render_report(report: dict[str, object]) -> str:
     .metric strong {{ display: block; font-size: 0.95rem; line-height: 1.25; overflow-wrap: anywhere; }}
     .actions {{ margin: 0; padding-left: 18px; }}
     .actions li + li {{ margin-top: 5px; }}
+    .insight-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }}
+    .insight {{ background: var(--soft); border-radius: 8px; padding: 10px; }}
+    .chip-row {{ display: flex; flex-wrap: wrap; gap: 6px; }}
+    .chip {{ border: 1px solid var(--line); background: var(--soft); border-radius: 999px; padding: 4px 8px; font-size: 12px; color: var(--text); }}
     .why {{ font-style: italic; margin: 0; }}
     .query-note {{
       color: var(--amber-text);
@@ -1128,6 +1656,11 @@ def render_report(report: dict[str, object]) -> str:
       border-radius: 10px;
       padding: 18px;
     }}
+    table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+    th, td {{ border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }}
+    th {{ color: var(--muted); font-size: 12px; }}
+    .table-wrap {{ overflow-x: auto; }}
+    .appendix table {{ font-size: 0.88rem; }}
     .reliability-note {{
       color: var(--muted);
       font-size: 0.9rem;
@@ -1154,6 +1687,7 @@ def render_report(report: dict[str, object]) -> str:
     @media (max-width: 820px) {{
       main {{ padding: 24px 14px 42px; }}
       .report-header {{ grid-template-columns: 1fr; }}
+      .cover-meta, .insight-grid {{ grid-template-columns: 1fr; }}
       .kpi-grid {{ grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }}
       .section-heading {{ display: block; }}
       .metric-row {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
@@ -1161,7 +1695,6 @@ def render_report(report: dict[str, object]) -> str:
     }}
     @media print {{
       .btn-export,
-      .filter-bar,
       nav,
       .no-print {{ display: none !important; }}
       @page {{
@@ -1174,25 +1707,21 @@ def render_report(report: dict[str, object]) -> str:
         color: black !important;
       }}
       main {{ max-width: none; padding: 0; }}
-      .page-card {{
+      .page-card, .priority-item, .snippet-card, .report-panel, .report-section {{
         break-inside: avoid;
         page-break-inside: avoid;
         border: 1px solid #ccc !important;
         box-shadow: none !important;
       }}
-      a[href]::after {{
-        content: " (" attr(href) ")";
-        font-size: 9pt;
-        color: #666;
-      }}
-      .kpi-card {{
+      a[href]::after {{ content: ""; }}
+      .kpi-card, .metric, .insight {{
         background: #F5F5F5 !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }}
       .page-card {{ display: block !important; }}
-      .report-section {{ page-break-before: auto; }}
-      .report-section:first-of-type {{ page-break-before: avoid; }}
+      .report-section, .report-panel {{ page-break-before: auto; }}
+      .appendix {{ break-inside: auto; page-break-inside: auto; }}
     }}
   </style>
 </head>
@@ -1200,30 +1729,54 @@ def render_report(report: dict[str, object]) -> str:
   <main>
     <header class="report-header">
       <div>
-        <div class="brand-mark">SEO</div>
+        <p class="eyebrow">Audit SEO GSC</p>
         <h1>{html.escape(title)}</h1>
-        <p class="meta">Généré le {html.escape(str(report["generated_at"]))} · {html.escape(str(report["period_label"]))}</p>
+        <p class="subtitle">{html.escape(str(report.get("subtitle", "")))}</p>
+        <div class="cover-meta">
+          <div><span>Domaine analysé</span><strong>{html.escape(str(report.get("site_name") or "Non précisé"))}</strong></div>
+          <div><span>Période analysée</span><strong>{html.escape(str(report.get("period_label", "")).replace("Période analysée: ", ""))}</strong></div>
+          <div><span>Date de génération</span><strong>{html.escape(str(report["generated_at"]))}</strong></div>
+        </div>
       </div>
       <button onclick="exportPDF()" class="btn-export">Exporter en PDF</button>
     </header>
-
-    <section class="kpi-grid" aria-label="Indicateurs clés">
-      {kpis}
-    </section>
 
     <section class="source-box">
       <ul class="source-list">{source_notes}</ul>
     </section>
 
-    {traffic_section}
-
     <nav aria-label="Navigation du rapport">{nav}</nav>
 
-    {sections_html}
+    <section class="report-panel" id="synthese">
+      <div class="section-heading"><div><h2>Synthèse exécutive</h2><p>Les indicateurs à retenir avant d’entrer dans le détail.</p></div></div>
+      <section class="kpi-grid" aria-label="Indicateurs clés">{kpis}</section>
+      <p class="summary-copy">{html.escape(str(report.get("executive_summary", "")))}</p>
+    </section>
 
+    <section class="report-panel" id="priorites">
+      <div class="section-heading"><div><h2>Les 3 priorités du mois</h2><p>Un plan d’action volontairement court pour décider vite.</p></div></div>
+      {priorities}
+    </section>
+
+    <section class="report-section" id="pages-prioritaires">
+      <div class="section-heading"><div><h2>Top pages à traiter en premier</h2><p>Les pages avec le meilleur rapport visibilité, effort et potentiel.</p></div></div>
+      {priority_cards}
+      <p class="reliability-note">Les clics récupérables estimés sont un ordre de grandeur, pas une promesse. À confirmer après mise en ligne et suivi dans Google Search Console.</p>
+    </section>
+
+    <section class="report-section" id="requetes">
+      <div class="section-heading"><div><h2>Exploitation des requêtes</h2><p>Une sélection limitée aux requêtes utiles pour orienter les titles, FAQ et contenus.</p></div></div>
+      {query_sections}
+    </section>
+
+    {snippets}
+    {breakthrough}
+    {traffic_section}
     {origin_section}
+    {render_methodology_section()}
+    {appendices}
 
-    <p class="footer-note">Les gains sont des estimations sur la période analysée, pas des garanties.</p>
+    <p class="footer-note">Analyse basée sur les données Google Search Console exportées. Les recommandations doivent être priorisées avec la connaissance métier du site.</p>
   </main>
   <script>
     function exportPDF() {{
@@ -1232,33 +1785,238 @@ def render_report(report: dict[str, object]) -> str:
       window.print();
       document.title = original;
     }}
-
-    document.querySelectorAll('.filter-bar').forEach((bar) => {{
-      bar.addEventListener('click', (event) => {{
-        const button = event.target.closest('button[data-filter-kind]');
-        if (!button) return;
-        const section = button.closest('.report-section');
-        const kind = button.dataset.filterKind;
-        section.querySelectorAll(`button[data-filter-kind="${{kind}}"]`).forEach((item) => {{
-          item.classList.toggle('is-active', item === button);
-        }});
-        applyFilters(section);
-      }});
-    }});
-
-    function applyFilters(section) {{
-      const priority = section.querySelector('[data-filter-kind="priority"].is-active')?.dataset.filterValue || 'all';
-      const action = section.querySelector('[data-filter-kind="action"].is-active')?.dataset.filterValue || 'all';
-      section.querySelectorAll('.page-card').forEach((card) => {{
-        const priorityMatch = priority === 'all' || card.dataset.priority === priority;
-        const actionValues = (card.dataset.actions || '').split(',');
-        const actionMatch = action === 'all' || actionValues.includes(action);
-        card.style.display = priorityMatch && actionMatch ? '' : 'none';
-      }});
-    }}
   </script>
 </body>
 </html>"""
+
+
+def render_kpi_card(kpi: dict[str, object]) -> str:
+    return (
+        "<div class='kpi-card'>"
+        f"<span>{html.escape(str(kpi.get('label', '')))}</span>"
+        f"<strong>{html.escape(str(kpi.get('value', '')))}</strong>"
+        "</div>"
+    )
+
+
+def render_monthly_priorities(items: list[dict[str, str]]) -> str:
+    if not items:
+        return render_empty_state()
+    cards = []
+    for index, item in enumerate(items[:3], start=1):
+        cards.append(
+            "<article class='priority-item'>"
+            f"<h3>Priorité {index} — {html.escape(item.get('title', ''))}</h3>"
+            f"<p><strong>Pourquoi :</strong> {html.escape(item.get('why', ''))}</p>"
+            f"<p><strong>Action :</strong> {html.escape(item.get('action', ''))}</p>"
+            f"<p><strong>Impact :</strong> {html.escape(item.get('impact', ''))}</p>"
+            "</article>"
+        )
+    return f"<div class='priority-list'>{''.join(cards)}</div>"
+
+
+def render_priority_page_cards(pages: list[dict[str, object]]) -> str:
+    if not pages:
+        return render_empty_state()
+    return f"<div class='cards-grid'>{''.join(render_client_page_card(page) for page in pages)}</div>"
+
+
+def render_client_page_card(page: dict[str, object]) -> str:
+    metrics = "".join(
+        "<div class='metric'>"
+        f"<span>{html.escape(str(label))}</span>"
+        f"<strong>{html.escape(str(value))}</strong>"
+        "</div>"
+        for label, value in dict(page.get("metrics", {})).items()
+    )
+    actions = "".join(f"<li>{html.escape(str(action))}</li>" for action in page.get("actions", []))  # type: ignore[arg-type]
+    action_labels = "".join(f"<span class='chip'>{html.escape(str(label))}</span>" for label in page.get("action_type_labels", []))  # type: ignore[arg-type]
+    overlap = ""
+    if page.get("overlap_queries"):
+        queries = " · ".join(str(query) for query in page["overlap_queries"])  # type: ignore[index]
+        overlap = f"<p class='query-note'>Cannibalisation à vérifier sur: {html.escape(queries)}</p>"
+    return f"""
+      <article class="page-card">
+        <div class="card-head">
+          <div>
+            <h3>Page : {html.escape(str(page.get("slug", "")))}</h3>
+            <a class="url-full" href="{html.escape(str(page.get("url", "")))}">{html.escape(str(page.get("url", "")))}</a>
+          </div>
+          <span class="badge badge-{html.escape(str(page.get("priority", "p3")))}">{html.escape(str(page.get("priority_label", "")))}</span>
+        </div>
+        <div class="metric-row">{metrics}</div>
+        <p><strong>Constat :</strong> {html.escape(str(page.get("diagnostic", "")))}</p>
+        <div>
+          <strong>Action recommandée</strong>
+          <ul class="actions">{actions}</ul>
+        </div>
+        <div class="insight-grid">
+          <div class="insight"><span class="mini-label">Effort estimé</span><strong>{html.escape(str(page.get("effort", "")))}</strong></div>
+          <div class="insight"><span class="mini-label">Type d’action</span><div class="chip-row">{action_labels}</div></div>
+          <div class="insight"><span class="mini-label">Impact attendu</span><strong>{html.escape(str(page.get("impact", "")))}</strong></div>
+        </div>
+        {overlap}
+      </article>
+"""
+
+
+def render_query_sections(sections: list[dict[str, object]], has_queries: bool) -> str:
+    if not has_queries:
+        return render_empty_state("Export Requêtes non fourni ou non exploitable dans l’export fourni.")
+    rendered = []
+    for section in sections:
+        rows = section.get("rows", [])
+        rendered.append(
+            "<div class='report-panel'>"
+            f"<h3>{html.escape(str(section.get('title', '')))}</h3>"
+            f"{render_query_table(rows)}"
+            "</div>"
+        )
+    return "".join(rendered)
+
+
+def render_query_table(rows: object) -> str:
+    if not rows:
+        return render_empty_state()
+    typed_rows = list(rows)  # type: ignore[arg-type]
+    body = "".join(
+        "<tr>"
+        f"<td>{html.escape(str(row.get('query', '')))}</td>"
+        f"<td>{html.escape(str(row.get('clicks', '')))}</td>"
+        f"<td>{html.escape(str(row.get('impressions', '')))}</td>"
+        f"<td>{html.escape(str(row.get('ctr', '')))}</td>"
+        f"<td>{html.escape(str(row.get('position', '')))}</td>"
+        f"<td>{html.escape(str(row.get('recommendation', '')))}</td>"
+        "</tr>"
+        for row in typed_rows
+    )
+    return (
+        "<div class='table-wrap'><table><thead><tr>"
+        "<th>Requête</th><th>Clics</th><th>Impressions</th><th>CTR</th><th>Position</th><th>Recommandation</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>"
+    )
+
+
+def render_snippet_section(snippets: list[dict[str, object]]) -> str:
+    body = (
+        f"<div class='cards-grid'>{''.join(render_snippet_card(item) for item in snippets)}</div>"
+        if snippets
+        else render_empty_state()
+    )
+    return f"""
+    <section class="report-section" id="snippets">
+      <div class="section-heading"><div><h2>Snippets à retravailler</h2><p>Des propositions concrètes pour rendre les résultats Google plus cliquables.</p></div></div>
+      {body}
+    </section>
+"""
+
+
+def render_snippet_card(item: dict[str, object]) -> str:
+    return f"""
+      <article class="snippet-card">
+        <h3>{html.escape(str(item.get("slug", "")))}</h3>
+        <a class="url-full" href="{html.escape(str(item.get("url", "")))}">{html.escape(str(item.get("url", "")))}</a>
+        <p class="small-note">{html.escape(str(item.get("metrics", "")))}</p>
+        <p><strong>Problème :</strong> {html.escape(str(item.get("problem", "")))}</p>
+        <p><strong>Intention probable :</strong> {html.escape(str(item.get("intent", "")))}</p>
+        <p><strong>Angle recommandé :</strong> {html.escape(str(item.get("angle", "")))}</p>
+        <p><strong>Exemple de title :</strong> {html.escape(str(item.get("title_example", "")))}</p>
+        <p><strong>Exemple de meta :</strong> {html.escape(str(item.get("meta_example", "")))}</p>
+      </article>
+"""
+
+
+def render_breakthrough_section(pages: list[dict[str, object]]) -> str:
+    if not pages:
+        body = render_empty_state()
+    else:
+        body_rows = "".join(
+            "<tr>"
+            f"<td><a href='{html.escape(str(row.get('url', '')))}'>{html.escape(str(row.get('slug', '')))}</a></td>"
+            f"<td>{html.escape(str(row.get('position', '')))}</td>"
+            f"<td>{html.escape(str(row.get('impressions', '')))}</td>"
+            f"<td>{html.escape(str(row.get('clicks', '')))}</td>"
+            f"<td>{html.escape(str(row.get('action', '')))}</td>"
+            f"<td>{html.escape(str(row.get('effort', '')))}</td>"
+            f"<td>{html.escape(str(row.get('impact', '')))}</td>"
+            "</tr>"
+            for row in pages
+        )
+        body = (
+            "<div class='table-wrap'><table><thead><tr>"
+            "<th>URL</th><th>Position</th><th>Impressions</th><th>Clics</th><th>Action principale</th><th>Effort</th><th>Impact</th>"
+            f"</tr></thead><tbody>{body_rows}</tbody></table></div>"
+        )
+    return f"""
+    <section class="report-section" id="renforcer">
+      <div class="section-heading"><div><h2>Pages déjà visibles à renforcer</h2><p>Ces pages ont déjà une base SEO: les améliorer est souvent plus rentable que repartir de zéro.</p></div></div>
+      {body}
+    </section>
+"""
+
+
+def render_traffic_section(traffic_chart: str) -> str:
+    return f"""
+    <section class="report-panel chart-panel">
+      <div class="section-heading">
+        <div><h2>Évolution du trafic</h2><p>Évolution quotidienne des clics, si l’export Graphique est disponible.</p></div>
+      </div>
+      {traffic_chart}
+    </section>
+"""
+
+
+def render_methodology_section() -> str:
+    items = [
+        "Les clics récupérables sont des estimations, pas des promesses.",
+        "Les positions sont des moyennes Google Search Console.",
+        "Les priorités sont calculées selon impressions, CTR, position et potentiel d’amélioration.",
+        "Les signaux de cannibalisation doivent être vérifiés manuellement.",
+        "Les résultats sont à confirmer après mise en ligne et suivi dans GSC.",
+    ]
+    body = "".join(f"<li>{html.escape(item)}</li>" for item in items)
+    return f"""
+    <section class="report-panel" id="methodologie">
+      <div class="section-heading"><div><h2>Comment lire ce rapport</h2><p>Les règles de lecture pour éviter les mauvaises interprétations.</p></div></div>
+      <ul class="actions">{body}</ul>
+    </section>
+"""
+
+
+def render_appendices(pages: list[dict[str, object]], queries: list[dict[str, object]]) -> str:
+    pages_table = render_appendix_table(pages)
+    queries_table = render_appendix_table(queries) if queries else render_empty_state("Aucun export Requêtes exploitable dans cette analyse.")
+    return f"""
+    <section class="report-section appendix" id="annexes">
+      <div class="section-heading"><div><h2>Annexes</h2><p>Données complètes et limites méthodologiques.</p></div></div>
+      <h3>Tableau complet des pages analysées</h3>
+      {pages_table}
+      <h3>Tableau complet des requêtes</h3>
+      {queries_table}
+      <h3>Détails méthodologiques et limites</h3>
+      <ul class="actions">
+        <li>Google Search Console agrège les positions et les CTR: ce ne sont pas des mesures page par page en temps réel.</li>
+        <li>Le rapport ne remplace pas une vérification SERP, une analyse de contenu ni un crawl technique complet.</li>
+        <li>Les estimations de clics récupérables donnent un ordre de grandeur sur la période exportée.</li>
+      </ul>
+    </section>
+"""
+
+
+def render_appendix_table(rows: list[dict[str, object]]) -> str:
+    if not rows:
+        return render_empty_state()
+    headers = list(rows[0].keys())
+    head = "".join(f"<th>{html.escape(str(header))}</th>" for header in headers)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{html.escape(str(row.get(header, '')))}</td>" for header in headers) + "</tr>"
+        for row in rows
+    )
+    return f"<div class='table-wrap'><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>"
+
+
+def render_empty_state(message: str = "Aucun signal prioritaire détecté sur cette catégorie dans l’export fourni.") -> str:
+    return f"<p class='empty-state'>{html.escape(message)}</p>"
 
 
 def nav_label(title: str) -> str:

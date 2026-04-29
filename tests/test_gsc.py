@@ -191,15 +191,19 @@ class GSCAnalysisTests(unittest.TestCase):
 
             report = output_html.read_text(encoding="utf-8")
 
-        self.assertIn("Rapport SEO — Example", report)
-        self.assertIn("Opportunités prioritaires", report)
-        self.assertIn("Résultats Google à améliorer", report)
+        self.assertIn("Plan d’action SEO basé sur Google Search Console", report)
+        self.assertIn("Domaine analysé", report)
+        self.assertIn("Example", report)
+        self.assertIn("Les 3 priorités du mois", report)
+        self.assertIn("Top pages à traiter en premier", report)
+        self.assertIn("Exploitation des requêtes", report)
+        self.assertIn("Pages déjà visibles à renforcer", report)
         self.assertIn("Export Pages précédent: fourni", report)
         self.assertIn("Exporter en PDF", report)
         self.assertIn("@media print", report)
         self.assertNotIn("ACTION CONSEILLEE", report)
         self.assertNotIn("PRIORITE", report)
-        self.assertNotIn("Snippets à retravailler", report)
+        self.assertNotIn("HIGH", report)
 
     def test_run_gsc_analysis_accepts_full_search_console_zip(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -238,6 +242,30 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertIn("Origine du trafic", report)
         self.assertIn("France", report)
         self.assertIn("Mobile", report)
+
+    def test_gsc_zip_detection_uses_columns_when_filename_is_ambiguous(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            archive = root / "performance-search.zip"
+
+            with ZipFile(archive, "w") as zip_file:
+                zip_file.writestr(
+                    "export_1.csv",
+                    "Pages les plus populaires,Clics,Impressions,CTR,Position\n"
+                    "https://example.com/guide-padel,12,1000,1.2%,8.4\n",
+                )
+                zip_file.writestr(
+                    "Reque_tes.csv",
+                    "Requêtes les plus fréquentes,Clics,Impressions,CTR,Position\n"
+                    "guide padel,10,800,1.25%,7\n",
+                )
+
+            pages = parse_pages_csv(str(archive))
+            queries = parse_queries_csv(str(archive))
+
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(len(queries), 1)
+        self.assertEqual(queries[0].query, "guide padel")
 
     def test_missing_optional_gsc_csvs_do_not_crash_report_rendering(self) -> None:
         with TemporaryDirectory() as tmp_dir:
