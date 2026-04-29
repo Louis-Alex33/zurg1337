@@ -1258,12 +1258,12 @@ def diagnostic_for_page(item: GSCPageAnalysis) -> str:
 
 
 def impact_for_page(item: GSCPageAnalysis) -> str:
-    if item.impact_label:
-        return item.impact_label
+    if item.estimated_recoverable_clicks:
+        return f"+{format_number(item.estimated_recoverable_clicks)} clics récupérables estimés"
     if is_snippet_opportunity(item):
-        return "Hausse potentielle du CTR, à confirmer après mise en ligne et suivi dans GSC."
+        return "Hausse potentielle du CTR"
     if item.position <= 20:
-        return "Potentiel de gain progressif si la page gagne en pertinence et en liens internes."
+        return "Potentiel de progression SEO"
     return "Impact à confirmer: le signal actuel reste limité."
 
 
@@ -1302,9 +1302,7 @@ def precise_actions_for_page(item: GSCPageAnalysis) -> list[str]:
         )
     if item.click_delta is not None and item.click_delta < -10:
         actions.append("contrôler la fraîcheur du contenu et les changements visibles dans les résultats Google")
-    if item.possible_overlap_queries:
-        actions.append("vérifier manuellement la cannibalisation possible avant de modifier les pages")
-    return list(dict.fromkeys(actions)) or ["garder la page en suivi et réévaluer lors du prochain export GSC"]
+    return (list(dict.fromkeys(actions)) or ["garder la page en suivi et réévaluer lors du prochain export GSC"])[:5]
 
 
 def keyword_phrase_from_url(url: str) -> str:
@@ -1637,10 +1635,29 @@ def render_report(report: dict[str, object]) -> str:
     .metric strong {{ display: block; font-size: 0.95rem; line-height: 1.25; overflow-wrap: anywhere; }}
     .actions {{ margin: 0; padding-left: 18px; }}
     .actions li + li {{ margin-top: 5px; }}
-    .insight-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }}
-    .insight {{ background: var(--soft); border-radius: 8px; padding: 10px; }}
+    .insight-grid {{
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #FBFCFE;
+    }}
+    .insight {{
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      min-width: 0;
+    }}
+    .insight strong {{
+      font-size: 0.95rem;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }}
     .chip-row {{ display: flex; flex-wrap: wrap; gap: 6px; }}
-    .chip {{ border: 1px solid var(--line); background: var(--soft); border-radius: 999px; padding: 4px 8px; font-size: 12px; color: var(--text); }}
+    .chip {{ border: 1px solid var(--line); background: var(--soft); border-radius: 999px; padding: 3px 8px; font-size: 11px; color: var(--text); }}
     .why {{ font-style: italic; margin: 0; }}
     .query-note {{
       color: var(--amber-text);
@@ -1687,7 +1704,8 @@ def render_report(report: dict[str, object]) -> str:
     @media (max-width: 820px) {{
       main {{ padding: 24px 14px 42px; }}
       .report-header {{ grid-template-columns: 1fr; }}
-      .cover-meta, .insight-grid {{ grid-template-columns: 1fr; }}
+      .cover-meta {{ grid-template-columns: 1fr; }}
+      .insight {{ grid-template-columns: 1fr; }}
       .kpi-grid {{ grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }}
       .cards-grid, .priority-list {{ grid-template-columns: 1fr; }}
       .section-heading {{ display: block; }}
