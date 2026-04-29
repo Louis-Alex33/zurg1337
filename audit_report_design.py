@@ -726,6 +726,14 @@ def prepare_audit_report_context(
         "pages_prioritaires": pages_prioritaires,
         "top_recovery_opportunities": [as_dict(item) for item in data.get("top_recovery_opportunities", []) if isinstance(item, dict)],
         "traffic_drop_investigation": as_dict(data.get("traffic_drop_investigation")),
+        "traffic_drop": as_dict(data.get("traffic_drop")),
+        "top_losing_pages": [as_dict(item) for item in data.get("top_losing_pages", []) if isinstance(item, dict)],
+        "top_losing_queries": [as_dict(item) for item in data.get("top_losing_queries", []) if isinstance(item, dict)],
+        "top_losing_countries": [as_dict(item) for item in data.get("top_losing_countries", []) if isinstance(item, dict)],
+        "top_losing_devices": [as_dict(item) for item in data.get("top_losing_devices", []) if isinstance(item, dict)],
+        "traffic_losing_pages_with_crawl_issues": [as_dict(item) for item in data.get("traffic_losing_pages_with_crawl_issues", []) if isinstance(item, dict)],
+        "cannibalization_groups": [as_dict(item) for item in data.get("cannibalization_groups", []) if isinstance(item, dict)],
+        "content_intent_gaps": [as_dict(item) for item in data.get("content_intent_gaps", []) if isinstance(item, dict)],
         "page_type_breakdown": as_dict(data.get("page_type_breakdown")) or as_dict(summary.get("page_type_breakdown")),
         "business_value_breakdown": as_dict(data.get("business_value_breakdown")) or as_dict(summary.get("business_value_breakdown")),
         "redirect_summary": as_dict(data.get("redirect_summary")),
@@ -750,7 +758,11 @@ def render_report_body(context: dict[str, Any]) -> str:
         recovery_sections = (
             render_traffic_drop_investigation(context)
             + render_page_type_breakdown(context)
+            + render_top_gsc_losses(context)
             + render_top_recovery_opportunities(context)
+            + render_traffic_losing_pages_with_issues(context)
+            + render_cannibalization_section(context)
+            + render_content_intent_gaps(context)
             + render_redirect_cleanup_section(context)
             + render_internal_linking_recovery_section(context)
         )
@@ -806,6 +818,7 @@ def render_cover(context: dict[str, Any]) -> str:
       <div class="cover-meta">
         <span class="urgency-badge {urgency_class}">{t("urgency_level")} : {escape(context["urgency_level"])}</span>
         <span>{int(context["pages_analysees"])} {escape(t("pages_analyzed"))}</span>
+        {render_gsc_cover_badge(context)}
       </div>
     </div>
     {render_page_footer(context)}
@@ -816,11 +829,21 @@ def render_recovery_cover_score(context: dict[str, Any]) -> str:
     if context.get("report_type") != "recovery":
         return ""
     label = "Potential recovery opportunity" if context_lang(context) == "en" else "Opportunité de récupération potentielle"
-    badge = "crawl-based" if context_lang(context) == "en" else "basé sur le crawl"
+    gsc_available = bool(as_dict(context.get("traffic_drop")).get("gsc_data_available") or as_dict(context.get("traffic_drop_investigation")).get("gsc_data_available"))
+    badge = "GSC-enhanced" if gsc_available else ("crawl-based" if context_lang(context) == "en" else "basé sur le crawl")
     return (
         f"<p class='recovery-cover-score'><strong>{int(context.get('recovery_opportunity_score') or 0)}/100</strong> "
         f"{escape(label)} <span>{escape(badge)}</span></p>"
     )
+
+
+def render_gsc_cover_badge(context: dict[str, Any]) -> str:
+    traffic_drop = as_dict(context.get("traffic_drop")) or as_dict(context.get("traffic_drop_investigation"))
+    if context.get("report_type") != "recovery" or not traffic_drop.get("gsc_data_available"):
+        return ""
+    before = str(traffic_drop.get("period_before") or "before")
+    after = str(traffic_drop.get("period_after") or "after")
+    return f"<span class='gsc-badge'>GSC-enhanced · {escape(before)} / {escape(after)}</span>"
 
 
 def render_page_footer(context: dict[str, Any]) -> str:
@@ -1194,6 +1217,135 @@ def render_page_type_breakdown(context: dict[str, Any]) -> str:
   </section>"""
 
 
+def render_top_gsc_losses(context: dict[str, Any]) -> str:
+    traffic_drop = as_dict(context.get("traffic_drop_investigation"))
+    if not traffic_drop.get("gsc_data_available"):
+        return ""
+    is_en = context_lang(context) == "en"
+    pages = [as_dict(item) for item in context.get("top_losing_pages", []) if isinstance(item, dict)]
+    queries = [as_dict(item) for item in context.get("top_losing_queries", []) if isinstance(item, dict)]
+    countries = [as_dict(item) for item in context.get("top_losing_countries", []) if isinstance(item, dict)]
+    devices = [as_dict(item) for item in context.get("top_losing_devices", []) if isinstance(item, dict)]
+    metrics = [
+        ("Clicks before", traffic_drop.get("clicks_before", 0)),
+        ("Clicks after", traffic_drop.get("clicks_after", 0)),
+        ("Click loss", traffic_drop.get("click_loss", 0)),
+        ("Impression loss", traffic_drop.get("impression_loss", 0)),
+        ("Pattern", traffic_drop.get("pattern", "not enough data")),
+        ("Confidence", traffic_drop.get("confidence", "low")),
+    ]
+    metric_html = "".join(
+        f"<div class='metric-card'><span>{escape(label)}</span><strong>{escape(format_gsc_value(value))}</strong></div>"
+        for label, value in metrics
+    )
+    return f"""
+  <section class="report-page recovery-section gsc-losses-section">
+    <div class="section-head">
+      <p class="label section-label">GSC</p>
+      <h2>{escape("Traffic Loss Overview" if is_en else "Vue des pertes de trafic")}</h2>
+    </div>
+    <div class="metric-grid">{metric_html}</div>
+    {render_losing_pages_table(context, pages)}
+    {render_losing_queries_table(context, queries)}
+    <div class="recovery-grid">
+      {render_losing_countries_table(countries, is_en)}
+      {render_losing_devices_table(devices, is_en)}
+    </div>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_losing_pages_table(context: dict[str, Any], rows_data: list[dict[str, Any]]) -> str:
+    if not rows_data:
+        return ""
+    is_en = context_lang(context) == "en"
+    rows = []
+    for item in rows_data[:10]:
+        url = str(item.get("url") or item.get("page") or item.get("key") or "")
+        rows.append(
+            "<tr>"
+            f"<td><a href='{escape(appendix_href(url))}' target='_blank' rel='noreferrer'>{escape(truncate(display_url_label(url, str(context['domain'])), 44))}</a></td>"
+            f"<td>{escape(str(item.get('page_type') or '-'))}</td>"
+            f"<td>{escape(str(item.get('business_value') or '-'))}</td>"
+            f"<td>{escape(format_signed_loss(item.get('clicks_delta')))}</td>"
+            f"<td>{escape(format_signed_loss(item.get('impressions_delta')))}</td>"
+            f"<td>{escape(format_position_change(item.get('position_delta')))}</td>"
+            f"<td>{escape(str(item.get('crawl_issue') or '-'))}</td>"
+            f"<td>{escape(str(item.get('recommended_action') or '-'))}</td>"
+            "</tr>"
+        )
+    return (
+        f"<h3>{escape('Top Losing Pages' if is_en else 'Pages en plus forte baisse')}</h3>"
+        "<table class='technical-table'><thead><tr>"
+        f"<th>URL</th><th>{escape('Page type' if is_en else 'Type')}</th><th>{escape('Business value' if is_en else 'Valeur business')}</th><th>{escape('Click loss' if is_en else 'Perte clics')}</th><th>{escape('Impression loss' if is_en else 'Perte impressions')}</th><th>{escape('Position change' if is_en else 'Position')}</th><th>{escape('Crawl issue' if is_en else 'Problème crawl')}</th><th>{escape('Recommended action' if is_en else 'Action')}</th>"
+        f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def render_losing_queries_table(context: dict[str, Any], rows_data: list[dict[str, Any]]) -> str:
+    if not rows_data:
+        return ""
+    is_en = context_lang(context) == "en"
+    rows = []
+    for item in rows_data[:10]:
+        query = str(item.get("query") or item.get("key") or "")
+        rows.append(
+            "<tr>"
+            f"<td>{escape(truncate(query, 46))}</td>"
+            f"<td>{escape(format_signed_loss(item.get('clicks_delta')))}</td>"
+            f"<td>{escape(format_signed_loss(item.get('impressions_delta')))}</td>"
+            f"<td>{escape(format_position_change(item.get('position_delta')))}</td>"
+            f"<td>{escape(str(item.get('likely_affected_page') or '-'))}</td>"
+            f"<td>{escape(str(item.get('intent_type') or 'unknown'))}</td>"
+            "</tr>"
+        )
+    return (
+        f"<h3>{escape('Top Losing Queries' if is_en else 'Requêtes en plus forte baisse')}</h3>"
+        "<table class='technical-table'><thead><tr>"
+        f"<th>{escape('Query' if is_en else 'Requête')}</th><th>{escape('Click loss' if is_en else 'Perte clics')}</th><th>{escape('Impression loss' if is_en else 'Perte impressions')}</th><th>{escape('Position change' if is_en else 'Position')}</th><th>{escape('Likely affected page' if is_en else 'Page probablement touchée')}</th><th>{escape('Intent' if is_en else 'Intention')}</th>"
+        f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def render_losing_countries_table(rows_data: list[dict[str, Any]], is_en: bool) -> str:
+    if not rows_data:
+        return ""
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(item.get('country') or item.get('key') or '-'))}</td>"
+        f"<td>{escape(format_signed_loss(item.get('clicks_delta')))}</td>"
+        f"<td>{escape(format_signed_loss(item.get('impressions_delta')))}</td>"
+        f"<td>{escape(format_percent_value(item.get('share_of_total_loss')))}</td>"
+        "</tr>"
+        for item in rows_data[:8]
+    )
+    return f"""
+      <article class="card">
+        <h3>{escape("Top Losing Countries" if is_en else "Pays en baisse")}</h3>
+        <table class="technical-table"><thead><tr><th>{escape("Country" if is_en else "Pays")}</th><th>{escape("Click loss" if is_en else "Perte clics")}</th><th>{escape("Impression loss" if is_en else "Perte impressions")}</th><th>{escape("Share" if is_en else "Part")}</th></tr></thead><tbody>{rows}</tbody></table>
+      </article>"""
+
+
+def render_losing_devices_table(rows_data: list[dict[str, Any]], is_en: bool) -> str:
+    if not rows_data:
+        return ""
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(item.get('device') or item.get('key') or '-'))}</td>"
+        f"<td>{escape(format_signed_loss(item.get('clicks_delta')))}</td>"
+        f"<td>{escape(format_signed_loss(item.get('impressions_delta')))}</td>"
+        f"<td>{escape(format_percent_delta(item.get('ctr_delta')))}</td>"
+        f"<td>{escape(format_position_change(item.get('position_delta')))}</td>"
+        "</tr>"
+        for item in rows_data[:8]
+    )
+    return f"""
+      <article class="card">
+        <h3>{escape("Top Losing Devices" if is_en else "Appareils en baisse")}</h3>
+        <table class="technical-table"><thead><tr><th>{escape("Device" if is_en else "Appareil")}</th><th>{escape("Click loss" if is_en else "Perte clics")}</th><th>{escape("Impression loss" if is_en else "Perte impressions")}</th><th>{escape("CTR change" if is_en else "CTR")}</th><th>{escape("Position" if is_en else "Position")}</th></tr></thead><tbody>{rows}</tbody></table>
+      </article>"""
+
+
 def render_top_recovery_opportunities(context: dict[str, Any]) -> str:
     rows_data = [as_dict(item) for item in context.get("top_recovery_opportunities", []) if isinstance(item, dict)]
     if not rows_data:
@@ -1281,6 +1433,92 @@ def render_internal_linking_recovery_section(context: dict[str, Any]) -> str:
       <h2>{escape("Internal Linking Opportunities" if is_en else "Opportunités de maillage interne")}</h2>
     </div>
     <table class="technical-table"><thead><tr><th>URL</th><th>Type</th><th>Business</th><th>{escape("Inbound links" if is_en else "Liens entrants")}</th><th>{escape("Issue" if is_en else "Problème")}</th><th>{escape("Recommended internal links" if is_en else "Liens recommandés")}</th></tr></thead><tbody>{rows}</tbody></table>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_traffic_losing_pages_with_issues(context: dict[str, Any]) -> str:
+    items = [as_dict(item) for item in context.get("traffic_losing_pages_with_crawl_issues", []) if isinstance(item, dict)]
+    if not items:
+        return ""
+    is_en = context_lang(context) == "en"
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(truncate(display_url_label(str(item.get('url') or ''), str(context['domain'])), 52))}</td>"
+        f"<td>{escape(str(item.get('traffic_loss') or 0))}</td>"
+        f"<td>{escape(str(item.get('issue_found') or '-'))}</td>"
+        f"<td>{escape(str(item.get('why_it_matters') or '-'))}</td>"
+        f"<td>{escape(str(item.get('fix_priority') or '-'))}</td>"
+        "</tr>"
+        for item in items[:12]
+    )
+    return f"""
+  <section class="report-page recovery-section">
+    <div class="section-head">
+      <p class="label section-label">GSC + CRAWL</p>
+      <h2>{escape("Traffic-Losing Pages With Crawl Issues" if is_en else "Pages en baisse avec problèmes crawl")}</h2>
+    </div>
+    <table class="technical-table"><thead><tr><th>URL</th><th>{escape("Traffic loss" if is_en else "Perte trafic")}</th><th>{escape("Issue found" if is_en else "Problème")}</th><th>{escape("Why it matters" if is_en else "Pourquoi c'est important")}</th><th>{escape("Fix priority" if is_en else "Priorité")}</th></tr></thead><tbody>{rows}</tbody></table>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_cannibalization_section(context: dict[str, Any]) -> str:
+    groups = [as_dict(item) for item in context.get("cannibalization_groups", []) if isinstance(item, dict)]
+    if not groups:
+        return ""
+    is_en = context_lang(context) == "en"
+    rows = []
+    for item in groups[:10]:
+        urls = [str(url) for url in item.get("urls_involved", []) if str(url).strip()]
+        evidence = [str(value) for value in item.get("evidence", []) if str(value).strip()]
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(item.get('topic') or '-'))}</td>"
+            f"<td>{escape('; '.join(truncate(display_url_label(url, str(context['domain'])), 34) for url in urls[:4]))}</td>"
+            f"<td>{escape('; '.join(evidence[:3]) or '-')}</td>"
+            f"<td>{escape(str(item.get('confidence') or 'low'))}</td>"
+            f"<td>{escape(str(item.get('recommendation') or '-'))}</td>"
+            "</tr>"
+        )
+    return f"""
+  <section class="report-page recovery-section">
+    <div class="section-head">
+      <p class="label section-label">{escape("Cannibalization" if is_en else "Cannibalisation")}</p>
+      <h2>{escape("Potential Cannibalization Groups" if is_en else "Groupes de cannibalisation potentielle")}</h2>
+    </div>
+    <p class="suggestions-intro">{escape("These are cautious signals. Query-level GSC data is needed before merging pages." if is_en else "Ces signaux restent prudents. Les données requêtes GSC sont nécessaires avant de fusionner des pages.")}</p>
+    <table class="technical-table"><thead><tr><th>{escape("Topic" if is_en else "Sujet")}</th><th>URLs</th><th>{escape("Evidence" if is_en else "Preuves")}</th><th>{escape("Confidence" if is_en else "Confiance")}</th><th>{escape("Recommendation" if is_en else "Recommandation")}</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_content_intent_gaps(context: dict[str, Any]) -> str:
+    gaps = [as_dict(item) for item in context.get("content_intent_gaps", []) if isinstance(item, dict)]
+    if not gaps:
+        return ""
+    is_en = context_lang(context) == "en"
+    rows = []
+    for item in gaps[:12]:
+        url = str(item.get("url") or "")
+        recommendations = [str(value) for value in item.get("recommendations", []) if str(value).strip()]
+        rows.append(
+            "<tr>"
+            f"<td>{escape(truncate(display_url_label(url, str(context['domain'])), 48))}</td>"
+            f"<td>{escape(str(item.get('page_type') or '-'))}</td>"
+            f"<td>{get_int(item, 'commercial_signal_score', 0)}/100</td>"
+            f"<td>{get_int(item, 'trust_signal_score', 0)}/100</td>"
+            f"<td>{get_int(item, 'intent_clarity_score', 0)}/100</td>"
+            f"<td>{escape('; '.join(recommendations[:4]) or '-')}</td>"
+            "</tr>"
+        )
+    return f"""
+  <section class="report-page recovery-section">
+    <div class="section-head">
+      <p class="label section-label">{escape("Content & Intent" if is_en else "Contenu et intention")}</p>
+      <h2>{escape("Content & Intent Gaps" if is_en else "Manques de contenu et d'intention")}</h2>
+    </div>
+    <table class="technical-table"><thead><tr><th>URL</th><th>{escape("Type" if is_en else "Type")}</th><th>{escape("Commercial" if is_en else "Commercial")}</th><th>Trust</th><th>{escape("Intent" if is_en else "Intention")}</th><th>{escape("Recommendation" if is_en else "Recommandation")}</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
     {render_page_footer(context)}
   </section>"""
 
@@ -2922,16 +3160,16 @@ def build_recovery_plan_action(lang: str = "fr") -> dict[str, dict[str, str]]:
     if sanitize_report_language(lang) == "en":
         return {
             "j30": {
-                "titre": "Validate and fix visible issues",
-                "description": "Validate the drop in GSC, fix redirected internal links, update high-value pages with date issues, and correct top title/meta issues.",
+                "titre": "Fix losing pages first",
+                "description": "Fix losing pages with crawl issues, update redirected internal links, refresh outdated title/H1/content signals, correct high-impact meta issues, and validate branded vs non-branded loss.",
             },
             "j60": {
-                "titre": "Refresh priority pages",
-                "description": "Refresh top priority pages, strengthen internal links to commercial pages, differentiate similar pages, and improve trust signals.",
+                "titre": "Refresh affected clusters",
+                "description": "Refresh top losing content clusters, strengthen commercial and trust signals, improve internal links to affected business pages, and differentiate cannibalizing pages.",
             },
             "j90": {
                 "titre": "Consolidate and monitor recovery",
-                "description": "Consolidate weak or obsolete pages if needed, build supporting content around business pages, monitor recovery in GSC, and refine with query-level data.",
+                "description": "Consolidate or split cannibalized pages, build supporting content around recovering pages, monitor GSC recovery, and adjust based on query-level changes.",
             },
         }
     return {
@@ -3190,6 +3428,50 @@ def format_seconds(value: float | None) -> str:
         return "—"
     formatted = f"{value:.2f}".rstrip("0").rstrip(".")
     return f"{formatted}s"
+
+
+def format_gsc_value(value: Any) -> str:
+    if isinstance(value, float):
+        return f"{value:.1f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
+def format_signed_loss(value: Any) -> str:
+    try:
+        number = int(float(value or 0))
+    except (TypeError, ValueError):
+        number = 0
+    if number < 0:
+        return str(abs(number))
+    return str(number)
+
+
+def format_position_change(value: Any) -> str:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        number = 0.0
+    if number == 0:
+        return "0"
+    sign = "+" if number > 0 else ""
+    return f"{sign}{number:.1f}".rstrip("0").rstrip(".")
+
+
+def format_percent_value(value: Any) -> str:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        number = 0.0
+    return f"{number:.1f}%".replace(".0%", "%")
+
+
+def format_percent_delta(value: Any) -> str:
+    try:
+        number = float(value or 0) * 100
+    except (TypeError, ValueError):
+        number = 0.0
+    sign = "+" if number > 0 else ""
+    return f"{sign}{number:.1f}%".replace(".0%", "%")
 
 
 def canonical_url_key(url: str) -> str:
@@ -3959,6 +4241,22 @@ def render_report_styles() -> str:
       letter-spacing: 0.04em;
       font-size: 10px;
       font-weight: 700;
+    }
+    .premium-report .gsc-badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(38, 102, 75, 0.28);
+      border-radius: 999px;
+      color: #174f39;
+      background: #edf7f1;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .premium-report .gsc-losses-section h3 {
+      margin-top: var(--space-lg);
+      margin-bottom: var(--space-sm);
+      font-size: 16px;
     }
     .premium-report .pages-prioritaires-grid {
       display: grid;

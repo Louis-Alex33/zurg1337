@@ -8,17 +8,24 @@ from zipfile import ZipFile
 from gsc import (
     analyze_pages,
     build_report,
+    compare_gsc_periods,
     derive_auto_stopwords,
+    detect_csv_dialect,
     detect_possible_query_overlap,
     estimate_recoverable_clicks,
+    load_gsc_csv,
     load_appareils,
     load_pays,
+    match_gsc_page_to_crawl,
+    normalize_url_for_matching,
+    parse_ctr,
+    parse_number,
     parse_pages_csv,
     parse_queries_csv,
     render_report,
     run_gsc_analysis,
 )
-from models import GSCPageAnalysis, GSCPageData, GSCQueryData
+from models import AuditPage, GSCPageAnalysis, GSCPageData, GSCQueryData
 
 
 class GSCAnalysisTests(unittest.TestCase):
@@ -312,6 +319,54 @@ class GSCAnalysisTests(unittest.TestCase):
 
         self.assertEqual(pays[0]["pays"], "France")
         self.assertEqual(appareils[0]["appareil"], "Mobile")
+
+    def test_phase2_gsc_csv_import_is_tolerant(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            export = root / "pages_before.csv"
+            export.write_text(
+                " Page ; Clicks ; Impressions ; CTR ; Average position \n"
+                " https://www.example.com/Guide/?utm=1 ; 1 234 ; 2,500 ; 12,5% ; 4,2 \n",
+                encoding="utf-8",
+            )
+
+            rows = load_gsc_csv(export)
+            dialect = detect_csv_dialect(export)
+
+        self.assertEqual(dialect.delimiter, ";")
+        self.assertEqual(rows[0]["page"], "https://www.example.com/Guide/?utm=1")
+        self.assertEqual(rows[0]["clicks"], 1234)
+        self.assertEqual(rows[0]["impressions"], 2500)
+        self.assertAlmostEqual(rows[0]["ctr"], 0.125)
+        self.assertAlmostEqual(rows[0]["position"], 4.2)
+
+    def test_phase2_parsing_and_period_comparison_handle_zero_division(self) -> None:
+        self.assertEqual(parse_number("1 234"), 1234)
+        self.assertEqual(parse_number("1,25"), 1.25)
+        self.assertAlmostEqual(parse_ctr("4,5%"), 0.045)
+        comparison = compare_gsc_periods(
+            before_df=[{"page": "https://example.com/a", "clicks": 0, "impressions": 0, "ctr": 0, "position": 0}],
+            after_df=[{"page": "https://example.com/a", "clicks": 10, "impressions": 100, "ctr": 0.1, "position": 5}],
+            key_column="page",
+        )
+
+        self.assertIsNone(comparison[0]["clicks_delta_pct"])
+        self.assertEqual(comparison[0]["status"], "existing")
+        self.assertEqual(comparison[0]["clicks_delta"], 10)
+
+    def test_phase2_url_normalization_and_crawl_matching(self) -> None:
+        page = AuditPage(
+            url="https://example.com/final/",
+            requested_url="http://www.example.com/old?x=1",
+            final_url="https://example.com/final/",
+            canonical="https://www.example.com/final#intro",
+        )
+
+        match = match_gsc_page_to_crawl("http://example.com/final?utm_source=x#frag", [page])
+
+        self.assertEqual(normalize_url_for_matching("HTTP://www.Example.com/Final/?utm=1#x"), "example.com/final")
+        self.assertTrue(match["matched"])
+        self.assertEqual(match["match_type"], "final_url")
 
 
 if __name__ == "__main__":

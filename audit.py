@@ -34,6 +34,15 @@ from config import (
     UI_HEADING_PATTERNS,
 )
 from io_helpers import read_scored_csv, write_csv_rows, write_json_file
+from gsc import (
+    detect_traffic_drop_start_date,
+    load_gsc_period_exports,
+    match_gsc_page_to_crawl,
+    normalize_url_for_matching,
+    path_for_matching,
+    query_intent_type,
+    resolve_gsc_export_paths,
+)
 from models import AuditPage, AuditReport, QualifiedDomain
 from utils import CLIError, clean_domain, contains_year_reference, fetch_limited_html, make_cached_session, make_session, normalize_url
 
@@ -59,6 +68,37 @@ B2B_TERMS = {
     "private label",
     "supplier",
     "wholesale",
+}
+COMMERCIAL_INTENT_TERMS = {
+    "bulk",
+    "certification",
+    "contact",
+    "custom",
+    "factory",
+    "ingredients",
+    "manufacturer",
+    "minimum order",
+    "moq",
+    "odm",
+    "oem",
+    "packaging",
+    "private label",
+    "quote",
+    "supplier",
+    "wholesale",
+}
+TRUST_TERMS = {
+    "ce",
+    "certified",
+    "compliance",
+    "factory",
+    "fda",
+    "gmp",
+    "iso",
+    "quality control",
+    "safety",
+    "testing",
+    "years experience",
 }
 STOPWORDS_FOR_SIMILARITY = {
     "a",
@@ -123,6 +163,16 @@ def audit_domains(
     mode: str = DEFAULT_AUDIT_MODE,
     report_type: str = "standard",
     lang: str = "fr",
+    gsc_folder: str | None = None,
+    gsc_pages_before: str | None = None,
+    gsc_pages_after: str | None = None,
+    gsc_queries_before: str | None = None,
+    gsc_queries_after: str | None = None,
+    gsc_countries_before: str | None = None,
+    gsc_countries_after: str | None = None,
+    gsc_devices_before: str | None = None,
+    gsc_devices_after: str | None = None,
+    gsc_dates: str | None = None,
     site: str | None = None,
     session: requests.Session | None = None,
     excluded_path_prefixes: set[str] | None = None,
@@ -166,6 +216,18 @@ def audit_domains(
     resolved_overlap_max_pages = overlap_max_pages if overlap_max_pages is not None else mode_config.overlap_max_pages
     resolved_sitemap_max_urls = sitemap_max_urls if sitemap_max_urls is not None else (10_000 if unlimited_pages else max(resolved_max_pages * 4, 40))
     resolved_timeout = timeout if timeout is not None else (15 if report_type == "recovery" else mode_config.timeout)
+    gsc_paths = resolve_gsc_export_paths(
+        gsc_folder=gsc_folder,
+        pages_before=gsc_pages_before,
+        pages_after=gsc_pages_after,
+        queries_before=gsc_queries_before,
+        queries_after=gsc_queries_after,
+        countries_before=gsc_countries_before,
+        countries_after=gsc_countries_after,
+        devices_before=gsc_devices_before,
+        devices_after=gsc_devices_after,
+        dates=gsc_dates,
+    )
     summary_rows: list[dict[str, int | str]] = []
     summary_fieldnames = [
         "domain",
@@ -248,6 +310,7 @@ def audit_domains(
                 crawl_metadata=crawl_metadata,
                 report_type=report_type,
                 lang=lang,
+                gsc_paths=gsc_paths,
             )
 
         report_path = output_path / f"{report.domain}.json"
@@ -1277,6 +1340,12 @@ def crawl_page(
     images = soup.find_all("img")
     page.images_total = len(images)
     page.images_without_alt = sum(1 for image in images if not image.get("alt", "").strip())
+    tables = soup.find_all("table")
+    page.content_quality = calculate_content_quality(page, text=text, has_table=bool(tables))
+    page.commercial_signal_score = int(page.content_quality.get("commercial_signal_score") or 0)
+    page.trust_signal_score = int(page.content_quality.get("trust_signal_score") or 0)
+    page.intent_clarity_score = int(page.content_quality.get("intent_clarity_score") or 0)
+    page.content_recommendations = list(page.content_quality.get("recommendations") or [])
 
     base_domain = clean_domain(page.url)
     links: dict[str, int] = {}
@@ -2088,6 +2157,7 @@ def build_report(
     crawl_metadata: dict[str, object] | None = None,
     report_type: str = "standard",
     lang: str = "fr",
+    gsc_paths: dict[str, str] | None = None,
 ) -> AuditReport:
     enrich_page_classification(pages)
     analyze_page_issues(pages)
@@ -2102,6 +2172,15 @@ def build_report(
     enrich_internal_link_metrics(pages, incoming_links)
     assign_page_health_scores(pages, incoming_links, probable_orphans, weak_internal_linking)
     compute_recovery_opportunities(pages, incoming_links, duplicate_titles, duplicate_metas)
+    content_intent_gaps = enrich_content_quality_signals(pages)
+    gsc_context = enrich_pages_with_gsc(pages, gsc_paths or {}, domain=domain)
+    cannibalization_groups = detect_cannibalization_groups(pages, gsc_context=gsc_context)
+    top_losing_pages = gsc_context.get("top_losing_pages", [])
+    top_losing_queries = gsc_context.get("top_losing_queries", [])
+    top_losing_countries = gsc_context.get("top_losing_countries", [])
+    top_losing_devices = gsc_context.get("top_losing_devices", [])
+    recovery_candidates = build_recovery_candidates(pages)
+    traffic_losing_pages_with_crawl_issues = build_traffic_losing_pages_with_crawl_issues(pages)
     dated_content = [{"url": page.url, "references": page.dated_references} for page in pages if page.dated_references]
     observed_health_score = compute_observed_health_score(
         pages,
@@ -2120,7 +2199,13 @@ def build_report(
     business_value_breakdown = dict(Counter(page.business_value or "low" for page in ok_pages))
     top_recovery_opportunities = build_top_recovery_opportunities(pages)
     redirect_summary = build_redirect_summary(pages)
-    traffic_drop_investigation = build_traffic_drop_investigation(pages, summary={}, redirect_summary=redirect_summary)
+    traffic_drop_investigation = build_traffic_drop_investigation(
+        pages,
+        summary={},
+        redirect_summary=redirect_summary,
+        gsc_context=gsc_context,
+        recovery_candidates=recovery_candidates,
+    )
     summary = {
         "pages_crawled": len(pages),
         "pages_ok": len(ok_pages),
@@ -2167,10 +2252,32 @@ def build_report(
         "internal_links_to_redirected_urls": sum(len(page.internal_links_to_redirected_urls) for page in pages),
         "redirect_chains_over_1": redirect_summary.get("redirect_chains_over_1", 0),
     }
-    traffic_drop_investigation = build_traffic_drop_investigation(pages, summary=summary, redirect_summary=redirect_summary)
+    traffic_drop_investigation = build_traffic_drop_investigation(
+        pages,
+        summary=summary,
+        redirect_summary=redirect_summary,
+        gsc_context=gsc_context,
+        recovery_candidates=recovery_candidates,
+    )
     recovery_score = round(
         sum(page.recovery_opportunity_score for page in pages) / max(1, len([page for page in pages if page.recovery_opportunity_score]))
     ) if any(page.recovery_opportunity_score for page in pages) else 0
+    summary.update(
+        {
+            "overall_score": observed_health_score,
+            "crawl_health_score": observed_health_score,
+            "recovery_opportunity_score": recovery_score,
+            "pages_detected": len(pages),
+            "pages_successful": summary.get("pages_ok", 0),
+            "pages_failed": summary.get("pages_with_errors", 0),
+            "http_errors": summary.get("pages_with_errors", 0),
+            "redirected_urls": summary.get("redirected_pages", 0),
+            "slow_pages": len([page for page in pages if page.load_time > 3]),
+            "outdated_pages": summary.get("dated_content_signals", 0),
+            "duplicate_description_groups": summary.get("duplicate_meta_description_groups", 0),
+            "top_recovery_candidates": len(top_recovery_opportunities),
+        }
+    )
 
     critical_findings = build_critical_findings(summary)
     business_priority_signals = build_business_priority_signals(summary)
@@ -2187,16 +2294,31 @@ def build_report(
     )
     confidence_notes = build_confidence_notes(summary, possible_overlap)
     if report_type == "recovery":
-        confidence_notes.insert(
-            0,
-            "This is a crawl-based recovery audit. Search Console and analytics data are required to confirm the traffic-drop cause.",
-        )
+        if gsc_context.get("available"):
+            confidence_notes.insert(0, "Search Console exports were matched against crawl findings where possible.")
+        else:
+            confidence_notes.insert(
+                0,
+                "This is a crawl-based recovery audit. Search Console and analytics data are required to confirm the traffic-drop cause.",
+            )
     notes = [
         "Rapport fondé uniquement sur les pages réellement visitées pendant l'analyse.",
         "Les points remontés servent à repérer des opportunités d'amélioration, pas à rendre un verdict définitif.",
         "Les pages dites isolées ou peu soutenues sont estimées à partir des liens visibles pendant l'analyse.",
         "Les sujets trop proches signalent un risque de doublon, pas un problème confirmé à 100 %.",
     ]
+
+    traffic_drop = build_structured_traffic_drop(gsc_context, traffic_drop_investigation)
+    structured_summary = build_structured_summary(
+        summary=summary,
+        observed_health_score=observed_health_score,
+        recovery_score=recovery_score,
+        pages=pages,
+        top_recovery_opportunities=top_recovery_opportunities,
+    )
+    site_info = build_site_info(domain, crawl_metadata or {}, report_type=report_type, lang=lang)
+    limitations = build_report_limitations(gsc_context)
+    methodology = build_methodology(gsc_context, crawl_metadata or {})
 
     return AuditReport(
         domain=domain,
@@ -2225,9 +2347,483 @@ def build_report(
         page_type_breakdown=page_type_breakdown,
         business_value_breakdown=business_value_breakdown,
         redirect_summary=redirect_summary,
+        site=site_info,
+        structured_summary=structured_summary,
+        traffic_drop=traffic_drop,
+        top_losing_pages=top_losing_pages,
+        top_losing_queries=top_losing_queries,
+        top_losing_countries=top_losing_countries,
+        top_losing_devices=top_losing_devices,
+        traffic_losing_pages_with_crawl_issues=traffic_losing_pages_with_crawl_issues,
+        recovery_candidates=recovery_candidates,
+        cannibalization_groups=cannibalization_groups,
+        content_intent_gaps=content_intent_gaps,
+        methodology=methodology,
+        limitations=limitations,
         crawl_metadata=crawl_metadata or {},
         pages=[serialize_audit_page(page) for page in pages],
     )
+
+
+def enrich_pages_with_gsc(pages: list[AuditPage], gsc_paths: dict[str, str], domain: str) -> dict[str, object]:
+    context: dict[str, object] = {
+        "available": False,
+        "paths": gsc_paths,
+        "top_losing_pages": [],
+        "top_losing_queries": [],
+        "top_losing_countries": [],
+        "top_losing_devices": [],
+        "summary": {},
+        "dates": [],
+    }
+    for page in pages:
+        page.requested_url_normalized = normalize_url_for_matching(page.requested_url or page.url)
+        page.final_url_normalized = normalize_url_for_matching(page.final_url or page.url)
+        page.canonical_url_normalized = normalize_url_for_matching(page.canonical) if page.canonical else ""
+        page.path_normalized = path_for_matching(page.final_url or page.url)
+    if not gsc_paths:
+        return context
+    gsc_data = load_gsc_period_exports(gsc_paths)
+    summary = dict(gsc_data.get("summary") or {})
+    context.update(
+        {
+            "available": any(gsc_data.get(key) for key in ("pages", "queries", "countries", "devices")),
+            "data": gsc_data,
+            "summary": summary,
+            "dates": gsc_data.get("dates", []),
+            "drop_start_date": detect_traffic_drop_start_date(list(gsc_data.get("dates") or [])),
+        }
+    )
+    if not context["available"]:
+        return context
+
+    page_rows = list(gsc_data.get("pages") or [])
+    pages_by_url = {page.url: page for page in pages}
+    for row in page_rows:
+        gsc_url = str(row.get("page") or row.get("key") or "")
+        match = match_gsc_page_to_crawl(gsc_url, pages)
+        page = match.get("page")
+        enriched = enrich_losing_page_row(row, page if isinstance(page, AuditPage) else None, domain=domain)
+        if isinstance(page, AuditPage):
+            apply_gsc_row_to_page(page, row, str(match.get("match_type") or "unmatched"))
+            add_gsc_recovery_weight(page)
+        row.update(enriched)
+    query_rows = [enrich_query_loss_row(row) for row in list(gsc_data.get("queries") or [])]
+    country_rows = enrich_loss_share_rows(list(gsc_data.get("countries") or []), key_column="country")
+    device_rows = list(gsc_data.get("devices") or [])
+    context["top_losing_pages"] = sorted(
+        [row for row in page_rows if int(row.get("clicks_delta") or 0) < 0 or int(row.get("impressions_delta") or 0) < 0],
+        key=lambda row: (int(row.get("clicks_delta") or 0), int(row.get("impressions_delta") or 0)),
+    )[:20]
+    context["top_losing_queries"] = sorted(
+        [row for row in query_rows if int(row.get("clicks_delta") or 0) < 0 or int(row.get("impressions_delta") or 0) < 0],
+        key=lambda row: (int(row.get("clicks_delta") or 0), int(row.get("impressions_delta") or 0)),
+    )[:20]
+    context["top_losing_countries"] = country_rows[:20]
+    context["top_losing_devices"] = sorted(
+        [row for row in device_rows if int(row.get("clicks_delta") or 0) < 0 or int(row.get("impressions_delta") or 0) < 0],
+        key=lambda row: (int(row.get("clicks_delta") or 0), int(row.get("impressions_delta") or 0)),
+    )[:20]
+    context["matched_pages"] = len([page for page in pages if page.gsc_matched])
+    context["unmatched_gsc_pages"] = len([row for row in page_rows if not pages_by_url.get(str(row.get("url") or "")) and not row.get("gsc_matched")])
+    return context
+
+
+def apply_gsc_row_to_page(page: AuditPage, row: dict[str, object], match_type: str) -> None:
+    clicks_before = int(row.get("clicks_before") or 0)
+    clicks_after = int(row.get("clicks_after") or 0)
+    impressions_before = int(row.get("impressions_before") or 0)
+    impressions_after = int(row.get("impressions_after") or 0)
+    page.gsc_data_available = True
+    page.gsc_matched = True
+    page.gsc_match_type = match_type
+    page.gsc_clicks_before = clicks_before
+    page.gsc_clicks_after = clicks_after
+    page.gsc_click_loss = max(0, clicks_before - clicks_after)
+    page.gsc_click_loss_pct = gsc_loss_pct(clicks_before, clicks_after)
+    page.gsc_impressions_before = impressions_before
+    page.gsc_impressions_after = impressions_after
+    page.gsc_impression_loss = max(0, impressions_before - impressions_after)
+    page.gsc_impression_loss_pct = gsc_loss_pct(impressions_before, impressions_after)
+    page.gsc_ctr_before = float(row.get("ctr_before") or 0.0)
+    page.gsc_ctr_after = float(row.get("ctr_after") or 0.0)
+    page.gsc_ctr_delta = float(row.get("ctr_delta") or 0.0)
+    page.gsc_position_before = float(row.get("position_before") or 0.0)
+    page.gsc_position_after = float(row.get("position_after") or 0.0)
+    page.gsc_position_delta = float(row.get("position_delta") or 0.0)
+    if "gsc" not in page.evidence_sources:
+        page.evidence_sources.append("gsc")
+    page.needs_gsc_validation = False
+
+
+def gsc_loss_pct(before: int, after: int) -> float | None:
+    if before == 0:
+        return None
+    return round(max(0.0, ((before - after) / before) * 100), 1)
+
+
+def add_gsc_recovery_weight(page: AuditPage) -> None:
+    if not page.gsc_data_available:
+        return
+    score = page.recovery_opportunity_score
+    reasons = [page.recovery_reason] if page.recovery_reason else []
+    if page.gsc_click_loss >= 50 or (page.gsc_click_loss_pct or 0) >= 30:
+        score += 30
+        reasons.append("high GSC click loss")
+    elif page.gsc_click_loss > 0:
+        score += 15
+        reasons.append("GSC click loss")
+    if page.gsc_impression_loss >= 500 or (page.gsc_impression_loss_pct or 0) >= 30:
+        score += 20
+        reasons.append("high GSC impression loss")
+    if page.gsc_position_delta >= 3:
+        score += 20
+        reasons.append("position drop")
+    if page.business_value == "high" and page.gsc_click_loss > 0:
+        score += 25
+        reasons.append("business page with traffic loss")
+    if page.issues and page.gsc_click_loss > 0:
+        score += 15
+        reasons.append("fixable crawl issue on losing page")
+    page.recovery_opportunity_score = max(0, min(100, score))
+    if page.recovery_opportunity_score >= 70:
+        page.recovery_priority = "high"
+    elif page.recovery_opportunity_score >= 35:
+        page.recovery_priority = "medium"
+    else:
+        page.recovery_priority = "low"
+    page.recovery_reason = ", ".join([item for item in reasons if item][:5])
+
+
+def enrich_losing_page_row(row: dict[str, object], page: AuditPage | None, domain: str) -> dict[str, object]:
+    issue = main_recovery_issue(page) if page else "unmatched GSC page"
+    return {
+        "url": row.get("page") or row.get("key") or "",
+        "gsc_matched": bool(page),
+        "gsc_match_type": page.gsc_match_type if page else "unmatched",
+        "page_type": page.page_type if page else "-",
+        "business_value": page.business_value if page else "-",
+        "click_loss": max(0, int(row.get("clicks_before") or 0) - int(row.get("clicks_after") or 0)),
+        "impression_loss": max(0, int(row.get("impressions_before") or 0) - int(row.get("impressions_after") or 0)),
+        "position_change": float(row.get("position_delta") or 0.0),
+        "crawl_issue": issue,
+        "recommended_action": recovery_recommended_action(page, issue) if page else "Match this URL to the crawl, then validate indexability and redirects.",
+    }
+
+
+def enrich_query_loss_row(row: dict[str, object]) -> dict[str, object]:
+    enriched = dict(row)
+    query = str(row.get("query") or row.get("key") or "")
+    enriched["intent_type"] = query_intent_type(query)
+    enriched["click_loss"] = max(0, int(row.get("clicks_before") or 0) - int(row.get("clicks_after") or 0))
+    enriched["impression_loss"] = max(0, int(row.get("impressions_before") or 0) - int(row.get("impressions_after") or 0))
+    enriched["likely_affected_page"] = ""
+    return enriched
+
+
+def enrich_loss_share_rows(rows: list[dict[str, object]], key_column: str) -> list[dict[str, object]]:
+    losing = [row for row in rows if int(row.get("clicks_delta") or 0) < 0 or int(row.get("impressions_delta") or 0) < 0]
+    total_loss = sum(max(0, int(row.get("clicks_before") or 0) - int(row.get("clicks_after") or 0)) for row in losing)
+    enriched = []
+    for row in losing:
+        item = dict(row)
+        loss = max(0, int(row.get("clicks_before") or 0) - int(row.get("clicks_after") or 0))
+        item["click_loss"] = loss
+        item["impression_loss"] = max(0, int(row.get("impressions_before") or 0) - int(row.get("impressions_after") or 0))
+        item["share_of_total_loss"] = round((loss / total_loss) * 100, 1) if total_loss else 0.0
+        item.setdefault(key_column, row.get("key") or "")
+        enriched.append(item)
+    enriched.sort(key=lambda row: (int(row.get("clicks_delta") or 0), int(row.get("impressions_delta") or 0)))
+    return enriched
+
+
+def build_recovery_candidates(pages: list[AuditPage]) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for page in pages:
+        has_loss = page.gsc_click_loss > 0 or page.gsc_impression_loss > 0 or page.gsc_position_delta > 1.5
+        visible_issues = list(page.issues[:4])
+        qualifies = (
+            (has_loss and visible_issues)
+            or (page.business_value == "high" and visible_issues)
+            or (page.business_value == "high" and has_loss)
+            or page.potential_cannibalization
+        )
+        if not qualifies:
+            continue
+        issue = main_recovery_issue(page)
+        candidates.append(
+            {
+                "url": page.url,
+                "requested_url": page.requested_url,
+                "final_url": page.final_url,
+                "page_type": page.page_type,
+                "business_value": page.business_value,
+                "clicks_before": page.gsc_clicks_before,
+                "clicks_after": page.gsc_clicks_after,
+                "click_loss": page.gsc_click_loss,
+                "click_loss_pct": page.gsc_click_loss_pct,
+                "impressions_before": page.gsc_impressions_before,
+                "impressions_after": page.gsc_impressions_after,
+                "impression_loss": page.gsc_impression_loss,
+                "impression_loss_pct": page.gsc_impression_loss_pct,
+                "position_delta": page.gsc_position_delta,
+                "ctr_delta": page.gsc_ctr_delta,
+                "crawl_score": page.page_health_score,
+                "recovery_opportunity_score": page.recovery_opportunity_score,
+                "visible_issues": visible_issues,
+                "recommended_action": recovery_recommended_action(page, issue),
+                "effort": recovery_effort(issue),
+                "impact": "high" if page.business_value == "high" or page.gsc_click_loss >= 25 else "medium",
+                "confidence": "high" if page.gsc_matched and has_loss and visible_issues else "medium" if page.gsc_matched else "low",
+                "evidence_sources": page.evidence_sources,
+            }
+        )
+    candidates.sort(key=lambda item: (int(item["recovery_opportunity_score"]), int(item["click_loss"])), reverse=True)
+    return candidates[:30]
+
+
+def build_traffic_losing_pages_with_crawl_issues(pages: list[AuditPage]) -> list[dict[str, object]]:
+    rows = []
+    for page in pages:
+        if not (page.gsc_click_loss or page.gsc_impression_loss) or not page.issues:
+            continue
+        issue = main_recovery_issue(page)
+        rows.append(
+            {
+                "url": page.url,
+                "traffic_loss": page.gsc_click_loss,
+                "issue_found": issue,
+                "why_it_matters": recovery_why_it_matters(page, issue),
+                "fix_priority": page.recovery_priority,
+            }
+        )
+    rows.sort(key=lambda item: (int(item["traffic_loss"]), str(item["fix_priority"]) == "high"), reverse=True)
+    return rows[:20]
+
+
+def enrich_content_quality_signals(pages: list[AuditPage]) -> list[dict[str, object]]:
+    gaps: list[dict[str, object]] = []
+    for page in pages:
+        if not page.content_quality:
+            page.content_quality = calculate_content_quality(page)
+            page.commercial_signal_score = int(page.content_quality.get("commercial_signal_score") or 0)
+            page.trust_signal_score = int(page.content_quality.get("trust_signal_score") or 0)
+            page.intent_clarity_score = int(page.content_quality.get("intent_clarity_score") or 0)
+            page.content_recommendations = list(page.content_quality.get("recommendations") or [])
+        if page.business_value == "high" and page.content_recommendations:
+            gaps.append(
+                {
+                    "url": page.url,
+                    "page_type": page.page_type,
+                    "business_value": page.business_value,
+                    "commercial_signal_score": page.commercial_signal_score,
+                    "trust_signal_score": page.trust_signal_score,
+                    "intent_clarity_score": page.intent_clarity_score,
+                    "recommendations": page.content_recommendations,
+                }
+            )
+    gaps.sort(key=lambda item: (int(item["commercial_signal_score"]) + int(item["trust_signal_score"]), str(item["url"])))
+    return gaps[:20]
+
+
+def calculate_content_quality(page: AuditPage, text: str = "", has_table: bool | None = None) -> dict[str, object]:
+    haystack = f"{page.url} {page.title} {' '.join(page.h1)} {' '.join(page.h2)} {text}".lower()
+    commercial_hits = count_term_hits(haystack, COMMERCIAL_INTENT_TERMS)
+    trust_hits = count_term_hits(haystack, TRUST_TERMS)
+    has_faq = "faq" in haystack or "frequently asked questions" in haystack or "questions fréquentes" in haystack
+    table_signal = bool(has_table) if has_table is not None else False
+    depth_score = 0
+    depth_score += min(35, page.word_count // 35)
+    depth_score += min(15, len(page.h2) * 3)
+    depth_score += 10 if has_faq else 0
+    depth_score += 10 if table_signal else 0
+    depth_score -= min(15, page.images_without_alt)
+    depth_score = max(0, min(100, depth_score))
+    commercial_score = min(100, commercial_hits * 18)
+    trust_score = min(100, trust_hits * 20)
+    intent_score = min(100, 35 + commercial_score // 3 + trust_score // 4 + (15 if page.page_type in COMMERCIAL_PAGE_TYPES else 0))
+    recommendations: list[str] = []
+    if page.business_value == "high" and commercial_score < 35:
+        recommendations.append("strengthen commercial intent")
+    if page.business_value == "high" and trust_score < 35:
+        recommendations.append("add trust proof")
+    if page.page_type in {"product", "manufacturer", "category"} and "specification" not in haystack:
+        recommendations.append("add product specifications")
+    if page.business_value == "high" and page.inbound_internal_links_count < 3:
+        recommendations.append("add internal links to product pages")
+    if page.outdated_date_signal:
+        recommendations.append("update old intro")
+    if not table_signal and page.page_type in {"product", "category", "manufacturer", "guide"}:
+        recommendations.append("add comparison table")
+    if not has_faq and page.word_count >= 500:
+        recommendations.append("add FAQ")
+    if page.word_count < 250 and page.page_type in {"blog", "guide", "resource"}:
+        recommendations.append("consolidate if weak/obsolete")
+    return {
+        "word_count": page.word_count,
+        "headings_count": len(page.h1) + len(page.h2),
+        "h1_count": len(page.h1),
+        "h2_count": len(page.h2),
+        "images_count": page.images_total,
+        "images_missing_alt_count": page.images_without_alt,
+        "has_faq_section": has_faq,
+        "has_table": table_signal,
+        "has_product_terms": any(term in haystack for term in ("product", "products", "specification", "ingredients")),
+        "has_commercial_terms": commercial_hits > 0,
+        "has_trust_terms": trust_hits > 0,
+        "content_depth_score": depth_score,
+        "commercial_signal_score": commercial_score,
+        "trust_signal_score": trust_score,
+        "intent_clarity_score": intent_score,
+        "recommendations": recommendations[:6],
+    }
+
+
+def count_term_hits(haystack: str, terms: set[str]) -> int:
+    return sum(1 for term in terms if re.search(rf"\b{re.escape(term.lower())}\b", haystack))
+
+
+def detect_cannibalization_groups(pages: list[AuditPage], gsc_context: dict[str, object]) -> list[dict[str, object]]:
+    content_pages = [page for page in pages if is_content_like_page(page) and page.page_type not in {"legal", "contact"}]
+    groups: list[dict[str, object]] = []
+    used: set[str] = set()
+    gsc_available = bool(gsc_context.get("available"))
+    for index, page in enumerate(content_pages):
+        if page.url in used:
+            continue
+        signature = cannibalization_signature(page)
+        if not signature:
+            continue
+        urls = [page.url]
+        evidence = []
+        for other in content_pages[index + 1 :]:
+            if other.url in used:
+                continue
+            if page.page_type != other.page_type:
+                continue
+            similarity = SequenceMatcher(None, signature, cannibalization_signature(other)).ratio()
+            if similarity >= 0.58:
+                urls.append(other.url)
+                evidence.append(f"title/H1/slug similarity {round(similarity * 100)}%")
+        if len(urls) < 2:
+            continue
+        group_id = f"cannibalization-{len(groups) + 1}"
+        confidence = "medium" if gsc_available else "low"
+        topic = signature.split(" ")[:5]
+        for url in urls:
+            matched = next((item for item in pages if item.url == url), None)
+            if matched:
+                matched.potential_cannibalization = True
+                matched.cannibalization_group_id = group_id
+                matched.competing_urls = [item for item in urls if item != url]
+                matched.cannibalization_confidence = confidence
+                matched.needs_gsc_validation = not gsc_available
+        used.update(urls)
+        groups.append(
+            {
+                "group_id": group_id,
+                "topic": " ".join(topic) or "similar page intent",
+                "urls_involved": urls,
+                "evidence": evidence[:4] or ["similar titles, headings or slugs"],
+                "confidence": confidence,
+                "needs_gsc_validation": not gsc_available,
+                "recommendation": "differentiate; merge only if intent is the same, otherwise add internal links to the primary page",
+            }
+        )
+    return groups[:12]
+
+
+def cannibalization_signature(page: AuditPage) -> str:
+    value = f"{page.title} {' '.join(page.h1)} {urlparse(page.url).path}".lower()
+    tokens = [
+        token
+        for token in re.split(r"[^a-z0-9]+", value)
+        if len(token) > 3 and token not in STOPWORDS_FOR_SIMILARITY and not token.isdigit()
+    ]
+    return " ".join(list(dict.fromkeys(tokens))[:10])
+
+
+def build_structured_traffic_drop(gsc_context: dict[str, object], investigation: dict[str, object]) -> dict[str, object]:
+    summary = dict(gsc_context.get("summary") or {})
+    available = bool(gsc_context.get("available"))
+    return {
+        "gsc_data_available": available,
+        "period_before": "before export" if available else "",
+        "period_after": "after export" if available else "",
+        "traffic_drop_start_date": str(gsc_context.get("drop_start_date") or ""),
+        "clicks_before": summary.get("clicks_before", 0),
+        "clicks_after": summary.get("clicks_after", 0),
+        "click_loss": summary.get("click_loss", 0),
+        "click_loss_pct": summary.get("click_loss_pct"),
+        "impressions_before": summary.get("impressions_before", 0),
+        "impressions_after": summary.get("impressions_after", 0),
+        "impression_loss": summary.get("impression_loss", 0),
+        "impression_loss_pct": summary.get("impression_loss_pct"),
+        "pattern": investigation.get("pattern", "not enough data"),
+        "confidence": investigation.get("confidence", "low"),
+        "data_needed": investigation.get("data_required", []),
+    }
+
+
+def build_structured_summary(
+    summary: dict[str, object],
+    observed_health_score: int,
+    recovery_score: int,
+    pages: list[AuditPage],
+    top_recovery_opportunities: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "overall_score": observed_health_score,
+        "crawl_health_score": observed_health_score,
+        "recovery_opportunity_score": recovery_score,
+        "pages_detected": len(pages),
+        "pages_crawled": summary.get("pages_crawled", len(pages)),
+        "pages_successful": summary.get("pages_ok", 0),
+        "pages_failed": summary.get("pages_with_errors", 0),
+        "http_errors": summary.get("pages_with_errors", 0),
+        "redirected_urls": summary.get("redirected_pages", 0),
+        "slow_pages": len([page for page in pages if page.load_time > 3]),
+        "outdated_pages": summary.get("dated_content_signals", 0),
+        "duplicate_title_groups": summary.get("duplicate_title_groups", 0),
+        "duplicate_description_groups": summary.get("duplicate_meta_description_groups", 0),
+        "high_business_value_pages": summary.get("high_business_value_pages", 0),
+        "top_recovery_candidates": len(top_recovery_opportunities),
+    }
+
+
+def build_site_info(domain: str, crawl_metadata: dict[str, object], report_type: str, lang: str) -> dict[str, object]:
+    return {
+        "domain": domain,
+        "audit_date": datetime.now().isoformat(timespec="seconds"),
+        "crawl_start": "",
+        "crawl_end": datetime.now().isoformat(timespec="seconds"),
+        "language": lang,
+        "max_pages": crawl_metadata.get("max_pages", ""),
+        "concurrency": crawl_metadata.get("concurrency", ""),
+        "report_type": report_type,
+    }
+
+
+def build_report_limitations(gsc_context: dict[str, object]) -> list[str]:
+    if gsc_context.get("available"):
+        return [
+            "GSC exports are aggregated and do not prove causality by themselves.",
+            "Query-to-page matching is limited unless the export includes page-query pairs.",
+            "Traffic patterns should be validated against known site changes and analytics.",
+        ]
+    return [
+        "No Google Search Console exports were provided, so the traffic-drop diagnosis remains crawl-based.",
+        "Search Console and analytics data are required to confirm which pages or queries lost traffic.",
+    ]
+
+
+def build_methodology(gsc_context: dict[str, object], crawl_metadata: dict[str, object]) -> dict[str, object]:
+    return {
+        "crawl": "Sitemap and internal-link crawl with page classification, metadata, redirects, dates and internal-link checks.",
+        "gsc": "Before/after Search Console comparison by page, query, country and device." if gsc_context.get("available") else "No GSC data supplied.",
+        "matching": "GSC page URLs are matched against final, requested, canonical and path-normalized crawl URLs.",
+        "crawl_metadata": crawl_metadata,
+    }
 
 
 def build_critical_findings(summary: dict[str, int]) -> list[str]:
@@ -2426,13 +3022,20 @@ def build_top_recovery_opportunities(pages: list[AuditPage]) -> list[dict[str, o
                 "recommended_action": recovery_recommended_action(page, issue),
                 "effort": recovery_effort(issue),
                 "impact": "high" if page.business_value == "high" and page.recovery_opportunity_score >= 50 else "medium",
-                "needs_gsc_validation": True,
+                "needs_gsc_validation": not page.gsc_matched,
+                "click_loss": page.gsc_click_loss,
+                "impression_loss": page.gsc_impression_loss,
+                "position_change": page.gsc_position_delta,
             }
         )
     return rows
 
 
 def main_recovery_issue(page: AuditPage) -> str:
+    if page.gsc_click_loss > 0 and page.issues:
+        return "traffic-losing page with crawl issue"
+    if page.gsc_position_delta >= 3:
+        return "position drop"
     if page.outdated_date_signal or page.dated_references:
         return "outdated date signal"
     if page.redirect_count:
@@ -2451,6 +3054,10 @@ def main_recovery_issue(page: AuditPage) -> str:
 
 
 def recovery_why_it_matters(page: AuditPage, issue: str) -> str:
+    if issue == "traffic-losing page with crawl issue":
+        return f"The page lost {page.gsc_click_loss} clicks and has a visible fixable SEO issue."
+    if issue == "position drop":
+        return "Average position declined in GSC, so fixes should focus on relevance, freshness and internal support."
     if page.business_value == "high":
         return f"This {page.page_type} page has direct business value and visible fixable SEO issues."
     if issue == "outdated date signal":
@@ -2459,6 +3066,14 @@ def recovery_why_it_matters(page: AuditPage, issue: str) -> str:
 
 
 def recovery_recommended_action(page: AuditPage, issue: str) -> str:
+    if issue == "traffic-losing page with crawl issue":
+        if page.outdated_date_signal:
+            return page.recommended_date_action or "Refresh the page and validate recovery in GSC."
+        if page.inbound_internal_links_count < 3:
+            return "Fix the visible page issue and strengthen internal links from relevant pages."
+        return "Fix the crawl-visible issue, then monitor the page in GSC."
+    if issue == "position drop":
+        return "Refresh the page around the lost query intent and improve internal links to the URL."
     if issue == "outdated date signal":
         return page.recommended_date_action or "Refresh the page and update visible freshness signals."
     if issue == "redirect cleanup":
@@ -2475,6 +3090,8 @@ def recovery_recommended_action(page: AuditPage, issue: str) -> str:
 
 
 def recovery_effort(issue: str) -> str:
+    if issue in {"traffic-losing page with crawl issue", "position drop"}:
+        return "medium"
     if issue in {"redirect cleanup", "weak internal linking", "weak title or meta", "duplicate metadata"}:
         return "low"
     if issue in {"outdated date signal", "slow page"}:
@@ -2515,7 +3132,40 @@ def build_traffic_drop_investigation(
     pages: list[AuditPage],
     summary: dict[str, object],
     redirect_summary: dict[str, object],
+    gsc_context: dict[str, object] | None = None,
+    recovery_candidates: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
+    gsc_context = gsc_context or {}
+    recovery_candidates = recovery_candidates or []
+    if gsc_context.get("available"):
+        gsc_summary = dict(gsc_context.get("summary") or {})
+        pattern = detect_traffic_drop_pattern(gsc_summary, recovery_candidates, pages=pages, gsc_context=gsc_context)
+        return {
+            "gsc_data_available": True,
+            "limits_statement": "Search Console exports were compared before and after the reported drop. The findings below indicate patterns to validate, not guaranteed causes.",
+            "period_before": "before export",
+            "period_after": "after export",
+            "traffic_drop_start_date": str(gsc_context.get("drop_start_date") or ""),
+            "clicks_before": gsc_summary.get("clicks_before", 0),
+            "clicks_after": gsc_summary.get("clicks_after", 0),
+            "click_loss": gsc_summary.get("click_loss", 0),
+            "click_loss_pct": gsc_summary.get("click_loss_pct"),
+            "impressions_before": gsc_summary.get("impressions_before", 0),
+            "impressions_after": gsc_summary.get("impressions_after", 0),
+            "impression_loss": gsc_summary.get("impression_loss", 0),
+            "impression_loss_pct": gsc_summary.get("impression_loss_pct"),
+            "ctr_before": gsc_summary.get("ctr_before", 0.0),
+            "ctr_after": gsc_summary.get("ctr_after", 0.0),
+            "pattern": pattern["pattern"],
+            "confidence": pattern["confidence"],
+            "crawl_suggests": pattern["signals"],
+            "data_required": pattern["data_needed"],
+            "conclusion": [pattern["conclusion"]],
+            "top_losing_pages": gsc_context.get("top_losing_pages", []),
+            "top_losing_queries": gsc_context.get("top_losing_queries", []),
+            "top_losing_countries": gsc_context.get("top_losing_countries", []),
+            "top_losing_devices": gsc_context.get("top_losing_devices", []),
+        }
     validation_areas = []
     if any(page.outdated_date_signal or page.dated_references for page in pages):
         validation_areas.append("pages with outdated date signals")
@@ -2533,6 +3183,7 @@ def build_traffic_drop_investigation(
         validation_areas.append("old blog posts that may have lost freshness")
     validation_areas.append("page groups that need GSC validation")
     return {
+        "gsc_data_available": False,
         "limits_statement": "This crawl cannot confirm the traffic drop cause without Search Console / analytics data.",
         "crawl_suggests": validation_areas,
         "data_required": [
@@ -2547,6 +3198,91 @@ def build_traffic_drop_investigation(
             "The next step is to match these findings with Search Console data.",
             "The highest-priority pages are those combining business value with visible fixable issues.",
         ],
+    }
+
+
+def detect_traffic_drop_pattern(
+    gsc_summary: dict[str, object],
+    recovery_candidates: list[dict[str, object]],
+    pages: list[AuditPage] | None = None,
+    gsc_context: dict[str, object] | None = None,
+) -> dict[str, object]:
+    pages = pages or []
+    gsc_context = gsc_context or {}
+    click_loss = int(gsc_summary.get("click_loss") or 0)
+    impression_loss = int(gsc_summary.get("impression_loss") or 0)
+    clicks_before = int(gsc_summary.get("clicks_before") or 0)
+    if not clicks_before or click_loss <= 0:
+        return {
+            "pattern": "not enough data",
+            "confidence": "low",
+            "signals": ["No clear click loss is visible in the provided GSC exports."],
+            "data_needed": ["A valid before/after Pages export with clicks and impressions."],
+            "conclusion": "Not enough data to determine pattern.",
+        }
+    losing_pages = [page for page in pages if page.gsc_click_loss > 0 or page.gsc_impression_loss > 0]
+    losing_clicks = sum(page.gsc_click_loss for page in losing_pages)
+    page_type_losses = Counter(page.page_type or "other" for page in losing_pages)
+    business_losses = sum(page.gsc_click_loss for page in losing_pages if page.business_value == "high")
+    blog_losses = sum(page.gsc_click_loss for page in losing_pages if page.page_type in {"blog", "guide", "resource"})
+    top_pages = list(gsc_context.get("top_losing_pages") or [])
+    top_countries = list(gsc_context.get("top_losing_countries") or [])
+    top_devices = list(gsc_context.get("top_losing_devices") or [])
+    signals: list[str] = []
+    pattern = "not enough data"
+    confidence = "medium" if len(losing_pages) >= 3 else "low"
+    if top_pages and len(top_pages) <= max(3, len(losing_pages) // 3):
+        pattern = "page-specific"
+        signals.append("Loss is concentrated in a limited set of pages.")
+    if blog_losses and losing_clicks and blog_losses / losing_clicks >= 0.55:
+        pattern = "blog-focused"
+        signals.append("Most matched click loss is on blog/resource pages.")
+    if business_losses and losing_clicks and business_losses / losing_clicks >= 0.45:
+        pattern = "commercial-page-focused"
+        signals.append("A material share of matched click loss affects high business value pages.")
+    if top_countries and float(top_countries[0].get("share_of_total_loss") or 0) >= 60:
+        pattern = "country-specific"
+        signals.append(f"Loss is concentrated in {top_countries[0].get('country') or top_countries[0].get('key')}.")
+    if top_devices:
+        total_device_loss = sum(max(0, int(row.get("clicks_before") or 0) - int(row.get("clicks_after") or 0)) for row in top_devices)
+        first_device_loss = max(0, int(top_devices[0].get("clicks_before") or 0) - int(top_devices[0].get("clicks_after") or 0))
+        if total_device_loss and first_device_loss / total_device_loss >= 0.65:
+            pattern = "device-specific"
+            signals.append(f"Loss appears concentrated on {top_devices[0].get('device') or top_devices[0].get('key')}.")
+    if impression_loss and impression_loss >= click_loss * 10:
+        signals.append("The data suggests an impression loss rather than a CTR-only issue.")
+        if pattern == "not enough data":
+            pattern = "mostly impression loss"
+    ctr_before = float(gsc_summary.get("ctr_before") or 0.0)
+    ctr_after = float(gsc_summary.get("ctr_after") or 0.0)
+    if ctr_before and ctr_after < ctr_before * 0.8 and impression_loss < max(1, int(gsc_summary.get("impressions_before") or 0)) * 0.1:
+        pattern = "mostly CTR loss"
+        signals.append("CTR fell while impressions stayed relatively stable.")
+    if recovery_candidates:
+        signals.append("Some losing pages also have crawl-visible issues that can be fixed first.")
+    conclusion_map = {
+        "page-specific": "The drop appears mostly page-specific.",
+        "blog-focused": "The drop appears concentrated on blog/resource pages.",
+        "commercial-page-focused": "The drop appears to affect commercial pages.",
+        "country-specific": "The drop appears concentrated in one country segment.",
+        "device-specific": "The drop appears concentrated on one device segment.",
+        "mostly impression loss": "The data suggests an impression loss rather than a CTR issue.",
+        "mostly CTR loss": "The data suggests a CTR loss rather than a visibility-only issue.",
+    }
+    if pattern == "not enough data":
+        confidence = "low"
+    if page_type_losses:
+        signals.append("Most affected page type: " + page_type_losses.most_common(1)[0][0])
+    return {
+        "pattern": pattern,
+        "confidence": confidence,
+        "signals": signals[:6] or ["Not enough data to determine a clear pattern."],
+        "data_needed": [
+            "Confirm exact drop date in GSC or GA4.",
+            "Map query-level losses to pages if page-query exports are available.",
+            "Check site/content changes around the drop window.",
+        ],
+        "conclusion": conclusion_map.get(pattern, "Not enough data to determine pattern."),
     }
 
 
@@ -2674,4 +3410,38 @@ def serialize_audit_page(page: AuditPage) -> dict[str, object]:
     payload.pop("content_like", None)
     payload.pop("meaningful_h1_count", None)
     payload.pop("overlap_fingerprint", None)
+    payload["url"] = page.url
+    payload["gsc"] = {
+        "data_available": page.gsc_data_available,
+        "matched": page.gsc_matched,
+        "match_type": page.gsc_match_type,
+        "clicks_before": page.gsc_clicks_before,
+        "clicks_after": page.gsc_clicks_after,
+        "click_loss": page.gsc_click_loss,
+        "click_loss_pct": page.gsc_click_loss_pct,
+        "impressions_before": page.gsc_impressions_before,
+        "impressions_after": page.gsc_impressions_after,
+        "impression_loss": page.gsc_impression_loss,
+        "impression_loss_pct": page.gsc_impression_loss_pct,
+        "ctr_before": page.gsc_ctr_before,
+        "ctr_after": page.gsc_ctr_after,
+        "ctr_delta": page.gsc_ctr_delta,
+        "position_before": page.gsc_position_before,
+        "position_after": page.gsc_position_after,
+        "position_delta": page.gsc_position_delta,
+        "top_losing_queries": page.gsc_top_losing_queries,
+    }
+    payload["internal_links"] = {
+        "inbound_count": page.inbound_internal_links_count,
+        "outbound_count": page.outbound_internal_links_count,
+        "strength": page.internal_link_strength,
+        "orphan_like": page.orphan_like,
+        "anchors_received": page.anchors_received,
+    }
+    payload["date_signals_structured"] = {
+        "signals": page.date_signals,
+        "outdated": page.outdated_date_signal,
+        "severity": page.date_severity,
+        "recommended_action": page.recommended_date_action,
+    }
     return payload

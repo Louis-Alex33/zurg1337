@@ -11,7 +11,8 @@ from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from typing import Any
+from urllib.parse import unquote, urlparse
 from zipfile import BadZipFile, ZipFile
 
 from config import GSC_CANNIBAL_STOPWORDS, GSC_STRUCTURAL_SLUGS, GSC_TECHNICAL_URL_PATTERNS, GSC_TECHNICAL_URL_SUFFIXES
@@ -138,12 +139,406 @@ def run_gsc_analysis(
 def detect_delimiter(filepath: str) -> str:
     with Path(filepath).open("r", encoding="utf-8-sig") as handle:
         first_line = handle.readline()
-    return "\t" if "\t" in first_line else ","
+    if "\t" in first_line:
+        return "\t"
+    if first_line.count(";") > first_line.count(","):
+        return ";"
+    return ","
 
 
 def detect_delimiter_from_text(text: str) -> str:
     first_line = text.splitlines()[0] if text.splitlines() else ""
-    return "\t" if "\t" in first_line else ","
+    if "\t" in first_line:
+        return "\t"
+    if first_line.count(";") > first_line.count(","):
+        return ";"
+    return ","
+
+
+def detect_csv_dialect(path: str | Path) -> csv.Dialect:
+    sample = Path(path).read_text(encoding="utf-8-sig", errors="replace")[:4096]
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=",;\t")
+    except csv.Error:
+        class FallbackDialect(csv.excel):
+            delimiter = detect_delimiter_from_text(sample)
+
+        return FallbackDialect
+
+
+def parse_number(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    cleaned = str(value).replace("\xa0", " ").replace("%", "").strip()
+    cleaned = re.sub(r"\s+", "", cleaned)
+    if not cleaned:
+        return 0.0
+    if "," in cleaned and "." in cleaned:
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+    elif "," in cleaned:
+        left, right = cleaned.rsplit(",", 1)
+        if len(right) == 3 and left and left.replace("-", "").isdigit():
+            cleaned = left + right
+        else:
+            cleaned = f"{left}.{right}"
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
+
+def parse_ctr(value: Any) -> float:
+    if value is None:
+        return 0.0
+    raw = str(value)
+    number = parse_number(value)
+    if "%" in raw or number > 1:
+        return number / 100
+    return number
+
+
+def load_gsc_csv(path: str | Path | None) -> list[dict[str, Any]]:
+    if not path:
+        return []
+    source = Path(path)
+    if not source.exists():
+        raise CLIError(f"Fichier GSC introuvable: {path}")
+    dialect = detect_csv_dialect(source)
+    rows: list[dict[str, Any]] = []
+    with source.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+        reader = csv.DictReader(handle, dialect=dialect)
+        if not reader.fieldnames:
+            return []
+        for row in reader:
+            rows.append(dict(row))
+    return normalize_gsc_columns(rows)
+
+
+def normalize_gsc_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        normalized: dict[str, Any] = {}
+        for key, value in row.items():
+            normalized_key = normalize_header(str(key or ""))
+            if normalized_key in {"clicks", "impressions"}:
+                normalized[normalized_key] = int(round(parse_number(value)))
+            elif normalized_key == "ctr":
+                normalized[normalized_key] = parse_ctr(value)
+            elif normalized_key == "position":
+                normalized[normalized_key] = round(parse_number(value), 3)
+            elif normalized_key in {"page", "query", "country", "device", "date"}:
+                normalized[normalized_key] = str(value or "").strip()
+            elif normalized_key:
+                normalized[normalized_key] = value
+        if any(normalized.get(key) for key in ("page", "query", "country", "device", "date")):
+            normalized.setdefault("clicks", 0)
+            normalized.setdefault("impressions", 0)
+            normalized.setdefault("ctr", 0.0)
+            normalized.setdefault("position", 0.0)
+            normalized_rows.append(normalized)
+    return normalized_rows
+
+
+def compare_gsc_periods(
+    before_df: list[dict[str, Any]],
+    after_df: list[dict[str, Any]],
+    key_column: str,
+) -> list[dict[str, Any]]:
+    before = aggregate_gsc_rows(before_df, key_column)
+    after = aggregate_gsc_rows(after_df, key_column)
+    keys = set(before) | set(after)
+    comparisons: list[dict[str, Any]] = []
+    for key in sorted(keys):
+        old = before.get(key, empty_gsc_metric())
+        new = after.get(key, empty_gsc_metric())
+        clicks_delta = int(new["clicks"] - old["clicks"])
+        impressions_delta = int(new["impressions"] - old["impressions"])
+        item = {
+            key_column: key,
+            "key": key,
+            "status": "new" if key not in before else "lost" if key not in after else "existing",
+            "clicks_before": int(old["clicks"]),
+            "clicks_after": int(new["clicks"]),
+            "clicks_delta": clicks_delta,
+            "clicks_delta_pct": pct_delta(old["clicks"], new["clicks"]),
+            "impressions_before": int(old["impressions"]),
+            "impressions_after": int(new["impressions"]),
+            "impressions_delta": impressions_delta,
+            "impressions_delta_pct": pct_delta(old["impressions"], new["impressions"]),
+            "ctr_before": round(float(old["ctr"]), 4),
+            "ctr_after": round(float(new["ctr"]), 4),
+            "ctr_delta": round(float(new["ctr"] - old["ctr"]), 4),
+            "position_before": round(float(old["position"]), 2),
+            "position_after": round(float(new["position"]), 2),
+            "position_delta": round(float(new["position"] - old["position"]), 2),
+        }
+        comparisons.append(item)
+    comparisons.sort(key=lambda row: (int(row["clicks_delta"]), int(row["impressions_delta"])))
+    return comparisons
+
+
+def aggregate_gsc_rows(rows: list[dict[str, Any]], key_column: str) -> dict[str, dict[str, float]]:
+    grouped: dict[str, dict[str, float]] = {}
+    for row in rows:
+        key = str(row.get(key_column) or "").strip()
+        if key_column == "page":
+            key = normalize_url_for_matching(key)
+        if not key:
+            continue
+        current = grouped.setdefault(
+            key,
+            {
+                "clicks": 0.0,
+                "impressions": 0.0,
+                "ctr": 0.0,
+                "position": 0.0,
+                "position_weight": 0.0,
+            },
+        )
+        clicks = parse_number(row.get("clicks"))
+        impressions = parse_number(row.get("impressions"))
+        current["clicks"] += clicks
+        current["impressions"] += impressions
+        current["position"] += parse_number(row.get("position")) * max(impressions, 1.0)
+        current["position_weight"] += max(impressions, 1.0)
+    for value in grouped.values():
+        value["ctr"] = value["clicks"] / value["impressions"] if value["impressions"] else 0.0
+        value["position"] = value["position"] / value["position_weight"] if value["position_weight"] else 0.0
+    return grouped
+
+
+def empty_gsc_metric() -> dict[str, float]:
+    return {"clicks": 0.0, "impressions": 0.0, "ctr": 0.0, "position": 0.0}
+
+
+def pct_delta(before: float, after: float) -> float | None:
+    if before == 0:
+        return None
+    return round(((after - before) / before) * 100, 1)
+
+
+def summarize_gsc_losses(gsc_data: dict[str, Any]) -> dict[str, Any]:
+    pages = list(gsc_data.get("pages") or [])
+    queries = list(gsc_data.get("queries") or [])
+    countries = list(gsc_data.get("countries") or [])
+    devices = list(gsc_data.get("devices") or [])
+    page_totals = summarize_comparison_totals(pages)
+    return {
+        **page_totals,
+        "top_losing_pages": top_losses(pages),
+        "top_losing_queries": top_losses(queries),
+        "top_losing_countries": top_losses(countries),
+        "top_losing_devices": top_losses(devices),
+        "has_pages": bool(pages),
+        "has_queries": bool(queries),
+        "has_countries": bool(countries),
+        "has_devices": bool(devices),
+    }
+
+
+def summarize_comparison_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    clicks_before = sum(int(row.get("clicks_before") or 0) for row in rows)
+    clicks_after = sum(int(row.get("clicks_after") or 0) for row in rows)
+    impressions_before = sum(int(row.get("impressions_before") or 0) for row in rows)
+    impressions_after = sum(int(row.get("impressions_after") or 0) for row in rows)
+    return {
+        "clicks_before": clicks_before,
+        "clicks_after": clicks_after,
+        "click_loss": max(0, clicks_before - clicks_after),
+        "click_loss_pct": pct_loss(clicks_before, clicks_after),
+        "impressions_before": impressions_before,
+        "impressions_after": impressions_after,
+        "impression_loss": max(0, impressions_before - impressions_after),
+        "impression_loss_pct": pct_loss(impressions_before, impressions_after),
+        "ctr_before": round(clicks_before / impressions_before, 4) if impressions_before else 0.0,
+        "ctr_after": round(clicks_after / impressions_after, 4) if impressions_after else 0.0,
+    }
+
+
+def pct_loss(before: float, after: float) -> float | None:
+    if before == 0:
+        return None
+    return round(max(0.0, ((before - after) / before) * 100), 1)
+
+
+def top_losses(rows: list[dict[str, Any]], limit: int = 20) -> list[dict[str, Any]]:
+    losing = [row for row in rows if int(row.get("clicks_delta") or 0) < 0 or int(row.get("impressions_delta") or 0) < 0]
+    losing.sort(key=lambda row: (int(row.get("clicks_delta") or 0), int(row.get("impressions_delta") or 0)))
+    return losing[:limit]
+
+
+def normalize_url_for_matching(url: str) -> str:
+    if not url:
+        return ""
+    candidate = str(url).strip()
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+    parsed = urlparse(candidate)
+    host = parsed.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    path = unquote(parsed.path or "/")
+    path = re.sub(r"/+", "/", path).rstrip("/") or "/"
+    path = path.lower()
+    return f"{host}{path}"
+
+
+def path_for_matching(url: str) -> str:
+    normalized = normalize_url_for_matching(url)
+    if "/" not in normalized:
+        return "/"
+    return normalized[normalized.find("/") :] or "/"
+
+
+def match_gsc_page_to_crawl(gsc_url: str, crawl_pages: list[Any]) -> dict[str, Any]:
+    gsc_normalized = normalize_url_for_matching(gsc_url)
+    gsc_path = path_for_matching(gsc_url)
+    indexes = build_crawl_match_indexes(crawl_pages)
+    for match_type, index_name in (
+        ("final_url", "final"),
+        ("requested_url", "requested"),
+        ("canonical", "canonical"),
+    ):
+        page = indexes[index_name].get(gsc_normalized)
+        if page is not None:
+            return {"matched": True, "match_type": match_type, "page": page}
+    path_matches = indexes["path"].get(gsc_path, [])
+    if len(path_matches) == 1:
+        return {"matched": True, "match_type": "path", "page": path_matches[0]}
+    return {"matched": False, "match_type": "unmatched", "page": None}
+
+
+def build_crawl_match_indexes(crawl_pages: list[Any]) -> dict[str, Any]:
+    indexes: dict[str, Any] = {"final": {}, "requested": {}, "canonical": {}, "path": defaultdict(list)}
+    for page in crawl_pages:
+        requested = page_value(page, "requested_url") or page_value(page, "url")
+        final = page_value(page, "final_url") or page_value(page, "url")
+        canonical = page_value(page, "canonical")
+        requested_normalized = normalize_url_for_matching(str(requested or ""))
+        final_normalized = normalize_url_for_matching(str(final or ""))
+        canonical_normalized = normalize_url_for_matching(str(canonical or "")) if canonical else ""
+        path_normalized = path_for_matching(str(final or requested or ""))
+        set_page_value(page, "requested_url_normalized", requested_normalized)
+        set_page_value(page, "final_url_normalized", final_normalized)
+        set_page_value(page, "canonical_url_normalized", canonical_normalized)
+        set_page_value(page, "path_normalized", path_normalized)
+        if final_normalized:
+            indexes["final"][final_normalized] = page
+        if requested_normalized:
+            indexes["requested"][requested_normalized] = page
+        if canonical_normalized:
+            indexes["canonical"][canonical_normalized] = page
+        if path_normalized:
+            indexes["path"][path_normalized].append(page)
+    return indexes
+
+
+def page_value(page: Any, field: str) -> Any:
+    if isinstance(page, dict):
+        return page.get(field)
+    return getattr(page, field, None)
+
+
+def set_page_value(page: Any, field: str, value: Any) -> None:
+    if isinstance(page, dict):
+        page[field] = value
+    elif hasattr(page, field):
+        setattr(page, field, value)
+
+
+def resolve_gsc_export_paths(
+    *,
+    gsc_folder: str | None = None,
+    pages_before: str | None = None,
+    pages_after: str | None = None,
+    queries_before: str | None = None,
+    queries_after: str | None = None,
+    countries_before: str | None = None,
+    countries_after: str | None = None,
+    devices_before: str | None = None,
+    devices_after: str | None = None,
+    dates: str | None = None,
+) -> dict[str, str]:
+    paths = {
+        "pages_before": pages_before,
+        "pages_after": pages_after,
+        "queries_before": queries_before,
+        "queries_after": queries_after,
+        "countries_before": countries_before,
+        "countries_after": countries_after,
+        "devices_before": devices_before,
+        "devices_after": devices_after,
+        "dates": dates,
+    }
+    if gsc_folder:
+        folder = Path(gsc_folder)
+        conventions = {
+            "pages_before": "pages_before.csv",
+            "pages_after": "pages_after.csv",
+            "queries_before": "queries_before.csv",
+            "queries_after": "queries_after.csv",
+            "countries_before": "countries_before.csv",
+            "countries_after": "countries_after.csv",
+            "devices_before": "devices_before.csv",
+            "devices_after": "devices_after.csv",
+            "dates": "dates.csv",
+        }
+        for key, filename in conventions.items():
+            candidate = folder / filename
+            if not paths.get(key) and candidate.exists():
+                paths[key] = str(candidate)
+    return {key: str(value) for key, value in paths.items() if value}
+
+
+def load_gsc_period_exports(paths: dict[str, str]) -> dict[str, Any]:
+    data: dict[str, Any] = {"paths": paths}
+    pairs = {
+        "pages": ("pages_before", "pages_after", "page"),
+        "queries": ("queries_before", "queries_after", "query"),
+        "countries": ("countries_before", "countries_after", "country"),
+        "devices": ("devices_before", "devices_after", "device"),
+    }
+    for output_key, (before_key, after_key, dimension) in pairs.items():
+        before_path = paths.get(before_key)
+        after_path = paths.get(after_key)
+        if before_path and after_path:
+            data[output_key] = compare_gsc_periods(load_gsc_csv(before_path), load_gsc_csv(after_path), dimension)
+        else:
+            data[output_key] = []
+    data["dates"] = load_gsc_csv(paths.get("dates")) if paths.get("dates") else []
+    data["summary"] = summarize_gsc_losses(data)
+    return data
+
+
+def detect_traffic_drop_start_date(date_rows: list[dict[str, Any]]) -> str:
+    if len(date_rows) < 6:
+        return ""
+    ordered = sorted(date_rows, key=lambda row: str(row.get("date") or ""))
+    midpoint = max(2, len(ordered) // 2)
+    baseline_rows = ordered[:midpoint]
+    baseline = sum(int(row.get("clicks") or 0) for row in baseline_rows) / max(1, len(baseline_rows))
+    if baseline <= 0:
+        return ""
+    for row in ordered[midpoint:]:
+        if int(row.get("clicks") or 0) <= baseline * 0.75:
+            return str(row.get("date") or "")
+    return ""
+
+
+def query_intent_type(query: str, brand_terms: list[str] | None = None) -> str:
+    cleaned = query.lower()
+    if any(term and term.lower() in cleaned for term in brand_terms or []):
+        return "branded"
+    if any(term in cleaned for term in ("price", "pricing", "quote", "supplier", "manufacturer", "wholesale", "buy", "oem", "odm", "private label")):
+        return "commercial"
+    if any(cleaned.startswith(prefix) for prefix in ("how ", "what ", "why ", "best ", "guide ", *QUERY_QUESTION_STARTERS)):
+        return "informational"
+    return "unknown"
 
 
 def gsc_archive_contains(filepath: str | None, kind: str) -> bool:
@@ -253,11 +648,13 @@ def normalize_header(header: str) -> str:
         "appareil": "device",
         "appareils": "device",
         "country": "country",
+        "countries": "country",
         "clics": "clicks",
         "clicks": "clicks",
         "ctr": "ctr",
         "date": "date",
         "device": "device",
+        "devices": "device",
         "filtre": "filter",
         "filter": "filter",
         "jour": "date",
@@ -2123,7 +2520,7 @@ def render_report(report: dict[str, object]) -> str:
         <p class="cover-subtitle">Plan d'action basé sur les données Google Search Console</p>
         <div class="cover-meta">
           <div class="cover-meta-item">
-            <span class="cover-meta-label">Domaine</span>
+            <span class="cover-meta-label">Domaine analysé</span>
             <span class="cover-meta-value">{html.escape(str(report.get("site_name") or "Non précisé"))}</span>
           </div>
           <div class="cover-meta-item">

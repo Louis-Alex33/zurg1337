@@ -154,6 +154,37 @@ class AuditPage:
     content_like: bool = False
     meaningful_h1_count: int = 0
     overlap_fingerprint: str = ""
+    requested_url_normalized: str = ""
+    final_url_normalized: str = ""
+    canonical_url_normalized: str = ""
+    path_normalized: str = ""
+    gsc_data_available: bool = False
+    gsc_matched: bool = False
+    gsc_match_type: str = ""
+    gsc_clicks_before: int = 0
+    gsc_clicks_after: int = 0
+    gsc_click_loss: int = 0
+    gsc_click_loss_pct: float | None = None
+    gsc_impressions_before: int = 0
+    gsc_impressions_after: int = 0
+    gsc_impression_loss: int = 0
+    gsc_impression_loss_pct: float | None = None
+    gsc_ctr_before: float = 0.0
+    gsc_ctr_after: float = 0.0
+    gsc_ctr_delta: float = 0.0
+    gsc_position_before: float = 0.0
+    gsc_position_after: float = 0.0
+    gsc_position_delta: float = 0.0
+    gsc_top_losing_queries: list[dict[str, Any]] = field(default_factory=list)
+    potential_cannibalization: bool = False
+    cannibalization_group_id: str = ""
+    competing_urls: list[str] = field(default_factory=list)
+    cannibalization_confidence: str = ""
+    content_quality: dict[str, Any] = field(default_factory=dict)
+    commercial_signal_score: int = 0
+    trust_signal_score: int = 0
+    intent_clarity_score: int = 0
+    content_recommendations: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -184,6 +215,19 @@ class AuditReport:
     page_type_breakdown: dict[str, int] = field(default_factory=dict)
     business_value_breakdown: dict[str, int] = field(default_factory=dict)
     redirect_summary: dict[str, Any] = field(default_factory=dict)
+    site: dict[str, Any] = field(default_factory=dict)
+    structured_summary: dict[str, Any] = field(default_factory=dict)
+    traffic_drop: dict[str, Any] = field(default_factory=dict)
+    top_losing_pages: list[dict[str, Any]] = field(default_factory=list)
+    top_losing_queries: list[dict[str, Any]] = field(default_factory=list)
+    top_losing_countries: list[dict[str, Any]] = field(default_factory=list)
+    top_losing_devices: list[dict[str, Any]] = field(default_factory=list)
+    traffic_losing_pages_with_crawl_issues: list[dict[str, Any]] = field(default_factory=list)
+    recovery_candidates: list[dict[str, Any]] = field(default_factory=list)
+    cannibalization_groups: list[dict[str, Any]] = field(default_factory=list)
+    content_intent_gaps: list[dict[str, Any]] = field(default_factory=list)
+    methodology: dict[str, Any] = field(default_factory=dict)
+    limitations: list[str] = field(default_factory=list)
     crawl_metadata: dict[str, Any] = field(default_factory=dict)
     history_path: str = ""
     html_path: str = ""

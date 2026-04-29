@@ -20,6 +20,7 @@ from audit_report_design import (
 from audit import (
     audit_domains,
     build_report,
+    calculate_content_quality,
     classify_page_type,
     compute_observed_health_score,
     crawl_page,
@@ -458,6 +459,93 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertIn(".premium-report .annexe", page)
         self.assertIn("display: none !important", page)
         self.assertIn("Pourquoi elle ressort", page)
+
+    def test_recovery_report_without_gsc_keeps_crawl_based_fallback(self) -> None:
+        report = build_report(
+            [make_page(url="https://example.com/product/private-label", page_type="product", business_value="high")],
+            domain="example.com",
+            report_type="recovery",
+            lang="en",
+        )
+
+        self.assertFalse(report.traffic_drop["gsc_data_available"])
+        self.assertIn("Search Console", " ".join(report.confidence_notes))
+        self.assertIn("gsc", report.pages[0])
+
+    def test_recovery_report_with_gsc_enriches_pages_and_html(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            before = root / "pages_before.csv"
+            after = root / "pages_after.csv"
+            queries_before = root / "queries_before.csv"
+            queries_after = root / "queries_after.csv"
+            before.write_text(
+                "Page,Clicks,Impressions,CTR,Position\n"
+                "https://www.example.com/product/private-label,120,1000,12%,3\n",
+                encoding="utf-8",
+            )
+            after.write_text(
+                "Page,Clicks,Impressions,CTR,Position\n"
+                "https://example.com/product/private-label/,40,700,5.7%,7\n",
+                encoding="utf-8",
+            )
+            queries_before.write_text(
+                "Query,Clicks,Impressions,CTR,Position\nprivate label supplier,80,700,11.4%,3\n",
+                encoding="utf-8",
+            )
+            queries_after.write_text(
+                "Query,Clicks,Impressions,CTR,Position\nprivate label supplier,20,500,4%,8\n",
+                encoding="utf-8",
+            )
+            page = make_page(
+                url="https://example.com/product/private-label",
+                requested_url="https://example.com/product/private-label",
+                final_url="https://example.com/product/private-label",
+                page_type="product",
+                business_value="high",
+                meta_description="",
+                word_count=220,
+            )
+            report = build_report(
+                [page],
+                domain="example.com",
+                report_type="recovery",
+                lang="en",
+                gsc_paths={
+                    "pages_before": str(before),
+                    "pages_after": str(after),
+                    "queries_before": str(queries_before),
+                    "queries_after": str(queries_after),
+                },
+            )
+            html = render_premium_audit_report(report, lang="en")
+
+        self.assertTrue(report.traffic_drop["gsc_data_available"])
+        self.assertEqual(report.pages[0]["gsc_click_loss"], 80)
+        self.assertLessEqual(report.pages[0]["recovery_opportunity_score"], 100)
+        self.assertTrue(report.top_losing_pages)
+        self.assertTrue(report.top_losing_queries)
+        self.assertIn("GSC-enhanced", html)
+        self.assertIn("Top Losing Pages", html)
+
+    def test_content_quality_detects_commercial_and_trust_gaps(self) -> None:
+        page = make_page(
+            url="https://example.com/products/oem-factory",
+            title="OEM Factory Product",
+            h1=["OEM Factory Product"],
+            h2=["Specifications", "FAQ"],
+            word_count=900,
+            images_total=3,
+            images_without_alt=1,
+            page_type="product",
+            business_value="high",
+        )
+
+        quality = calculate_content_quality(page, text="OEM factory bulk quote ISO certified testing", has_table=True)
+
+        self.assertGreater(quality["commercial_signal_score"], 0)
+        self.assertGreater(quality["trust_signal_score"], 0)
+        self.assertTrue(quality["has_table"])
 
     def test_premium_report_v3_density_regressions_are_rendered(self) -> None:
         current_year = str(datetime.now().year)

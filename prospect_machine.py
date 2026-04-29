@@ -120,6 +120,16 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--retries", type=int, default=1, help="Limited network retries per URL")
     audit_parser.add_argument("--lang", choices=["fr", "en"], default="fr", help="Report language")
     audit_parser.add_argument("--report-type", choices=["standard", "recovery"], default="standard", help="Report structure")
+    audit_parser.add_argument("--gsc-folder", help="Folder with GSC exports named pages_before.csv, pages_after.csv, queries_before.csv, queries_after.csv, countries_before.csv, countries_after.csv, devices_before.csv, devices_after.csv and dates.csv")
+    audit_parser.add_argument("--gsc-pages-before", help="GSC Pages export for the before period")
+    audit_parser.add_argument("--gsc-pages-after", help="GSC Pages export for the after period")
+    audit_parser.add_argument("--gsc-queries-before", help="GSC Queries export for the before period")
+    audit_parser.add_argument("--gsc-queries-after", help="GSC Queries export for the after period")
+    audit_parser.add_argument("--gsc-countries-before", help="GSC Countries export for the before period")
+    audit_parser.add_argument("--gsc-countries-after", help="GSC Countries export for the after period")
+    audit_parser.add_argument("--gsc-devices-before", help="GSC Devices export for the before period")
+    audit_parser.add_argument("--gsc-devices-after", help="GSC Devices export for the after period")
+    audit_parser.add_argument("--gsc-dates", help="Optional GSC dates/chart export")
     audit_parser.add_argument("--overlap", action="store_true", dest="overlap_enabled", default=None, help="Force overlap analysis on")
     audit_parser.add_argument("--skip-overlap", action="store_false", dest="overlap_enabled", help="Disable overlap analysis")
     audit_parser.add_argument("--overlap-max-pages", type=int, help="Maximum pages considered for overlap analysis")
@@ -254,6 +264,16 @@ def main(argv: list[str] | None = None) -> int:
                 cache_ttl_seconds=args.cache_ttl_seconds,
                 report_type=args.report_type,
                 lang=args.lang,
+                gsc_folder=args.gsc_folder,
+                gsc_pages_before=args.gsc_pages_before,
+                gsc_pages_after=args.gsc_pages_after,
+                gsc_queries_before=args.gsc_queries_before,
+                gsc_queries_after=args.gsc_queries_after,
+                gsc_countries_before=args.gsc_countries_before,
+                gsc_countries_after=args.gsc_countries_after,
+                gsc_devices_before=args.gsc_devices_before,
+                gsc_devices_after=args.gsc_devices_after,
+                gsc_dates=args.gsc_dates,
                 site=args.url or args.site,
             )
             print(f"{len(reports)} audits ecrits dans {args.output_dir}")
