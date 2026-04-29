@@ -4,7 +4,9 @@ import re
 import time
 import xml.etree.ElementTree as ET
 import html as html_lib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict, deque
+from collections import Counter
 from dataclasses import asdict
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -44,6 +46,37 @@ DATED_PATTERNS = [
 ]
 
 CRAWL_SOURCES = {"home", "sitemap", "mixed"}
+REPORT_TYPES = {"standard", "recovery"}
+COMMERCIAL_PAGE_TYPES = {"homepage", "product", "category", "manufacturer", "service", "certification"}
+B2B_TERMS = {
+    "b2b",
+    "brand",
+    "bulk",
+    "factory",
+    "manufacturer",
+    "oem",
+    "odm",
+    "private label",
+    "supplier",
+    "wholesale",
+}
+STOPWORDS_FOR_SIMILARITY = {
+    "a",
+    "about",
+    "and",
+    "de",
+    "des",
+    "du",
+    "for",
+    "in",
+    "la",
+    "le",
+    "les",
+    "of",
+    "the",
+    "to",
+    "with",
+}
 GENERIC_ANCHOR_TEXTS = {
     "cliquez ici",
     "continuer",
@@ -73,6 +106,9 @@ def audit_domains(
     max_links_per_page: int | None = None,
     max_html_bytes: int | None = None,
     max_total_seconds_per_domain: float | None = None,
+    concurrency: int = 5,
+    timeout: int | None = None,
+    retries: int = 1,
     overlap_enabled: bool | None = None,
     overlap_max_pages: int | None = None,
     crawl_source: str = DEFAULT_CRAWL_SOURCE,
@@ -85,6 +121,8 @@ def audit_domains(
     cache_dir: str = ".cache/prospect_machine/http",
     cache_ttl_seconds: int = 604_800,
     mode: str = DEFAULT_AUDIT_MODE,
+    report_type: str = "standard",
+    lang: str = "fr",
     site: str | None = None,
     session: requests.Session | None = None,
     excluded_path_prefixes: set[str] | None = None,
@@ -93,6 +131,8 @@ def audit_domains(
     mode_config = get_audit_mode_config(mode)
     if crawl_source not in CRAWL_SOURCES:
         raise CLIError(f"Source de crawl inconnue: {crawl_source}. Valeurs: home, sitemap, mixed.")
+    if report_type not in REPORT_TYPES:
+        raise CLIError(f"Type de rapport inconnu: {report_type}. Valeurs: standard, recovery.")
     selected = select_domains(input_csv=input_csv, top=top, min_score=min_score, site=site)
     if not selected:
         raise CLIError("Aucun domaine a auditer apres application des filtres.")
@@ -107,23 +147,25 @@ def audit_domains(
         client = make_session()
 
     reports: list[AuditReport] = []
-    resolved_max_pages = max_pages or mode_config.max_pages or DEFAULT_MAX_PAGES
+    unlimited_pages = max_pages == 0
+    resolved_max_pages = 0 if unlimited_pages else (max_pages if max_pages is not None else mode_config.max_pages or DEFAULT_MAX_PAGES)
     resolved_max_depth = max_depth if max_depth is not None else mode_config.max_depth
     resolved_max_requests = (
         max_total_requests_per_domain
         if max_total_requests_per_domain is not None
-        else max(mode_config.max_total_requests_per_domain, resolved_max_pages)
+        else (0 if unlimited_pages else max(mode_config.max_total_requests_per_domain, resolved_max_pages))
     )
     resolved_max_links = max_links_per_page if max_links_per_page is not None else mode_config.max_links_per_page
     resolved_max_html_bytes = max_html_bytes if max_html_bytes is not None else mode_config.max_html_bytes
     resolved_max_seconds = (
         max_total_seconds_per_domain
         if max_total_seconds_per_domain is not None
-        else mode_config.max_total_seconds_per_domain
+        else (0 if unlimited_pages or resolved_max_pages > mode_config.max_pages else mode_config.max_total_seconds_per_domain)
     )
     resolved_overlap_enabled = mode_config.overlap_enabled if overlap_enabled is None else overlap_enabled
     resolved_overlap_max_pages = overlap_max_pages if overlap_max_pages is not None else mode_config.overlap_max_pages
-    resolved_sitemap_max_urls = sitemap_max_urls if sitemap_max_urls is not None else max(resolved_max_pages * 4, 40)
+    resolved_sitemap_max_urls = sitemap_max_urls if sitemap_max_urls is not None else (10_000 if unlimited_pages else max(resolved_max_pages * 4, 40))
+    resolved_timeout = timeout if timeout is not None else (15 if report_type == "recovery" else mode_config.timeout)
     summary_rows: list[dict[str, int | str]] = []
     summary_fieldnames = [
         "domain",
@@ -150,7 +192,8 @@ def audit_domains(
     total = len(selected)
     print(
         f"Audit de {total} domaine(s) | mode={mode} | crawl_source={crawl_source} | "
-        f"max_pages={resolved_max_pages} | max_seconds={resolved_max_seconds}s | delay={delay}s"
+        f"max_pages={'all' if unlimited_pages else resolved_max_pages} | max_seconds={resolved_max_seconds}s | "
+        f"concurrency={concurrency} | delay={delay}s"
     )
 
     for index, item in enumerate(selected, start=1):
@@ -169,8 +212,10 @@ def audit_domains(
             max_total_seconds_per_domain=resolved_max_seconds,
             max_consecutive_errors=mode_config.max_consecutive_errors,
             delay=delay,
-            timeout=mode_config.timeout,
+            timeout=resolved_timeout,
             max_redirects=mode_config.max_redirects,
+            concurrency=concurrency,
+            retries=retries,
             crawl_source=crawl_source,
             sitemap_max_urls=resolved_sitemap_max_urls,
             respect_robots=respect_robots,
@@ -186,6 +231,8 @@ def audit_domains(
                 audited_at=datetime.now().isoformat(timespec="seconds"),
                 pages_crawled=0,
                 observed_health_score=0,
+                report_type=report_type,
+                lang=lang,
                 notes=[
                     "Aucune page HTML accessible n'a pu etre crawlee.",
                     "Ce resultat ne permet pas de conclure sur la qualite SEO du site.",
@@ -199,6 +246,8 @@ def audit_domains(
                 overlap_enabled=resolved_overlap_enabled,
                 overlap_max_pages=resolved_overlap_max_pages,
                 crawl_metadata=crawl_metadata,
+                report_type=report_type,
+                lang=lang,
             )
 
         report_path = output_path / f"{report.domain}.json"
@@ -208,9 +257,12 @@ def audit_domains(
             history_path = write_audit_history_report(output_path, report)
             report.history_path = str(history_path)
             write_json_file(report_path, asdict(report))
-        if html_output:
-            html_path = resolve_audit_html_path(html_output, output_path, report, single_report=len(selected) == 1)
-            write_audit_html_report(report, html_path)
+        effective_html_output = html_output
+        if report_type == "recovery" and not effective_html_output:
+            effective_html_output = str(output_path / f"{report.domain}.html")
+        if effective_html_output:
+            html_path = resolve_audit_html_path(effective_html_output, output_path, report, single_report=len(selected) == 1)
+            write_audit_html_report(report, html_path, lang=lang)
             report.html_path = str(html_path)
             write_json_file(report_path, asdict(report))
         index_path = sqlite_index or str(output_path / "audit_index.sqlite")
@@ -339,8 +391,8 @@ def write_audit_html_index(reports: list[AuditReport], output_path: Path) -> Pat
     return output_file
 
 
-def write_audit_html_report(report: AuditReport, output_path: Path) -> Path:
-    html = render_premium_audit_report(report)
+def write_audit_html_report(report: AuditReport, output_path: Path, lang: str | None = None) -> Path:
+    html = render_premium_audit_report(report, lang=lang or report.lang)
     output_file = write_text_file(output_path, html)
     return output_file
 
@@ -718,6 +770,8 @@ def crawl_site(
     delay: float = DEFAULT_DELAY,
     timeout: int = 8,
     max_redirects: int = 5,
+    concurrency: int = 5,
+    retries: int = 1,
     crawl_source: str = "home",
     sitemap_max_urls: int = 120,
     respect_robots: bool = True,
@@ -746,6 +800,7 @@ def crawl_site(
             excluded_path_prefixes=excluded_path_prefixes,
         )
     seed_urls = build_seed_urls(start_url, sitemap_urls=sitemap_urls, crawl_source=crawl_source)
+    seed_sources = {url: ("homepage" if url == start_url else "sitemap") for url in seed_urls}
     if metadata is not None:
         metadata.update(
             {
@@ -758,9 +813,10 @@ def crawl_site(
             }
         )
 
-    queue: deque[tuple[str, int]] = deque((url, 0) for url in seed_urls)
+    queue: deque[tuple[str, int, str]] = deque((url, 0, seed_sources.get(url, "other")) for url in seed_urls)
     visited: set[str] = set()
     seen_or_queued: set[str] = set(seed_urls)
+    final_url_groups: dict[str, list[str]] = defaultdict(list)
     pages: list[AuditPage] = []
     started_at = time.monotonic()
     total_requests = 0
@@ -771,7 +827,9 @@ def crawl_site(
 
     stop_reason = "queue_empty"
     skipped_urls = 0
-    while queue and len(pages) < max_pages:
+    page_limit = max_pages if max_pages and max_pages > 0 else None
+    max_workers = max(1, int(concurrency or 1))
+    while queue and (page_limit is None or len(pages) < page_limit):
         budget_stop_reason = crawl_budget_stop_reason(
             started_at,
             total_requests,
@@ -783,56 +841,134 @@ def crawl_site(
             break
         if cancel_callback is not None:
             cancel_callback()
-        current_url, depth = queue.popleft()
-        if depth > max_depth:
-            continue
-        current_url = normalize_url(current_url)
-        if current_url in visited:
-            continue
-        visited.add(current_url)
-        if respect_robots and not robots_can_fetch(robots_rules, current_url):
-            page = AuditPage(
-                url=current_url,
-                requested_url=current_url,
-                depth=depth,
-                robots_allowed=False,
-                page_type=classify_page_type(current_url),
-                page_health_score=0,
-                issues=["URL bloquée par robots.txt, non crawlée"],
-            )
-            pages.append(page)
-            continue
-        total_requests += 1
-        page = crawl_page(
-            current_url,
-            session=client,
-            timeout=timeout,
-            max_html_bytes=max_html_bytes,
-            max_links_per_page=max_links_per_page,
-            max_redirects=max_redirects,
-            excluded_path_prefixes=excluded_path_prefixes,
-            cancel_callback=cancel_callback,
+        batch: list[tuple[str, int, str]] = []
+        remaining_request_budget = (
+            max_total_requests_per_domain - total_requests
+            if max_total_requests_per_domain and max_total_requests_per_domain > 0
+            else max_workers
         )
-        if page is None:
-            skipped_urls += 1
+        while (
+            queue
+            and len(batch) < max_workers
+            and len(batch) < remaining_request_budget
+            and (page_limit is None or len(pages) + len(batch) < page_limit)
+        ):
+            current_url, depth, source = queue.popleft()
+            if depth > max_depth:
+                continue
+            current_url = normalize_url(current_url)
+            if current_url in visited:
+                continue
+            visited.add(current_url)
+            if respect_robots and not robots_can_fetch(robots_rules, current_url):
+                page = AuditPage(
+                    url=current_url,
+                    requested_url=current_url,
+                    final_url=current_url,
+                    depth=depth,
+                    crawl_depth=depth,
+                    source=source,
+                    robots_allowed=False,
+                    page_type=classify_page_type(current_url),
+                    page_health_score=0,
+                    crawl_error="robots_blocked",
+                    issues=["URL bloquée par robots.txt, non crawlée"],
+                )
+                pages.append(page)
+                continue
+            batch.append((current_url, depth, source))
+        if not batch:
             continue
-        page.depth = depth
-        pages.append(page)
-        if page.status_code and page.status_code >= 400:
-            consecutive_failures += 1
+        total_requests += len(batch)
+        batch_results: list[tuple[str, int, str, AuditPage | None]] = []
+        if max_workers == 1 or len(batch) == 1:
+            for current_url, depth, source in batch:
+                crawl_kwargs = {
+                    "session": client,
+                    "timeout": timeout,
+                    "max_html_bytes": max_html_bytes,
+                    "max_links_per_page": max_links_per_page,
+                    "max_redirects": max_redirects,
+                    "excluded_path_prefixes": excluded_path_prefixes,
+                    "cancel_callback": cancel_callback,
+                }
+                if retries != 1:
+                    crawl_kwargs["retries"] = retries
+                batch_results.append(
+                    (
+                        current_url,
+                        depth,
+                        source,
+                        crawl_page(current_url, **crawl_kwargs),
+                    )
+                )
         else:
-            consecutive_failures = 0
-        count = len(pages)
-        if count <= 3 or count % 10 == 0:
-            print(
-                f"    [{count}/{max_pages}] depth={depth} "
-                f"load={page.load_time:.2f}s {page.url}"
-            )
-        if depth < max_depth:
-            for link in page.internal_links_out:
-                if link not in visited and link not in seen_or_queued:
-                    seen_or_queued.add(link)
-                    queue.append((link, depth + 1))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                def submit_crawl(target_url: str):  # type: ignore[no-untyped-def]
+                    crawl_kwargs = {
+                        "session": client,
+                        "timeout": timeout,
+                        "max_html_bytes": max_html_bytes,
+                        "max_links_per_page": max_links_per_page,
+                        "max_redirects": max_redirects,
+                        "excluded_path_prefixes": excluded_path_prefixes,
+                        "cancel_callback": cancel_callback,
+                    }
+                    if retries != 1:
+                        crawl_kwargs["retries"] = retries
+                    return crawl_page(target_url, **crawl_kwargs)
+
+                futures = {
+                    executor.submit(submit_crawl, current_url): (current_url, depth, source)
+                    for current_url, depth, source in batch
+                }
+                for future in as_completed(futures):
+                    current_url, depth, source = futures[future]
+                    try:
+                        page = future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        page = AuditPage(
+                            url=current_url,
+                            requested_url=current_url,
+                            final_url=current_url,
+                            status_code=0,
+                            crawl_error=str(exc)[:120],
+                            issues=[f"Erreur reseau pendant le crawl: {str(exc)[:80]}"],
+                        )
+                    batch_results.append((current_url, depth, source, page))
+            batch_order = {url: index for index, (url, _, _) in enumerate(batch)}
+            batch_results.sort(key=lambda item: batch_order.get(item[0], 0))
+        for requested_url, depth, source, page in batch_results:
+            if page is None:
+                skipped_urls += 1
+                continue
+            page.depth = depth
+            page.crawl_depth = depth
+            page.source = source
+            page.requested_url = page.requested_url or requested_url
+            page.final_url = page.final_url or page.url
+            page.load_time_seconds = page.load_time
+            final_url_groups[page.final_url].append(page.requested_url)
+            if len(final_url_groups[page.final_url]) > 1:
+                page.redirect_source = "duplicate_final_url"
+                page.redirect_cleanup_needed = True
+            pages.append(page)
+            if page.status_code and page.status_code >= 400:
+                consecutive_failures += 1
+            else:
+                consecutive_failures = 0
+            count = len(pages)
+            if count <= 3 or count % 10 == 0:
+                page_limit_label = "all" if page_limit is None else str(page_limit)
+                print(
+                    f"    [{count}/{page_limit_label}] depth={depth} "
+                    f"load={page.load_time:.2f}s {page.url}"
+                )
+            if depth < max_depth:
+                for link in page.internal_links_out:
+                    if link not in visited and link not in seen_or_queued:
+                        seen_or_queued.add(link)
+                        queue.append((link, depth + 1, "internal_link"))
         if consecutive_failures >= max_consecutive_errors:
             stop_reason = "max_consecutive_errors"
             break
@@ -843,17 +979,32 @@ def crawl_site(
             cancel_callback()
         time.sleep(delay)
 
-    if len(pages) >= max_pages:
+    if page_limit is not None and len(pages) >= page_limit:
         stop_reason = "max_pages_reached"
+    redirected_pages = [page for page in pages if page.redirect_count]
+    load_times = [page.load_time for page in pages if page.load_time > 0]
     final_metadata = {
         "pages_collected": len(pages),
         "urls_attempted": total_requests,
+        "sitemap_urls_detected": len(sitemap_urls),
+        "urls_selected_for_crawl": len(seen_or_queued),
+        "urls_successfully_crawled": len([page for page in pages if not page.crawl_error and (not page.status_code or page.status_code < 400)]),
+        "urls_failed": len([page for page in pages if page.crawl_error or (page.status_code and page.status_code >= 400)]),
+        "redirected_urls": len(redirected_pages),
+        "final_urls": len([page.final_url or page.url for page in pages]),
+        "unique_final_urls": len({page.final_url or page.url for page in pages}),
+        "http_errors": len([page for page in pages if page.status_code and page.status_code >= 400]),
+        "average_load_time": round(sum(load_times) / len(load_times), 2) if load_times else 0.0,
+        "slow_pages_over_3s": len([page for page in pages if page.load_time > 3]),
         "urls_skipped": skipped_urls,
         "queued_urls_remaining": len(queue),
         "stop_reason": stop_reason,
-        "max_pages": max_pages,
+        "max_pages": "all" if page_limit is None else max_pages,
         "max_total_requests_per_domain": max_total_requests_per_domain,
         "max_total_seconds_per_domain": max_total_seconds_per_domain,
+        "concurrency": max_workers,
+        "timeout": timeout,
+        "retries": retries,
     }
     if metadata is not None:
         metadata.update(final_metadata)
@@ -993,26 +1144,62 @@ def crawl_page(
     max_html_bytes: int,
     max_links_per_page: int,
     max_redirects: int,
+    retries: int = 1,
     excluded_path_prefixes: set[str] | None = None,
     cancel_callback: Callable[[], None] | None = None,
 ) -> AuditPage | None:
     page = AuditPage(url=url, requested_url=url)
     if cancel_callback is not None:
         cancel_callback()
+    attempts = max(1, int(retries or 1) + 1)
+    response = None
+    last_request_error: requests.RequestException | None = None
+    for attempt in range(attempts):
+        try:
+            started_at = time.time()
+            response = fetch_limited_html(
+                session,
+                url,
+                timeout=timeout,
+                max_html_bytes=max_html_bytes,
+                max_redirects=max_redirects,
+            )
+            page.load_time = round(time.time() - started_at, 2)
+            break
+        except requests.Timeout:
+            page.load_time = float(timeout)
+            page.crawl_error = "timeout"
+            last_request_error = None
+            if attempt + 1 >= attempts:
+                page.issues.append("Timeout detecte pendant le crawl")
+                return page
+            time.sleep(0.2 * (attempt + 1))
+        except requests.RequestException as exc:
+            page.crawl_error = str(exc)[:120]
+            last_request_error = exc
+            if attempt + 1 >= attempts:
+                page.issues.append(f"Erreur reseau pendant le crawl: {str(exc)[:80]}")
+                return page
+            time.sleep(0.2 * (attempt + 1))
+    if response is None:
+        if last_request_error:
+            page.issues.append(f"Erreur reseau pendant le crawl: {str(last_request_error)[:80]}")
+        return page
     try:
-        started_at = time.time()
-        response = fetch_limited_html(
-            session,
-            url,
-            timeout=timeout,
-            max_html_bytes=max_html_bytes,
-            max_redirects=max_redirects,
-        )
-        page.load_time = round(time.time() - started_at, 2)
         page.status_code = response.status_code
         page.redirect_count = getattr(response, "redirect_count", 0)
+        page.redirect_chain = list(getattr(response, "redirect_chain", None) or [])
+        page.final_url = normalize_url(response.url)
+        page.requested_url = normalize_url(getattr(response, "request_url", "") or url)
+        if page.redirect_count:
+            page.redirect_source = "requested_url"
+            page.redirect_cleanup_needed = True
+            page.redirect_cleanup_recommendation = (
+                "Update internal links, sitemap URLs and canonicals so they point directly to the final destination."
+            )
         if response.status_code >= 400:
             page.issues.append(f"HTTP {response.status_code} detecte sur la page")
+            page.crawl_error = f"http_{response.status_code}"
             return page
         if clean_domain(response.url) != clean_domain(url):
             return None
@@ -1026,18 +1213,23 @@ def crawl_page(
             return page
     except requests.Timeout:
         page.load_time = float(timeout)
+        page.crawl_error = "timeout"
         page.issues.append("Timeout detecte pendant le crawl")
         return page
     except requests.RequestException as exc:
+        page.crawl_error = str(exc)[:120]
         page.issues.append(f"Erreur reseau pendant le crawl: {str(exc)[:80]}")
         return page
 
     page.url = normalize_url(response.url)
+    page.final_url = page.url
     soup = BeautifulSoup(response.text, "html.parser")
     page.title = extract_title(soup)
     page.meta_description = extract_meta_description(soup)
     page.h1 = [node.get_text(" ", strip=True) for node in soup.find_all("h1")]
-    page.has_structured_data = bool(soup.find("script", attrs={"type": "application/ld+json"}))
+    structured_nodes = soup.find_all("script", attrs={"type": "application/ld+json"})
+    page.has_structured_data = bool(structured_nodes)
+    page.structured_data_text = " ".join(node.get_text(" ", strip=True) for node in structured_nodes)[:4000]
     page.canonical = normalize_canonical(extract_canonical(soup), page.url)
     page.canonical_status = compute_canonical_status(page.url, page.canonical)
     page.meta_robots = extract_meta_robots(soup)
@@ -1045,8 +1237,33 @@ def crawl_page(
     page.meaningful_h1_count = compute_meaningful_h1_count(page.h1)
     text = extract_text_content(soup)
     page.word_count = len(text.split())
-    page.page_type = classify_page_type(page.url, title=page.title, headings=page.h1)
-    page.dated_references = find_dated_references(text=text, title=page.title, url=page.url)
+    page.h2 = [node.get_text(" ", strip=True) for node in soup.find_all("h2")[:10]]
+    page.page_type = classify_page_type(page.url, title=page.title, h1=" ".join(page.h1), content=text)
+    business_value, business_reason = estimate_business_value(page)
+    page.business_value = business_value
+    page.business_reason = business_reason
+    page.date_signals = detect_date_signals(
+        url=page.url,
+        title=page.title,
+        meta_description=page.meta_description,
+        h1=" ".join(page.h1),
+        headings=page.h2,
+        content=text,
+        structured_data=page.structured_data_text,
+    )
+    page.outdated_date_signal = any(signal.get("outdated") for signal in page.date_signals)
+    page.date_signal_locations = sorted({str(signal.get("location")) for signal in page.date_signals if signal.get("outdated")})
+    page.date_severity = classify_date_severity(page.date_signals)
+    page.recommended_date_action = recommend_date_action(page)
+    page.dated_references = find_dated_references(
+        text=text,
+        title=page.title,
+        url=page.url,
+        meta_description=page.meta_description,
+        h1=" ".join(page.h1),
+        headings=page.h2,
+        structured_data=page.structured_data_text,
+    )
     page.content_like = compute_content_like(
         url=page.url,
         status_code=page.status_code,
@@ -1055,8 +1272,7 @@ def crawl_page(
         word_count=page.word_count,
         dated_references=page.dated_references,
     )
-    h2 = [node.get_text(" ", strip=True) for node in soup.find_all("h2")[:5]]
-    page.overlap_fingerprint = build_overlap_fingerprint(page.title, page.h1 + h2, text_excerpt=text[:1200])
+    page.overlap_fingerprint = build_overlap_fingerprint(page.title, page.h1 + page.h2[:5], text_excerpt=text[:1200])
 
     images = soup.find_all("img")
     page.images_total = len(images)
@@ -1075,6 +1291,8 @@ def crawl_page(
                 page.empty_internal_anchor_count += 1
             elif anchor_text in GENERIC_ANCHOR_TEXTS:
                 page.generic_internal_anchor_count += 1
+            if anchor_text:
+                page.internal_link_anchors_out.setdefault(absolute, []).append(anchor_text)
             priority = crawl_link_priority(absolute, base_domain)
             if priority < 0:
                 continue
@@ -1085,6 +1303,7 @@ def crawl_page(
         item[0]
         for item in sorted(links.items(), key=lambda item: (-item[1], item[0]))[:max_links_per_page]
     ]
+    page.outbound_internal_links_count = len(page.internal_links_out)
     return page
 
 
@@ -1156,30 +1375,67 @@ def normalize_anchor_text(value: str) -> str:
     return re.sub(r"\s+", " ", value.lower()).strip()
 
 
-def classify_page_type(url: str, title: str = "", headings: list[str] | None = None) -> str:
+def classify_page_type(
+    url: str,
+    title: str = "",
+    h1: str | list[str] = "",
+    content: str = "",
+    breadcrumbs: list[str] | None = None,
+    headings: list[str] | None = None,
+) -> str:
     path = urlparse(url).path.lower().rstrip("/")
+    path_text = path.replace("-", " ").replace("_", " ")
+    h1_text = " ".join(h1) if isinstance(h1, list) else str(h1 or "")
+    heading = " ".join([title, h1_text, *(headings or []), *(breadcrumbs or [])]).lower()
+    content_sample = content[:3000].lower()
+    combined = f"{path_text} {heading} {content_sample}"
     if path in {"", "/"}:
         return "homepage"
-    if path_is_non_content(url):
-        if any(path.startswith(prefix) for prefix in ("/category", "/tag")):
-            return "taxonomy"
-        if path.startswith("/author"):
-            return "author"
-        if any(path.startswith(prefix) for prefix in ("/legal", "/mentions-legales", "/privacy", "/terms")):
-            return "legal"
-        if path.startswith("/contact"):
-            return "contact"
-        return "utility"
+    if any(marker in path for marker in ("/privacy", "/terms", "/cookie", "/legal", "/mentions-legales", "/cgv", "/cgu")):
+        return "legal"
+    if "/contact" in path or "contact us" in combined:
+        return "contact"
+    if "/about" in path or "/about-us" in path or "/qui-sommes-nous" in path or "factory overview" in combined:
+        return "about"
+    if any(term in combined for term in ("certification", "certificate", "certificates", "fda", "iso", "gmp", " ce ", "quality")):
+        return "certification"
+    if any(term in combined for term in ("manufacturer", "factory", "oem", "odm", "supplier", "private label")):
+        return "manufacturer"
     if any(path.startswith(prefix) for prefix in ("/product", "/products", "/produit", "/boutique", "/shop")):
         return "product"
+    if any(term in combined for term in (" product ", " products ", "sku", "specification", "ingredients", "wholesale")):
+        return "product"
+    if any(path.startswith(prefix) for prefix in ("/category", "/categories", "/collections", "/collection")):
+        return "category"
     if any(path.startswith(prefix) for prefix in ("/service", "/services", "/offre", "/offres")):
         return "service"
+    if any(marker in path for marker in ("/blog", "/news", "/actualites", "/articles")):
+        return "blog"
+    if any(term in combined for term in ("guide", "how to", "tips", "explained", "tutorial", "conseils")):
+        return "guide"
+    if any(marker in path for marker in ("/resource", "/resources", "/ressources", "/learn", "/downloads")):
+        return "resource"
     if path_looks_content_like(url) or contains_year_reference(path):
-        return "article"
-    heading = " ".join([title, *(headings or [])]).lower()
-    if any(word in heading for word in ("guide", "comparatif", "test", "avis", "conseil")):
-        return "article"
-    return "page"
+        return "blog"
+    return "other"
+
+
+def estimate_business_value(page: AuditPage) -> tuple[str, str]:
+    text = f"{page.url} {page.title} {' '.join(page.h1)} {page.meta_description}".lower()
+    page_type = page.page_type or classify_page_type(page.url, title=page.title, h1=page.h1)
+    if page_type in {"homepage", "product", "category", "manufacturer", "service"}:
+        return "high", f"{page_type} page directly tied to conversion or commercial discovery"
+    if page_type == "certification":
+        return "high", "trust and compliance page that can support B2B conversion"
+    if any(term in text for term in B2B_TERMS):
+        return "high", "commercial B2B terms detected on the page"
+    if page_type in {"guide", "resource", "blog"}:
+        if any(term in text for term in ("compare", "comparison", "best", "supplier", "manufacturer", "wholesale", "private label")):
+            return "medium", "informational page with a commercial or B2B angle"
+        return "low", "informational page with limited direct business intent"
+    if page_type in {"legal", "contact", "about"}:
+        return "low", f"{page_type} page is useful but usually not a recovery target"
+    return "medium", "general page that may support commercial discovery"
 
 
 def extract_text_content(soup: BeautifulSoup) -> str:
@@ -1212,15 +1468,23 @@ def find_dated_references(
     text: str,
     title: str,
     url: str,
+    meta_description: str = "",
+    h1: str = "",
+    headings: list[str] | None = None,
+    structured_data: str = "",
     reference_date: datetime | None = None,
 ) -> list[str]:
     found: list[str] = []
     active_reference_date = reference_date or datetime.now()
-    excerpts = [title, url, text[:2000]]
+    excerpts = [title, url, meta_description, h1, " ".join(headings or []), text[:2000], structured_data[:2000]]
     labels = [
         "Date visible dans le titre",
         "Date visible dans l'URL",
+        "Date visible dans la meta description",
+        "Date visible dans le H1",
+        "Date visible dans les intertitres",
         "Date visible dans le contenu",
+        "Date visible dans les donnees structurees",
     ]
     for index, excerpt in enumerate(excerpts):
         for pattern in DATED_PATTERNS:
@@ -1232,6 +1496,97 @@ def find_dated_references(
                 if label not in found:
                     found.append(label)
     return found
+
+
+def detect_date_signals(
+    *,
+    url: str,
+    title: str,
+    meta_description: str,
+    h1: str,
+    headings: list[str],
+    content: str,
+    structured_data: str,
+    reference_date: datetime | None = None,
+) -> list[dict[str, str | int | bool]]:
+    reference_year = (reference_date or datetime.now()).year
+    sources = {
+        "url": url,
+        "title": title,
+        "meta": meta_description,
+        "h1": h1,
+        "headings": " ".join(headings),
+        "content": content[:4000],
+        "structured_data": structured_data[:4000],
+    }
+    signals: list[dict[str, str | int | bool]] = []
+    seen: set[tuple[str, int]] = set()
+    for location, value in sources.items():
+        for year_match in re.finditer(r"\b(20\d{2})\b", value or ""):
+            year = int(year_match.group(1))
+            key = (location, year)
+            if key in seen:
+                continue
+            seen.add(key)
+            signals.append(
+                {
+                    "location": location,
+                    "year": year,
+                    "value": year_match.group(0),
+                    "outdated": year < reference_year,
+                    "severity": date_location_severity(location, year < reference_year),
+                }
+            )
+    return signals
+
+
+def date_location_severity(location: str, outdated: bool) -> str:
+    if not outdated:
+        return "none"
+    if location in {"url", "title", "h1"}:
+        return "high"
+    if location in {"meta", "headings"}:
+        return "medium"
+    return "low"
+
+
+def classify_date_severity(signals: list[dict[str, str | int | bool]]) -> str:
+    severities = [str(signal.get("severity") or "") for signal in signals if signal.get("outdated")]
+    if "high" in severities:
+        return "high"
+    if "medium" in severities:
+        return "medium"
+    if "low" in severities:
+        return "low"
+    return "none"
+
+
+def recommend_date_action(page: AuditPage) -> str:
+    if not page.outdated_date_signal:
+        return ""
+    locations = set(page.date_signal_locations)
+    if "url" in locations:
+        return "update content freshness, then redirect or consolidate the dated URL if it is obsolete"
+    if locations.intersection({"title", "h1"}):
+        return "remove or update the outdated year from the title or H1 if it is not essential"
+    if page.page_type in {"blog", "guide", "resource"}:
+        return "update the article if still relevant and add a clear last updated signal"
+    return "review the date in context before changing the page"
+
+
+def infer_date_type(value: str) -> str:
+    lowered = value.lower()
+    if "url" in lowered:
+        return "url"
+    if "titre" in lowered or "title" in lowered:
+        return "title"
+    if "h1" in lowered:
+        return "h1"
+    if "meta" in lowered:
+        return "meta"
+    if "intertitre" in lowered or "heading" in lowered:
+        return "headings"
+    return "content"
 
 
 def is_ui_like_text(value: str) -> bool:
@@ -1347,6 +1702,185 @@ def detect_duplicates(pages: list[AuditPage]) -> tuple[dict[str, list[str]], dic
     duplicate_titles = {title: urls for title, urls in title_map.items() if len(urls) > 1}
     duplicate_metas = {meta: urls for meta, urls in meta_map.items() if len(urls) > 1}
     return duplicate_titles, duplicate_metas
+
+
+def enrich_page_classification(pages: list[AuditPage]) -> None:
+    for page in pages:
+        if not page.final_url:
+            page.final_url = page.url
+        if not page.requested_url:
+            page.requested_url = page.url
+        page.load_time_seconds = page.load_time
+        page.crawl_depth = page.depth
+        if not page.page_type:
+            page.page_type = classify_page_type(page.url, title=page.title, h1=page.h1)
+        if not page.business_value:
+            page.business_value, page.business_reason = estimate_business_value(page)
+        if page.dated_references and not page.outdated_date_signal:
+            page.outdated_date_signal = True
+            page.date_signal_locations = sorted({infer_date_type(item) for item in page.dated_references})
+            page.date_severity = "high" if {"url", "titre"}.intersection(page.date_signal_locations) else "low"
+            page.recommended_date_action = recommend_date_action(page)
+        if page.redirect_count and not page.redirect_cleanup_recommendation:
+            page.redirect_source = page.redirect_source or "requested_url"
+            page.redirect_cleanup_needed = True
+            page.redirect_cleanup_recommendation = (
+                "Update internal links, sitemap URLs and canonicals so they point directly to the final destination."
+            )
+
+
+def annotate_duplicate_metadata(
+    pages: list[AuditPage],
+    duplicate_titles: dict[str, list[str]],
+    duplicate_metas: dict[str, list[str]],
+) -> None:
+    groups: list[tuple[str, str, list[str]]] = []
+    groups.extend((f"title-{index + 1}", "exact_title", urls) for index, urls in enumerate(duplicate_titles.values()))
+    groups.extend((f"meta-{index + 1}", "exact_meta_description", urls) for index, urls in enumerate(duplicate_metas.values()))
+    near_title_groups = detect_near_duplicate_groups(pages, field="title")
+    near_meta_groups = detect_near_duplicate_groups(pages, field="meta_description")
+    groups.extend((f"near-title-{index + 1}", "near_duplicate_title", urls) for index, urls in enumerate(near_title_groups))
+    groups.extend((f"near-meta-{index + 1}", "near_duplicate_meta_description", urls) for index, urls in enumerate(near_meta_groups))
+    pages_by_url = {page.url: page for page in pages}
+    for group_id, duplicate_type, urls in groups:
+        if len(urls) < 2:
+            continue
+        for url in urls:
+            page = pages_by_url.get(url)
+            if page is None:
+                continue
+            page.duplicate_group_id = page.duplicate_group_id or group_id
+            page.duplicate_group_size = max(page.duplicate_group_size, len(urls))
+            page.duplicate_type = page.duplicate_type or duplicate_type
+            page.recommended_unique_angle = recommend_unique_angle(page)
+
+
+def detect_near_duplicate_groups(pages: list[AuditPage], field: str) -> list[list[str]]:
+    buckets: dict[str, list[str]] = defaultdict(list)
+    for page in pages:
+        value = str(getattr(page, field, "") or "")
+        signature = normalized_token_signature(value)
+        if signature:
+            buckets[signature].append(page.url)
+    return [urls for urls in buckets.values() if len(urls) > 1]
+
+
+def normalized_token_signature(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9\s-]", " ", value.lower())
+    tokens = [
+        token
+        for token in re.split(r"[\s-]+", cleaned)
+        if len(token) > 2 and token not in STOPWORDS_FOR_SIMILARITY and not re.fullmatch(r"20\d{2}", token)
+    ]
+    if len(tokens) < 3:
+        return ""
+    return " ".join(sorted(dict.fromkeys(tokens))[:8])
+
+
+def recommend_unique_angle(page: AuditPage) -> str:
+    text = f"{page.url} {page.title} {' '.join(page.h1)}".lower()
+    angles = [
+        ("private label", "private label angle"),
+        ("wholesale", "wholesale angle"),
+        ("factory", "factory angle"),
+        ("oem", "OEM angle"),
+        ("odm", "ODM angle"),
+        ("ingredient", "ingredient angle"),
+        ("packaging", "packaging angle"),
+        ("certification", "certification angle"),
+    ]
+    for marker, angle in angles:
+        if marker in text:
+            return f"Differentiate this page with a stronger {angle}."
+    return "Differentiate the page by intent, audience, product angle or proof points."
+
+
+def enrich_internal_link_metrics(pages: list[AuditPage], incoming_links: dict[str, int]) -> None:
+    pages_by_url = {page.url: page for page in pages}
+    anchors_by_target: dict[str, list[str]] = defaultdict(list)
+    homepage_links: set[str] = set()
+    high_value_links: set[str] = set()
+    redirected_requested_urls = {page.requested_url for page in pages if page.redirect_count and page.requested_url}
+    for source in pages:
+        if source.page_type == "homepage":
+            homepage_links.update(source.internal_links_out)
+        if source.business_value == "high":
+            high_value_links.update(source.internal_links_out)
+        source.internal_links_to_redirected_urls = [
+            link for link in source.internal_links_out if link in redirected_requested_urls
+        ]
+        for target, anchors in source.internal_link_anchors_out.items():
+            anchors_by_target[target].extend(anchors)
+    for page in pages:
+        inbound = incoming_links.get(page.url, 0)
+        page.inbound_internal_links_count = inbound
+        page.outbound_internal_links_count = len(page.internal_links_out)
+        page.internal_link_strength = "weak" if inbound < 3 else "strong" if inbound >= 8 else "normal"
+        page.orphan_like = page.depth > 0 and inbound == 0
+        page.linked_from_homepage = page.url in homepage_links
+        page.linked_from_high_value_pages = page.url in high_value_links
+        anchors = anchors_by_target.get(page.url, [])
+        page.anchors_received = [anchor for anchor, _ in Counter(anchors).most_common(5)]
+        page.duplicate_anchors = [anchor for anchor, count in Counter(anchors).items() if count > 1][:5]
+
+
+def compute_recovery_opportunities(
+    pages: list[AuditPage],
+    incoming_links: dict[str, int],
+    duplicate_titles: dict[str, list[str]],
+    duplicate_metas: dict[str, list[str]],
+) -> None:
+    duplicate_urls = {url for urls in [*duplicate_titles.values(), *duplicate_metas.values()] for url in urls}
+    for page in pages:
+        score = 0
+        reasons: list[str] = []
+        evidence: set[str] = {"crawl"}
+        if page.business_value == "high":
+            score += 25
+            reasons.append("high business value")
+        elif page.business_value == "medium":
+            score += 12
+        if page.page_type in COMMERCIAL_PAGE_TYPES:
+            score += 15
+            reasons.append("commercial page type")
+        if page.outdated_date_signal or page.dated_references:
+            score += 15
+            evidence.add("dates")
+            reasons.append("outdated visible date signal")
+        if page.redirect_count:
+            score += 10
+            evidence.add("redirects")
+            reasons.append("redirect observed")
+        if page.load_time > 3:
+            score += 10
+            evidence.add("performance")
+            reasons.append("slow page over 3s")
+        if incoming_links.get(page.url, 0) < 3 and page.business_value == "high":
+            score += 10
+            evidence.add("internal_links")
+            reasons.append("weak internal linking for a high-value page")
+        if page.url in duplicate_urls or page.duplicate_group_id:
+            score += 10
+            evidence.add("metadata")
+            reasons.append("duplicate or near-duplicate metadata")
+        if not page.title or len(page.title) < 20 or len(page.title) > 65 or not page.meta_description:
+            score += 5
+            evidence.add("metadata")
+            reasons.append("weak title or meta description")
+        if is_content_like_page(page) and page.word_count < 350:
+            score += 10
+            evidence.add("content")
+            reasons.append("thin content")
+        page.recovery_opportunity_score = max(0, min(100, score))
+        if page.recovery_opportunity_score >= 60:
+            page.recovery_priority = "high"
+        elif page.recovery_opportunity_score >= 30:
+            page.recovery_priority = "medium"
+        else:
+            page.recovery_priority = "low"
+        page.recovery_reason = ", ".join(reasons[:4]) or "No strong crawl-based recovery signal"
+        page.needs_gsc_validation = True
+        page.evidence_sources = sorted(evidence)
 
 
 def detect_possible_overlap(pages: list[AuditPage], threshold: float = 0.6) -> list[dict[str, str | float]]:
@@ -1552,16 +2086,22 @@ def build_report(
     overlap_enabled: bool = True,
     overlap_max_pages: int = 24,
     crawl_metadata: dict[str, object] | None = None,
+    report_type: str = "standard",
+    lang: str = "fr",
 ) -> AuditReport:
+    enrich_page_classification(pages)
     analyze_page_issues(pages)
     duplicate_titles, duplicate_metas = detect_duplicates(pages)
+    annotate_duplicate_metadata(pages, duplicate_titles, duplicate_metas)
     possible_overlap = []
     if overlap_enabled:
         possible_overlap = detect_possible_overlap_bounded(pages, max_pages=overlap_max_pages)
     incoming_links = count_incoming_links(pages)
     probable_orphans = detect_probable_orphans(pages)
     weak_internal_linking = detect_weak_internal_linking(pages, incoming_links)
+    enrich_internal_link_metrics(pages, incoming_links)
     assign_page_health_scores(pages, incoming_links, probable_orphans, weak_internal_linking)
+    compute_recovery_opportunities(pages, incoming_links, duplicate_titles, duplicate_metas)
     dated_content = [{"url": page.url, "references": page.dated_references} for page in pages if page.dated_references]
     observed_health_score = compute_observed_health_score(
         pages,
@@ -1576,6 +2116,11 @@ def build_report(
     content_pages = [page for page in ok_pages if is_content_like_page(page)]
     health_scores = [page.page_health_score for page in content_pages or ok_pages if page.robots_allowed]
     technical_checks = build_technical_checks(pages, content_pages)
+    page_type_breakdown = dict(Counter(page.page_type or "other" for page in ok_pages))
+    business_value_breakdown = dict(Counter(page.business_value or "low" for page in ok_pages))
+    top_recovery_opportunities = build_top_recovery_opportunities(pages)
+    redirect_summary = build_redirect_summary(pages)
+    traffic_drop_investigation = build_traffic_drop_investigation(pages, summary={}, redirect_summary=redirect_summary)
     summary = {
         "pages_crawled": len(pages),
         "pages_ok": len(ok_pages),
@@ -1612,7 +2157,20 @@ def build_report(
         "redirected_pages": technical_checks["redirected_pages"],
         "robots_blocked_pages": technical_checks["robots_blocked_pages"],
         "generic_anchor_pages": technical_checks["generic_anchor_pages"],
+        "page_type_breakdown": page_type_breakdown,
+        "business_value_breakdown": business_value_breakdown,
+        "high_business_value_pages": business_value_breakdown.get("high", 0),
+        "medium_business_value_pages": business_value_breakdown.get("medium", 0),
+        "low_business_value_pages": business_value_breakdown.get("low", 0),
+        "recovery_opportunities_high": len([page for page in pages if page.recovery_priority == "high"]),
+        "recovery_opportunities_medium": len([page for page in pages if page.recovery_priority == "medium"]),
+        "internal_links_to_redirected_urls": sum(len(page.internal_links_to_redirected_urls) for page in pages),
+        "redirect_chains_over_1": redirect_summary.get("redirect_chains_over_1", 0),
     }
+    traffic_drop_investigation = build_traffic_drop_investigation(pages, summary=summary, redirect_summary=redirect_summary)
+    recovery_score = round(
+        sum(page.recovery_opportunity_score for page in pages) / max(1, len([page for page in pages if page.recovery_opportunity_score]))
+    ) if any(page.recovery_opportunity_score for page in pages) else 0
 
     critical_findings = build_critical_findings(summary)
     business_priority_signals = build_business_priority_signals(summary)
@@ -1623,11 +2181,16 @@ def build_report(
         weak_internal_linking=weak_internal_linking,
     )
     internal_linking_opportunities = build_internal_linking_opportunities(
-        content_pages,
+        ok_pages,
         weak_internal_linking=weak_internal_linking,
         probable_orphans=probable_orphans,
     )
     confidence_notes = build_confidence_notes(summary, possible_overlap)
+    if report_type == "recovery":
+        confidence_notes.insert(
+            0,
+            "This is a crawl-based recovery audit. Search Console and analytics data are required to confirm the traffic-drop cause.",
+        )
     notes = [
         "Rapport fondé uniquement sur les pages réellement visitées pendant l'analyse.",
         "Les points remontés servent à repérer des opportunités d'amélioration, pas à rendre un verdict définitif.",
@@ -1640,6 +2203,10 @@ def build_report(
         audited_at=datetime.now().isoformat(timespec="seconds"),
         pages_crawled=len(pages),
         observed_health_score=observed_health_score,
+        report_type=report_type,
+        lang=lang,
+        recovery_opportunity_score=recovery_score,
+        confidence_level="medium" if len(pages) >= 30 else "low",
         notes=notes,
         summary=summary,
         critical_findings=critical_findings,
@@ -1653,6 +2220,11 @@ def build_report(
         confidence_notes=confidence_notes,
         technical_checks=technical_checks,
         internal_linking_opportunities=internal_linking_opportunities,
+        top_recovery_opportunities=top_recovery_opportunities,
+        traffic_drop_investigation=traffic_drop_investigation,
+        page_type_breakdown=page_type_breakdown,
+        business_value_breakdown=business_value_breakdown,
+        redirect_summary=redirect_summary,
         crawl_metadata=crawl_metadata or {},
         pages=[serialize_audit_page(page) for page in pages],
     )
@@ -1802,7 +2374,12 @@ def build_internal_linking_opportunities(
     weak_internal_linking: list[str],
     probable_orphans: list[str],
 ) -> list[dict[str, object]]:
-    targets = [url for url in [*probable_orphans, *weak_internal_linking] if url]
+    high_value_weak = [
+        page.url
+        for page in pages
+        if page.business_value == "high" and page.inbound_internal_links_count < 3 and page.url
+    ]
+    targets = [url for url in [*high_value_weak, *probable_orphans, *weak_internal_linking] if url]
     if not targets:
         return []
     source_candidates = [
@@ -1820,10 +2397,157 @@ def build_internal_linking_opportunities(
             {
                 "target_url": target,
                 "suggested_source_urls": sources,
+                "page_type": (next((page.page_type for page in pages if page.url == target), "") or "other"),
+                "business_value": (next((page.business_value for page in pages if page.url == target), "") or "low"),
+                "inbound_links": (next((page.inbound_internal_links_count for page in pages if page.url == target), 0)),
+                "issue": "High-value page with weak internal links" if target in high_value_weak else "Page weakly supported by internal links",
+                "recommended_internal_links": "Homepage, category pages, related guides and high-value pages when relevant.",
                 "reason": "Renforcer cette page avec des liens depuis des contenus déjà visibles dans le crawl.",
             }
         )
     return opportunities
+
+
+def build_top_recovery_opportunities(pages: list[AuditPage]) -> list[dict[str, object]]:
+    candidates = [page for page in pages if page.recovery_opportunity_score > 0 and (not page.status_code or page.status_code < 400)]
+    candidates.sort(key=lambda page: (page.recovery_opportunity_score, page.business_value == "high", -page.depth), reverse=True)
+    rows: list[dict[str, object]] = []
+    for page in candidates[:20]:
+        issue = main_recovery_issue(page)
+        rows.append(
+            {
+                "url": page.url,
+                "page_type": page.page_type,
+                "business_value": page.business_value,
+                "recovery_score": page.recovery_opportunity_score,
+                "recovery_priority": page.recovery_priority,
+                "main_issue": issue,
+                "why_it_matters": recovery_why_it_matters(page, issue),
+                "recommended_action": recovery_recommended_action(page, issue),
+                "effort": recovery_effort(issue),
+                "impact": "high" if page.business_value == "high" and page.recovery_opportunity_score >= 50 else "medium",
+                "needs_gsc_validation": True,
+            }
+        )
+    return rows
+
+
+def main_recovery_issue(page: AuditPage) -> str:
+    if page.outdated_date_signal or page.dated_references:
+        return "outdated date signal"
+    if page.redirect_count:
+        return "redirect cleanup"
+    if page.business_value == "high" and page.inbound_internal_links_count < 3:
+        return "weak internal linking"
+    if page.duplicate_group_id:
+        return "duplicate metadata"
+    if not page.meta_description or not page.title:
+        return "weak title or meta"
+    if page.load_time > 3:
+        return "slow page"
+    if page.word_count < 350:
+        return "thin content"
+    return "crawl-based opportunity"
+
+
+def recovery_why_it_matters(page: AuditPage, issue: str) -> str:
+    if page.business_value == "high":
+        return f"This {page.page_type} page has direct business value and visible fixable SEO issues."
+    if issue == "outdated date signal":
+        return "Old visible dates can weaken freshness and trust, especially after a traffic drop."
+    return "The page combines crawl-visible issues with possible recovery upside."
+
+
+def recovery_recommended_action(page: AuditPage, issue: str) -> str:
+    if issue == "outdated date signal":
+        return page.recommended_date_action or "Refresh the page and update visible freshness signals."
+    if issue == "redirect cleanup":
+        return "Update internal links, sitemap URLs and canonicals to the final URL."
+    if issue == "weak internal linking":
+        return "Add links from the homepage, category pages, related guides or high-value pages."
+    if issue == "duplicate metadata":
+        return page.recommended_unique_angle or "Differentiate the title and meta description by intent."
+    if issue == "slow page":
+        return "Review assets and templates on this URL, then retest the page."
+    if issue == "thin content":
+        return "Expand the page around buyer questions, proof points and comparison criteria."
+    return "Validate in GSC, then fix the visible issue on this URL."
+
+
+def recovery_effort(issue: str) -> str:
+    if issue in {"redirect cleanup", "weak internal linking", "weak title or meta", "duplicate metadata"}:
+        return "low"
+    if issue in {"outdated date signal", "slow page"}:
+        return "medium"
+    return "medium"
+
+
+def build_redirect_summary(pages: list[AuditPage]) -> dict[str, object]:
+    redirected = [page for page in pages if page.redirect_count]
+    sitemap_redirects = [page for page in redirected if page.source == "sitemap"]
+    internal_links_to_redirects = [
+        {"source_url": page.url, "redirected_links": page.internal_links_to_redirected_urls}
+        for page in pages
+        if page.internal_links_to_redirected_urls
+    ]
+    chains = [page for page in redirected if page.redirect_count > 1]
+    return {
+        "total_redirected_urls": len(redirected),
+        "sitemap_urls_redirecting": len(sitemap_redirects),
+        "internal_links_to_redirected_urls": sum(len(item["redirected_links"]) for item in internal_links_to_redirects),
+        "redirect_chains_over_1": len(chains),
+        "top_redirect_cleanup_opportunities": [
+            {
+                "requested_url": page.requested_url,
+                "final_url": page.final_url,
+                "redirect_count": page.redirect_count,
+                "source": page.source,
+                "recommendation": page.redirect_cleanup_recommendation
+                or "Update internal links, sitemap URLs and canonicals so they point directly to the final destination.",
+            }
+            for page in redirected[:10]
+        ],
+        "internal_link_sources": internal_links_to_redirects[:10],
+    }
+
+
+def build_traffic_drop_investigation(
+    pages: list[AuditPage],
+    summary: dict[str, object],
+    redirect_summary: dict[str, object],
+) -> dict[str, object]:
+    validation_areas = []
+    if any(page.outdated_date_signal or page.dated_references for page in pages):
+        validation_areas.append("pages with outdated date signals")
+    if redirect_summary.get("total_redirected_urls"):
+        validation_areas.append("redirected pages")
+    if any(page.load_time > 3 for page in pages):
+        validation_areas.append("slow pages")
+    if summary.get("duplicate_title_groups") or summary.get("duplicate_meta_description_groups"):
+        validation_areas.append("duplicate titles/descriptions")
+    if summary.get("weak_internal_linking_pages"):
+        validation_areas.append("weak internal linking")
+    if any(page.business_value == "high" and page.issues for page in pages):
+        validation_areas.append("high business value pages with visible SEO issues")
+    if any(page.page_type == "blog" and page.outdated_date_signal for page in pages):
+        validation_areas.append("old blog posts that may have lost freshness")
+    validation_areas.append("page groups that need GSC validation")
+    return {
+        "limits_statement": "This crawl cannot confirm the traffic drop cause without Search Console / analytics data.",
+        "crawl_suggests": validation_areas,
+        "data_required": [
+            "Google Search Console read-only access",
+            "GA4 read-only access",
+            "List of website/content/template changes around the drop period",
+            "Migration / CMS / plugin / theme changes",
+            "Backlink loss check if needed",
+        ],
+        "conclusion": [
+            "The crawl does not show a major technical breakdown.",
+            "The next step is to match these findings with Search Console data.",
+            "The highest-priority pages are those combining business value with visible fixable issues.",
+        ],
+    }
 
 
 def build_confidence_notes(

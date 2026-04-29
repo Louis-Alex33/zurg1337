@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 DEFAULT_TIMEOUT = 10
 DEFAULT_DELAY = 0.2
-DEFAULT_MAX_PAGES = 30
+DEFAULT_MAX_PAGES = 100
 DEFAULT_UI_AUDIT_MAX_PAGES = 100
 DEFAULT_DISCOVER_PROVIDER = "auto"
 DEFAULT_QUALIFY_MODE = "qualify_fast"
@@ -468,7 +468,7 @@ class QualifyModeConfig:
 @dataclass(frozen=True)
 class AuditModeConfig:
     timeout: int = 8
-    max_pages: int = 30
+    max_pages: int = 100
     max_depth: int = 2
     max_total_requests_per_domain: int = 35
     max_links_per_page: int = 12
@@ -498,7 +498,7 @@ AUDIT_MODE_CONFIGS = {
     "audit_light": AuditModeConfig(),
     "audit_full": AuditModeConfig(
         timeout=12,
-        max_pages=80,
+        max_pages=100,
         max_depth=4,
         max_total_requests_per_domain=100,
         max_links_per_page=20,

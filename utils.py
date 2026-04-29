@@ -33,6 +33,7 @@ class LimitedHTMLResponse:
     too_large: bool = False
     skip_reason: str = ""
     redirect_count: int = 0
+    redirect_chain: list[str] | None = None
 
 
 def utc_timestamp() -> str:
@@ -250,6 +251,7 @@ def fetch_limited_html(
     with session.get(url, timeout=timeout, allow_redirects=allow_redirects, stream=True) as response:
         content_type = response.headers.get("content-type", "")
         redirect_count = len(response.history)
+        redirect_chain = [item.url for item in response.history] + [response.url] if response.history else []
         request_url = response.request.url if response.request is not None else url
         if redirect_count > max_redirects:
             return LimitedHTMLResponse(
@@ -259,6 +261,7 @@ def fetch_limited_html(
                 content_type=content_type,
                 skip_reason="too_many_redirects",
                 redirect_count=redirect_count,
+                redirect_chain=redirect_chain,
             )
         if response.status_code >= 400:
             return LimitedHTMLResponse(
@@ -267,6 +270,7 @@ def fetch_limited_html(
                 status_code=response.status_code,
                 content_type=content_type,
                 redirect_count=redirect_count,
+                redirect_chain=redirect_chain,
             )
         if "text/html" not in content_type.lower():
             return LimitedHTMLResponse(
@@ -276,6 +280,7 @@ def fetch_limited_html(
                 content_type=content_type,
                 skip_reason="non_html",
                 redirect_count=redirect_count,
+                redirect_chain=redirect_chain,
             )
 
         header_length = response.headers.get("content-length", "").strip()
@@ -289,6 +294,7 @@ def fetch_limited_html(
                 too_large=True,
                 skip_reason="html_too_large",
                 redirect_count=redirect_count,
+                redirect_chain=redirect_chain,
             )
 
         chunks: list[bytes] = []
@@ -307,6 +313,7 @@ def fetch_limited_html(
                     too_large=True,
                     skip_reason="html_too_large",
                     redirect_count=redirect_count,
+                    redirect_chain=redirect_chain,
                 )
             chunks.append(chunk)
 
@@ -320,4 +327,5 @@ def fetch_limited_html(
             text=text,
             content_length=total_bytes,
             redirect_count=redirect_count,
+            redirect_chain=redirect_chain,
         )

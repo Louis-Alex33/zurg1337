@@ -80,7 +80,7 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertNotIn("titre_suggere", suggestion)
         self.assertNotIn("titre_longueur", suggestion)
         self.assertIn("description_suggeree", suggestion)
-        self.assertIn("Find essential information", suggestion["description_suggeree"])
+        self.assertIn("specific criteria", suggestion["description_suggeree"])
         self.assertNotIn("Retrouvez", suggestion["description_suggeree"])
 
     def test_fit_seo_title_does_not_pad_valid_title_with_generic_suffix(self) -> None:
@@ -106,7 +106,7 @@ class AuditHeuristicsTests(unittest.TestCase):
 
         self.assertNotIn("titre_suggere", suggestion)
         self.assertIn("description_suggeree", suggestion)
-        self.assertIn("Find essential information", suggestion["description_suggeree"])
+        self.assertIn("specific criteria", suggestion["description_suggeree"])
         self.assertNotIn("Retrouvez", suggestion["description_suggeree"])
 
     def test_fit_meta_description_keeps_french_for_french_pages(self) -> None:
@@ -115,7 +115,7 @@ class AuditHeuristicsTests(unittest.TestCase):
             "Douche senior Bordeaux : prix 2026, aides MaPrimeAdapt",
         )
 
-        self.assertIn("Retrouvez les informations", description)
+        self.assertIn("Analyse claire", description)
 
     def test_overlap_and_orphan_labels_are_prudent(self) -> None:
         home = AuditPage(
@@ -867,7 +867,7 @@ class AuditHeuristicsTests(unittest.TestCase):
         assert page is not None
         self.assertTrue(page.is_noindex)
         self.assertEqual(page.canonical_status, "cross_domain")
-        self.assertEqual(page.page_type, "article")
+        self.assertEqual(page.page_type, "blog")
         self.assertEqual(page.generic_internal_anchor_count, 5)
 
         report = build_report([page], domain="example.com")
@@ -891,9 +891,9 @@ class AuditHeuristicsTests(unittest.TestCase):
 
     def test_classify_page_type_uses_url_and_heading_hints(self) -> None:
         self.assertEqual(classify_page_type("https://example.com/"), "homepage")
-        self.assertEqual(classify_page_type("https://example.com/blog/test"), "article")
+        self.assertEqual(classify_page_type("https://example.com/blog/test"), "blog")
         self.assertEqual(classify_page_type("https://example.com/product/test"), "product")
-        self.assertEqual(classify_page_type("https://example.com/any", title="Guide complet"), "article")
+        self.assertEqual(classify_page_type("https://example.com/any", title="Guide complet"), "guide")
 
     def test_find_dated_references_ignores_current_year_but_flags_older_dates(self) -> None:
         references = find_dated_references(

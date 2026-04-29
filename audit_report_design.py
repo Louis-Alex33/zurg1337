@@ -679,6 +679,7 @@ def prepare_audit_report_context(
     offres_source = data.get("offres") if "offres" in data else default_offers_for_language(active_lang)
     context = {
         "lang": active_lang,
+        "report_type": str(data.get("report_type") or "standard"),
         "tool_name": str(data.get("tool_name") or DEFAULT_TOOL_NAME),
         "tool_tagline": str(data.get("tool_tagline") or DEFAULT_TOOL_TAGLINE),
         "logo_url": logo_url,
@@ -691,6 +692,8 @@ def prepare_audit_report_context(
         "domain": domain,
         "audit_date": str(data.get("audit_date") or format_audit_date(str(data.get("audited_at") or ""), lang=active_lang)),
         "score_global": score,
+        "recovery_opportunity_score": clamp_score(get_int(data, "recovery_opportunity_score", get_int(summary, "recovery_opportunity_score", 0))),
+        "confidence_level": str(data.get("confidence_level") or ("low" if active_lang == "en" else "faible")),
         "urgency_level": str(data.get("urgency_level") or infer_urgency(score, summary, business_signals, lang=active_lang)),
         "base_status": str(data.get("base_status") or infer_base_status(score, lang=active_lang)),
         "pages_analysees": pages_analysees,
@@ -714,9 +717,19 @@ def prepare_audit_report_context(
         "benchmark": benchmark,
         "ce_qui_fonctionne": list_or_default(data.get("ce_qui_fonctionne"), build_strengths(summary, pages_analysees, score, lang=active_lang)),
         "points_attention": list_or_default(data.get("points_attention"), build_attention_points(summary, business_signals, data, lang=active_lang)),
-        "plan_action": as_dict(data.get("plan_action")) or build_plan_action(summary, top_pages, lang=active_lang),
+        "plan_action": as_dict(data.get("plan_action")) or (
+            build_recovery_plan_action(lang=active_lang)
+            if str(data.get("report_type") or "") == "recovery"
+            else build_plan_action(summary, top_pages, lang=active_lang)
+        ),
         "matrice": normalize_matrix(as_dict(data.get("matrice")) or build_matrix(summary, top_pages, lang=active_lang), lang=active_lang),
         "pages_prioritaires": pages_prioritaires,
+        "top_recovery_opportunities": [as_dict(item) for item in data.get("top_recovery_opportunities", []) if isinstance(item, dict)],
+        "traffic_drop_investigation": as_dict(data.get("traffic_drop_investigation")),
+        "page_type_breakdown": as_dict(data.get("page_type_breakdown")) or as_dict(summary.get("page_type_breakdown")),
+        "business_value_breakdown": as_dict(data.get("business_value_breakdown")) or as_dict(summary.get("business_value_breakdown")),
+        "redirect_summary": as_dict(data.get("redirect_summary")),
+        "internal_linking_opportunities": [as_dict(item) for item in data.get("internal_linking_opportunities", []) if isinstance(item, dict)],
         "signaux": normalize_signals(data.get("signaux") or dated_content),
         "opportunites": list_or_default(data.get("opportunites"), build_editorial_opportunities(summary, top_pages, lang=active_lang)),
         "urls_crawlees": urls_crawlees,
@@ -732,11 +745,21 @@ def prepare_audit_report_context(
 def render_report_body(context: dict[str, Any]) -> str:
     priority_pages = render_priority_pages(context)
     signals = render_secondary_signals(context)
+    recovery_sections = ""
+    if str(context.get("report_type") or "") == "recovery":
+        recovery_sections = (
+            render_traffic_drop_investigation(context)
+            + render_page_type_breakdown(context)
+            + render_top_recovery_opportunities(context)
+            + render_redirect_cleanup_section(context)
+            + render_internal_linking_recovery_section(context)
+        )
     return f"""
 <main class="premium-report">
   {render_cover(context)}
   {render_dirigeant_summary(context)}
   {render_executive_summary(context)}
+  {recovery_sections}
   {render_benchmark_section(context)}
   {render_action_plan(context)}
   {priority_pages}
@@ -769,7 +792,7 @@ def render_cover(context: dict[str, Any]) -> str:
     <div class="cover-center">
       <div>
         <p class="label">{escape(t("audit_done_on"))} {escape(context["audit_date"])}</p>
-        <h1 class="cover-title">{escape(t("seo_audit"))}</h1>
+        <h1 class="cover-title">{escape("SEO Recovery Audit" if context.get("report_type") == "recovery" and context_lang(context) == "en" else t("seo_audit"))}</h1>
         <p class="cover-domain">{escape(context["domain"])}</p>
       </div>
       <div class="cover-score">
@@ -777,6 +800,7 @@ def render_cover(context: dict[str, Any]) -> str:
         <div class="score-context">
           <span class="score-badge {score_class}">{int(context["score_global"])}/100</span>
           <p>{escape(context["base_status"])}</p>
+          {render_recovery_cover_score(context)}
         </div>
       </div>
       <div class="cover-meta">
@@ -786,6 +810,17 @@ def render_cover(context: dict[str, Any]) -> str:
     </div>
     {render_page_footer(context)}
   </section>"""
+
+
+def render_recovery_cover_score(context: dict[str, Any]) -> str:
+    if context.get("report_type") != "recovery":
+        return ""
+    label = "Potential recovery opportunity" if context_lang(context) == "en" else "Opportunité de récupération potentielle"
+    badge = "crawl-based" if context_lang(context) == "en" else "basé sur le crawl"
+    return (
+        f"<p class='recovery-cover-score'><strong>{int(context.get('recovery_opportunity_score') or 0)}/100</strong> "
+        f"{escape(label)} <span>{escape(badge)}</span></p>"
+    )
 
 
 def render_page_footer(context: dict[str, Any]) -> str:
@@ -1085,6 +1120,167 @@ def render_priority_pages(context: dict[str, Any]) -> str:
       <h2>{escape(t("priority_pages_title"))}</h2>
     </div>
     <div class="priority-page-list pages-prioritaires-grid">{''.join(cards)}</div>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_traffic_drop_investigation(context: dict[str, Any]) -> str:
+    data = as_dict(context.get("traffic_drop_investigation"))
+    if not data:
+        return ""
+    is_en = context_lang(context) == "en"
+    title = "Traffic Drop Investigation" if is_en else "Investigation de baisse de trafic"
+    limits = str(data.get("limits_statement") or "This crawl cannot confirm the traffic drop cause without Search Console / analytics data.")
+    intro = "However, the crawl highlights several areas to validate." if is_en else "Le crawl met toutefois en avant plusieurs zones à valider."
+    areas = [str(item) for item in data.get("crawl_suggests", []) if str(item).strip()]
+    required = [str(item) for item in data.get("data_required", []) if str(item).strip()]
+    conclusions = [str(item) for item in data.get("conclusion", []) if str(item).strip()]
+    return f"""
+  <section class="report-page recovery-section traffic-drop-section">
+    <div class="section-head">
+      <p class="label section-label">RECOVERY</p>
+      <h2>{escape(title)}</h2>
+    </div>
+    <article class="card recovery-note">
+      <p>{escape(limits)}</p>
+      <p>{escape(intro)}</p>
+    </article>
+    <div class="recovery-grid">
+      <article class="card">
+        <h3>{escape("Areas to validate" if is_en else "Zones à valider")}</h3>
+        {render_text_list(areas)}
+      </article>
+      <article class="card">
+        <h3>{escape("Data Needed To Confirm Diagnosis" if is_en else "Données nécessaires pour confirmer")}</h3>
+        {render_text_list(required)}
+      </article>
+    </div>
+    <article class="card recovery-note">{render_text_list(conclusions)}</article>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_page_type_breakdown(context: dict[str, Any]) -> str:
+    page_types = as_dict(context.get("page_type_breakdown"))
+    business = as_dict(context.get("business_value_breakdown"))
+    if not page_types and not business:
+        return ""
+    is_en = context_lang(context) == "en"
+    type_rows = "".join(
+        f"<tr><td>{escape(str(key))}</td><td>{escape(str(value))}</td></tr>"
+        for key, value in sorted(page_types.items(), key=lambda item: str(item[0]))
+    )
+    business_rows = "".join(
+        f"<tr><td>{escape(str(key))}</td><td>{escape(str(value))}</td></tr>"
+        for key, value in sorted(business.items(), key=lambda item: str(item[0]))
+    )
+    return f"""
+  <section class="report-page recovery-section">
+    <div class="section-head">
+      <p class="label section-label">{escape("Business Value" if is_en else "Valeur business")}</p>
+      <h2>{escape("Page Type & Business Value Breakdown" if is_en else "Répartition par type et valeur business")}</h2>
+    </div>
+    <div class="recovery-grid">
+      <article class="card">
+        <h3>{escape("Page Type Breakdown" if is_en else "Types de pages")}</h3>
+        <table><tbody>{type_rows}</tbody></table>
+      </article>
+      <article class="card">
+        <h3>{escape("Business Value Breakdown" if is_en else "Valeur business")}</h3>
+        <table><tbody>{business_rows}</tbody></table>
+      </article>
+    </div>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_top_recovery_opportunities(context: dict[str, Any]) -> str:
+    rows_data = [as_dict(item) for item in context.get("top_recovery_opportunities", []) if isinstance(item, dict)]
+    if not rows_data:
+        return ""
+    is_en = context_lang(context) == "en"
+    rows = []
+    for item in rows_data[:20]:
+        url = str(item.get("url") or "")
+        rows.append(
+            "<tr>"
+            f"<td><a href='{escape(appendix_href(url))}' target='_blank' rel='noreferrer'>{escape(truncate(display_url_label(url, str(context['domain'])), 46))}</a></td>"
+            f"<td>{escape(str(item.get('page_type') or '-'))}</td>"
+            f"<td>{escape(str(item.get('business_value') or '-'))}</td>"
+            f"<td><span class='score-pill {score_color_class(get_int(item, 'recovery_score', 0))}'>{get_int(item, 'recovery_score', 0)}/100</span></td>"
+            f"<td>{escape(str(item.get('main_issue') or '-'))}</td>"
+            f"<td>{escape(str(item.get('recommended_action') or '-'))}</td>"
+            f"<td>{escape(str(item.get('effort') or '-'))}</td>"
+            f"<td>{escape(str(item.get('impact') or '-'))}</td>"
+            f"<td>{escape('Yes' if item.get('needs_gsc_validation') else 'No')}</td>"
+            "</tr>"
+        )
+    return f"""
+  <section class="report-page recovery-section recovery-opportunities">
+    <div class="section-head">
+      <p class="label section-label">RECOVERY</p>
+      <h2>{escape("Top Recovery Opportunities" if is_en else "Top opportunités de récupération")}</h2>
+    </div>
+    <p class="suggestions-intro">{escape("These pages should be checked first because they combine business value with fixable SEO issues." if is_en else "Ces pages doivent être vérifiées en premier car elles combinent valeur business et problèmes SEO corrigeables.")}</p>
+    <table class="technical-table">
+      <thead><tr><th>URL</th><th>{escape("Type" if is_en else "Type")}</th><th>{escape("Business" if is_en else "Business")}</th><th>{escape("Score" if is_en else "Score")}</th><th>{escape("Main issue" if is_en else "Problème")}</th><th>{escape("Recommended action" if is_en else "Action")}</th><th>{escape("Effort" if is_en else "Effort")}</th><th>{escape("Impact" if is_en else "Impact")}</th><th>GSC</th></tr></thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_redirect_cleanup_section(context: dict[str, Any]) -> str:
+    data = as_dict(context.get("redirect_summary"))
+    if not data or not get_int(data, "total_redirected_urls", 0):
+        return ""
+    is_en = context_lang(context) == "en"
+    items = [
+        f"Total redirected URLs: {get_int(data, 'total_redirected_urls', 0)}",
+        f"Sitemap URLs redirecting: {get_int(data, 'sitemap_urls_redirecting', 0)}",
+        f"Internal links to redirected URLs: {get_int(data, 'internal_links_to_redirected_urls', 0)}",
+        f"Redirect chains > 1: {get_int(data, 'redirect_chains_over_1', 0)}",
+    ]
+    cleanup = [as_dict(item) for item in data.get("top_redirect_cleanup_opportunities", []) if isinstance(item, dict)]
+    rows = "".join(
+        f"<tr><td>{escape(truncate(str(item.get('requested_url') or ''), 54))}</td><td>{escape(truncate(str(item.get('final_url') or ''), 54))}</td><td>{get_int(item, 'redirect_count', 0)}</td><td>{escape(str(item.get('recommendation') or ''))}</td></tr>"
+        for item in cleanup[:8]
+    )
+    return f"""
+  <section class="report-page recovery-section">
+    <div class="section-head">
+      <p class="label section-label">{escape("Technical Findings" if is_en else "Technique")}</p>
+      <h2>{escape("Redirect Cleanup" if is_en else "Nettoyage des redirections")}</h2>
+    </div>
+    <article class="card">{render_text_list(items)}</article>
+    <table class="technical-table"><thead><tr><th>Requested URL</th><th>Final URL</th><th>Count</th><th>{escape("Recommendation" if is_en else "Recommandation")}</th></tr></thead><tbody>{rows}</tbody></table>
+    {render_page_footer(context)}
+  </section>"""
+
+
+def render_internal_linking_recovery_section(context: dict[str, Any]) -> str:
+    items = [as_dict(item) for item in context.get("internal_linking_opportunities", []) if isinstance(item, dict)]
+    if not items:
+        return ""
+    is_en = context_lang(context) == "en"
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(truncate(str(item.get('target_url') or ''), 54))}</td>"
+        f"<td>{escape(str(item.get('page_type') or '-'))}</td>"
+        f"<td>{escape(str(item.get('business_value') or '-'))}</td>"
+        f"<td>{get_int(item, 'inbound_links', 0)}</td>"
+        f"<td>{escape(str(item.get('issue') or '-'))}</td>"
+        f"<td>{escape(str(item.get('recommended_internal_links') or '-'))}</td>"
+        "</tr>"
+        for item in items[:10]
+    )
+    return f"""
+  <section class="report-page recovery-section">
+    <div class="section-head">
+      <p class="label section-label">{escape("Internal Linking" if is_en else "Maillage interne")}</p>
+      <h2>{escape("Internal Linking Opportunities" if is_en else "Opportunités de maillage interne")}</h2>
+    </div>
+    <table class="technical-table"><thead><tr><th>URL</th><th>Type</th><th>Business</th><th>{escape("Inbound links" if is_en else "Liens entrants")}</th><th>{escape("Issue" if is_en else "Problème")}</th><th>{escape("Recommended internal links" if is_en else "Liens recommandés")}</th></tr></thead><tbody>{rows}</tbody></table>
     {render_page_footer(context)}
   </section>"""
 
@@ -1554,6 +1750,23 @@ def render_final_section(context: dict[str, Any]) -> str:
         for item in opportunities
     )
     actions = "".join(f"<li>{escape(str(action))}</li>" for action in context["actions_30j"][:3])
+    recovery_conclusion = ""
+    if context.get("report_type") == "recovery":
+        if context_lang(context) == "en":
+            conclusion_text = (
+                "The crawl does not show a major technical breakdown. The priority is not to rebuild the website, "
+                "but to identify which page groups lost visibility, then fix freshness signals, redirects, internal linking "
+                "and page differentiation on the URLs that actually matter."
+            )
+            confidence = f"Confidence level: {context.get('confidence_level')}. Limited because this phase does not include Search Console or analytics data."
+        else:
+            conclusion_text = (
+                "Le crawl ne montre pas de casse technique majeure. La priorité n'est donc pas de refaire le site, "
+                "mais d'identifier les groupes de pages qui ont perdu de la visibilité, puis de corriger les signaux de fraîcheur, "
+                "les redirections, le maillage interne et la différenciation des pages sur les URLs réellement importantes."
+            )
+            confidence = f"Niveau de confiance : {context.get('confidence_level')}. Limité car cette phase n'inclut pas Search Console ni les données analytics."
+        recovery_conclusion = f"<article class='card recovery-note'><p>{escape(conclusion_text)}</p><p>{escape(confidence)}</p></article>"
     contact = str(context["contact_cta"])
     href = f"mailto:{contact}" if "@" in contact and not contact.startswith("mailto:") else contact
     analyste = (
@@ -1567,6 +1780,7 @@ def render_final_section(context: dict[str, Any]) -> str:
     <div class="finale-grid">
       <div class="finale-col">
         <h2>{escape(t("editorial_opportunities"))}</h2>
+        {recovery_conclusion}
         <ul class="opportunites-list">{opportunity_items}</ul>
       </div>
       <div class="finale-col">
@@ -2216,17 +2430,22 @@ def fit_meta_description(url: str, title: str, *, language: str | None = None) -
     if topic.lower() in {"page sans titre", "accueil"}:
         topic = title
     language = language or infer_seo_language(title, topic)
-    topic = trim_at_word(topic, 42 if language == "fr" else 58)
+    topic = trim_at_word(topic, 54 if language == "fr" else 68)
+    topic_lower = f"{topic} {title}".lower()
     if language == "fr":
-        description = (
-            f"Retrouvez les informations essentielles sur {topic}, avec conseils pratiques, "
-            "points clés et prochaines étapes."
-        )
+        if any(term in topic_lower for term in ("fabricant", "grossiste", "oem", "odm", "private label", "marque")):
+            description = f"Comparez les options {topic} et les critères à vérifier avant de choisir un partenaire B2B fiable."
+        elif any(term in topic_lower for term in ("recycl", "durable", "packaging", "emballage")):
+            description = f"Comprenez ce que {topic} implique pour les choix produit, les arguments de marque et la confiance client."
+        else:
+            description = f"Analyse claire de {topic} : points à vérifier, critères de choix et implications concrètes pour avancer."
     else:
-        description = (
-            f"Find essential information about {topic}, with practical tips, key details, "
-            "and clear next steps for readers."
-        )
+        if any(term in topic_lower for term in ("manufacturer", "supplier", "wholesale", "oem", "odm", "private label")):
+            description = f"Compare {topic} and learn what brands should check before choosing a private label or wholesale supplier."
+        elif any(term in topic_lower for term in ("recycl", "sustainable", "packaging", "tube")):
+            description = f"Learn what {topic} means for product packaging, sustainability claims, brand choices and customer trust."
+        else:
+            description = f"Review {topic} with specific criteria, practical checks and the details that matter before making a decision."
     return complete_meta_description(description, language)
 
 
@@ -2235,16 +2454,15 @@ def complete_meta_description(description: str, language: str) -> str:
         return finish_sentence(description)
     extras = (
         (
-            "À jour.",
-            "Conseils pratiques inclus.",
-            "Points clés et conseils pratiques.",
-            "Conseils pratiques pour avancer avec confiance.",
+            "Utile pour prioriser les prochaines actions.",
+            "Avec les points à contrôler en priorité.",
+            "Pour décider quoi corriger en premier.",
         )
         if language == "fr"
         else (
-            "Useful for planning.",
-            "Useful for browsing and planning.",
-            "Useful for browsing and planning with confidence.",
+            "Useful when prioritizing the next actions.",
+            "With the points worth checking first.",
+            "So the next SEO action is easier to prioritize.",
         )
     )
     for extra in extras:
@@ -2697,6 +2915,38 @@ def build_plan_action(summary: dict[str, Any], top_pages: list[dict[str, Any]], 
         "j30": {"titre": "Corriger les signaux visibles", "description": sentence_from_items(quick[:3], lang=lang)},
         "j60": {"titre": "Reprendre les pages prioritaires", "description": "Transformer les fiches page en briefs éditoriaux puis publier un premier lot."},
         "j90": {"titre": "Consolider la structure", "description": "Renforcer les hubs, le maillage interne et les contenus qui soutiennent les pages business."},
+    }
+
+
+def build_recovery_plan_action(lang: str = "fr") -> dict[str, dict[str, str]]:
+    if sanitize_report_language(lang) == "en":
+        return {
+            "j30": {
+                "titre": "Validate and fix visible issues",
+                "description": "Validate the drop in GSC, fix redirected internal links, update high-value pages with date issues, and correct top title/meta issues.",
+            },
+            "j60": {
+                "titre": "Refresh priority pages",
+                "description": "Refresh top priority pages, strengthen internal links to commercial pages, differentiate similar pages, and improve trust signals.",
+            },
+            "j90": {
+                "titre": "Consolidate and monitor recovery",
+                "description": "Consolidate weak or obsolete pages if needed, build supporting content around business pages, monitor recovery in GSC, and refine with query-level data.",
+            },
+        }
+    return {
+        "j30": {
+            "titre": "Valider et corriger les signaux visibles",
+            "description": "Valider la baisse dans GSC, corriger les liens redirigés, mettre à jour les pages business datées et reprendre les principaux titles/metas.",
+        },
+        "j60": {
+            "titre": "Rafraîchir les pages prioritaires",
+            "description": "Rafraîchir les pages prioritaires, renforcer les liens vers les pages commerciales, différencier les pages proches et améliorer les signaux de confiance.",
+        },
+        "j90": {
+            "titre": "Consolider et suivre la récupération",
+            "description": "Consolider les pages faibles ou obsolètes, créer du contenu support autour des pages business, suivre la récupération dans GSC et affiner par requête.",
+        },
     }
 
 
@@ -3679,6 +3929,36 @@ def render_report_styles() -> str:
     .premium-report .priority-page-list {
       display: grid;
       gap: var(--space-lg);
+    }
+    .premium-report .recovery-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-lg);
+      margin-bottom: var(--space-lg);
+    }
+    .premium-report .recovery-note p {
+      margin-top: 0;
+    }
+    .premium-report .recovery-cover-score {
+      margin-top: var(--space-sm);
+      color: var(--color-text-secondary);
+      font-size: 12px;
+    }
+    .premium-report .recovery-cover-score strong {
+      color: var(--color-text-primary);
+      font-size: 18px;
+    }
+    .premium-report .recovery-cover-score span {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: var(--color-accent-light);
+      color: var(--color-accent);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 10px;
+      font-weight: 700;
     }
     .premium-report .pages-prioritaires-grid {
       display: grid;

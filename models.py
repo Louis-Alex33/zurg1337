@@ -91,12 +91,15 @@ class QualifiedDomain:
 class AuditPage:
     url: str
     requested_url: str = ""
+    final_url: str = ""
     status_code: int = 0
     title: str = ""
     meta_description: str = ""
     h1: list[str] = field(default_factory=list)
+    h2: list[str] = field(default_factory=list)
     word_count: int = 0
     internal_links_out: list[str] = field(default_factory=list)
+    internal_link_anchors_out: dict[str, list[str]] = field(default_factory=dict)
     generic_internal_anchor_count: int = 0
     empty_internal_anchor_count: int = 0
     images_total: int = 0
@@ -111,8 +114,42 @@ class AuditPage:
     is_noindex: bool = False
     robots_allowed: bool = True
     redirect_count: int = 0
+    redirect_chain: list[str] = field(default_factory=list)
+    redirect_source: str = ""
+    redirect_cleanup_needed: bool = False
+    redirect_cleanup_recommendation: str = ""
     has_structured_data: bool = False
+    structured_data_text: str = ""
     page_type: str = ""
+    business_value: str = ""
+    business_reason: str = ""
+    date_signals: list[dict[str, str | int]] = field(default_factory=list)
+    outdated_date_signal: bool = False
+    date_signal_locations: list[str] = field(default_factory=list)
+    date_severity: str = ""
+    recommended_date_action: str = ""
+    inbound_internal_links_count: int = 0
+    outbound_internal_links_count: int = 0
+    internal_link_strength: str = ""
+    orphan_like: bool = False
+    linked_from_homepage: bool = False
+    linked_from_high_value_pages: bool = False
+    anchors_received: list[str] = field(default_factory=list)
+    duplicate_anchors: list[str] = field(default_factory=list)
+    internal_links_to_redirected_urls: list[str] = field(default_factory=list)
+    duplicate_group_id: str = ""
+    duplicate_group_size: int = 0
+    duplicate_type: str = ""
+    recommended_unique_angle: str = ""
+    recovery_opportunity_score: int = 0
+    recovery_priority: str = ""
+    recovery_reason: str = ""
+    needs_gsc_validation: bool = True
+    evidence_sources: list[str] = field(default_factory=list)
+    source: str = ""
+    crawl_depth: int = 0
+    load_time_seconds: float = 0.0
+    crawl_error: str = ""
     page_health_score: int = 100
     content_like: bool = False
     meaningful_h1_count: int = 0
@@ -125,6 +162,10 @@ class AuditReport:
     audited_at: str
     pages_crawled: int
     observed_health_score: int
+    report_type: str = "standard"
+    lang: str = "fr"
+    recovery_opportunity_score: int = 0
+    confidence_level: str = ""
     notes: list[str] = field(default_factory=list)
     summary: dict[str, Any] = field(default_factory=dict)
     critical_findings: list[str] = field(default_factory=list)
@@ -138,6 +179,11 @@ class AuditReport:
     confidence_notes: list[str] = field(default_factory=list)
     technical_checks: dict[str, Any] = field(default_factory=dict)
     internal_linking_opportunities: list[dict[str, Any]] = field(default_factory=list)
+    top_recovery_opportunities: list[dict[str, Any]] = field(default_factory=list)
+    traffic_drop_investigation: dict[str, Any] = field(default_factory=dict)
+    page_type_breakdown: dict[str, int] = field(default_factory=dict)
+    business_value_breakdown: dict[str, int] = field(default_factory=dict)
+    redirect_summary: dict[str, Any] = field(default_factory=dict)
     crawl_metadata: dict[str, Any] = field(default_factory=dict)
     history_path: str = ""
     html_path: str = ""
