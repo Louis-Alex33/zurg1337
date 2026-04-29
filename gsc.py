@@ -1590,7 +1590,7 @@ def render_report(report: dict[str, object]) -> str:
     .summary-copy {{ font-size: 1.05rem; max-width: 880px; margin-bottom: 0; }}
     .cards-grid, .priority-list {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 12px;
     }}
     .priority-item, .page-card, .snippet-card {{
@@ -1629,7 +1629,7 @@ def render_report(report: dict[str, object]) -> str:
     .badge-p3, .badge-dead {{ background: var(--green-bg); color: var(--green-text); }}
     .metric-row {{
       display: grid;
-      grid-template-columns: repeat(5, minmax(82px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(94px, 1fr));
       gap: 8px;
     }}
     .metric {{ background: var(--soft); border-radius: 8px; padding: 8px; min-width: 0; }}
@@ -1689,6 +1689,7 @@ def render_report(report: dict[str, object]) -> str:
       .report-header {{ grid-template-columns: 1fr; }}
       .cover-meta, .insight-grid {{ grid-template-columns: 1fr; }}
       .kpi-grid {{ grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }}
+      .cards-grid, .priority-list {{ grid-template-columns: 1fr; }}
       .section-heading {{ display: block; }}
       .metric-row {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .bar-label, .bar-value {{ width: auto; min-width: 64px; }}
