@@ -347,7 +347,7 @@ class GSCAnalysisTests(unittest.TestCase):
     def test_phase2_parsing_and_period_comparison_handle_zero_division(self) -> None:
         self.assertEqual(parse_number("1 234"), 1234)
         self.assertEqual(parse_number("1,25"), 1.25)
-        self.assertAlmostEqual(parse_ctr("4,5%"), 0.045)
+        self.assertAlmostEqual(parse_ctr("4,5%"), 4.5)
         comparison = compare_gsc_periods(
             before_df=[{"page": "https://example.com/a", "clicks": 0, "impressions": 0, "ctr": 0, "position": 0}],
             after_df=[{"page": "https://example.com/a", "clicks": 10, "impressions": 100, "ctr": 0.1, "position": 5}],
@@ -359,7 +359,13 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertEqual(comparison[0]["clicks_delta"], 10)
 
     def test_ctr_is_recalculated_from_clicks_and_impressions(self) -> None:
-        self.assertAlmostEqual(calculate_ctr(1, 1564), 0.000639386, places=6)
+        self.assertAlmostEqual(calculate_ctr(1, 1564), 0.06, places=2)
+        self.assertAlmostEqual(calculate_ctr(2, 941), 0.21, places=2)
+        self.assertAlmostEqual(calculate_ctr(54, 11212), 0.48, places=2)
+        self.assertAlmostEqual(calculate_ctr(17, 2816), 0.60, places=2)
+        self.assertAlmostEqual(calculate_ctr(2322, 131243), 1.77, places=2)
+        self.assertEqual(calculate_ctr(0, 1000), 0)
+        self.assertEqual(calculate_ctr(1, 0), 0)
         self.assertEqual(format_ctr(calculate_ctr(1, 1564)), "0,06 %")
         self.assertEqual(format_ctr(calculate_ctr(155, 13689)), "1,13 %")
         self.assertEqual(format_ctr(calculate_ctr(2322, 131243)), "1,77 %")
@@ -378,6 +384,8 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertNotIn("guide clair", combined)
         self.assertNotIn("points clés", combined)
         self.assertNotIn("découvrez les informations essentielles", combined)
+        self.assertNotIn("points à vérifier", combined)
+        self.assertNotIn("promesse plus concrète", combined)
 
     def test_detect_cannibalization_groups_stays_cluster_specific(self) -> None:
         pages = [

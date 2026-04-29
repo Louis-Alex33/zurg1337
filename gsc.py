@@ -75,11 +75,17 @@ QUERY_QUESTION_STARTERS = (
 )
 GENERIC_SNIPPET_PHRASES = (
     "guide clair",
+    "conseils et points clés",
+    "conseils et points cles",
     "points clés",
     "points cles",
+    "points à vérifier",
+    "points a verifier",
     "découvrez les informations essentielles",
     "decouvrez les informations essentielles",
     "conseils pour avancer plus simplement",
+    "promesse plus concrète",
+    "promesse plus concrete",
 )
 BUSINESS_HIGH_TERMS = (
     "raquette",
@@ -101,6 +107,10 @@ BUSINESS_HIGH_TERMS = (
     "prix",
     "promo",
     "guide achat",
+    "programme",
+    "pdf",
+    "formation",
+    "partenariat",
 )
 BUSINESS_LOW_TERMS = (
     "joueur",
@@ -130,6 +140,8 @@ def run_gsc_analysis(
     auto_niche_stopwords: bool = False,
     mode: str = "full",
     annexes_dir: str | None = None,
+    site_context: str = "affiliate_media",
+    export_csv: bool = False,
 ) -> list[GSCPageAnalysis]:
     if mode not in {"full", "executive"}:
         raise CLIError(f"Mode GSC inconnu: {mode}. Valeurs: full, executive.")
@@ -159,10 +171,16 @@ def run_gsc_analysis(
             queries,
             extra_stopwords=extra_stopwords,
         )
-    results = analyze_pages(current=current, previous=previous, possible_overlap=possible_overlap, queries=queries)
+    results = analyze_pages(
+        current=current,
+        previous=previous,
+        possible_overlap=possible_overlap,
+        queries=queries,
+        site_context=site_context,
+    )
     apply_cannibalization_groups(results, cannibalization_groups)
     write_csv(results, output_csv)
-    if mode == "executive":
+    if mode == "executive" or export_csv:
         write_executive_exports(
             results=results,
             queries=queries,
@@ -251,8 +269,10 @@ def parse_ctr(value: Any) -> float:
         return 0.0
     raw = str(value)
     number = parse_number(value)
-    if "%" in raw or number > 1:
-        return number / 100
+    if "%" in raw:
+        return number
+    if number <= 1:
+        return number * 100
     return number
 
 
@@ -260,11 +280,21 @@ def calculate_ctr(clicks: Any, impressions: Any) -> float:
     impression_count = parse_number(impressions)
     if impression_count <= 0:
         return 0.0
-    return parse_number(clicks) / impression_count
+    return (parse_number(clicks) / impression_count) * 100
 
 
-def format_ctr(value: float, decimals: int = 2) -> str:
-    return f"{float(value) * 100:.{decimals}f} %".replace(".", ",")
+def calculate_ctr_ratio(clicks: Any, impressions: Any) -> float:
+    return calculate_ctr(clicks, impressions) / 100
+
+
+def format_ctr(value: float, decimals: int | None = None) -> str:
+    percent = float(value)
+    resolved_decimals = decimals if decimals is not None else 2
+    return f"{percent:.{resolved_decimals}f} %".replace(".", ",")
+
+
+def format_ctr_ratio(value: float, decimals: int | None = None) -> str:
+    return format_ctr(float(value) * 100, decimals=decimals)
 
 
 def load_gsc_csv(path: str | Path | None) -> list[dict[str, Any]]:
@@ -303,7 +333,7 @@ def normalize_gsc_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if any(normalized.get(key) for key in ("page", "query", "country", "device", "date")):
             normalized.setdefault("clicks", 0)
             normalized.setdefault("impressions", 0)
-            normalized["ctr"] = calculate_ctr(normalized.get("clicks"), normalized.get("impressions"))
+            normalized["ctr"] = calculate_ctr_ratio(normalized.get("clicks"), normalized.get("impressions"))
             normalized.setdefault("position", 0.0)
             normalized_rows.append(normalized)
     return normalized_rows
@@ -818,7 +848,7 @@ def parse_pages_csv(filepath: str | None) -> list[GSCPageData]:
                     continue
                 clicks = coerce_int(row.get(headers["clicks"]), default=0)
                 impressions = coerce_int(row.get(headers["impressions"]), default=0)
-                ctr = calculate_ctr(clicks, impressions)
+                ctr = calculate_ctr_ratio(clicks, impressions)
                 pages.append(
                     GSCPageData(
                         url=url,
@@ -856,7 +886,7 @@ def parse_queries_csv(filepath: str | None) -> list[GSCQueryData]:
                     continue
                 clicks = coerce_int(row.get(headers["clicks"]), default=0)
                 impressions = coerce_int(row.get(headers["impressions"]), default=0)
-                ctr = calculate_ctr(clicks, impressions)
+                ctr = calculate_ctr_ratio(clicks, impressions)
                 queries.append(
                     GSCQueryData(
                         query=query,
@@ -964,7 +994,7 @@ def _load_dimension(
                 continue
             clicks = coerce_int(row.get(headers["clicks"]), default=0)
             impressions = coerce_int(row.get(headers["impressions"]), default=0)
-            ctr = calculate_ctr(clicks, impressions)
+            ctr = calculate_ctr_ratio(clicks, impressions)
             rows.append(
                 {
                     output_key: label,
@@ -999,7 +1029,7 @@ def extract_slug_keywords(url: str, stopwords: set[str] | frozenset[str] = froze
     return {
         word.lower()
         for word in parts
-        if len(word) > 4 and word.lower() not in stopwords
+        if (len(word) > 4 or re.fullmatch(r"p\d{2,4}", word.lower())) and word.lower() not in stopwords
     }
 
 
@@ -1115,7 +1145,16 @@ def detect_cannibalization_groups(
         if not shared_queries and len(combined_tokens) < 3:
             continue
         topic = build_cannibalization_topic(combined_tokens, shared_queries)
-        confidence = "high" if len(shared_queries) >= 3 and len(related) >= 3 else "medium" if shared_queries else "low"
+        known_cluster = known_cannibalization_cluster([item.url for item in related])
+        confidence = (
+            "high"
+            if len(shared_queries) >= 3 and len(related) >= 3
+            else "medium"
+            if shared_queries or known_cluster
+            else "low"
+        )
+        if confidence == "low":
+            continue
         group_id = f"can-{len(groups) + 1:02d}"
         urls = [item.url for item in related]
         groups.append(
@@ -1130,6 +1169,17 @@ def detect_cannibalization_groups(
         )
         used_urls.update(urls)
     return groups
+
+
+def known_cannibalization_cluster(urls: list[str]) -> bool:
+    joined = " ".join(strip_accents(url).lower() for url in urls)
+    if len(urls) >= 3 and "tournoi" in joined and re.search(r"p\d{2,4}", joined):
+        return True
+    if len(urls) >= 2 and "chaussures" in joined and "padel" in joined:
+        return True
+    if len(urls) >= 2 and "raquette" in joined and "padel" in joined:
+        return True
+    return False
 
 
 def build_cannibalization_topic(tokens: set[str], shared_queries: list[str]) -> str:
@@ -1178,6 +1228,7 @@ def analyze_pages(
     previous: list[GSCPageData] | None,
     possible_overlap: dict[str, list[str]],
     queries: list[GSCQueryData] | None = None,
+    site_context: str = "affiliate_media",
 ) -> list[GSCPageAnalysis]:
     previous_map = {page.url: page for page in previous or []}
     max_impressions = max((page.impressions for page in current), default=1)
@@ -1192,6 +1243,7 @@ def analyze_pages(
             title="",
             queries=[main_query.query] if main_query else [],
             page_type=page_type,
+            site_context=site_context,
         )
         analysis = GSCPageAnalysis(
             url=page.url,
@@ -1259,12 +1311,12 @@ def classify_page_type(url: str, main_query: str = "") -> str:
     text = strip_accents(f"{url} {main_query}").lower()
     if any(term in text for term in ("comparatif", "meilleur", "avis", "test-", "/test", "guide-achat")):
         return "commercial"
+    if any(term in text for term in ("comment", "tenir", "changer", "nettoyer", "regle", "technique", "service", "vollee")):
+        return "practical guide"
     if any(term in text for term in ("raquette", "chaussure", "balle", "pressurisateur", "sac", "equipement")):
         return "equipment"
     if any(term in text for term in ("tournoi", "p100", "p250", "p500", "niveau", "points")):
         return "cluster guide"
-    if any(term in text for term in ("comment", "tenir", "regle", "technique", "service", "vollee")):
-        return "practical guide"
     if any(term in text for term in ("joueur", "joueuse", "biographie", "actualite", "news")):
         return "low business editorial"
     return "editorial"
@@ -1275,9 +1327,10 @@ def estimate_business_value(
     title: str = "",
     queries: list[str] | None = None,
     page_type: str = "",
+    site_context: str = "affiliate_media",
 ) -> tuple[str, str, str]:
     haystack = strip_accents(" ".join([url, title, page_type, " ".join(queries or [])])).lower()
-    commercial_modifiers = ("meilleur", "meilleure", "avis", "comparatif", "test", "acheter", "achat", "prix", "promo")
+    commercial_modifiers = ("meilleur", "meilleure", "avis", "comparatif", "test", "acheter", "achat", "prix", "promo", "choisir")
     if page_type == "practical guide" and not any(term in haystack for term in commercial_modifiers):
         return "medium", "Guide pratique pouvant pousser vers une ressource ou un produit.", "produit numérique"
     if any(term in haystack for term in BUSINESS_HIGH_TERMS):
@@ -1312,17 +1365,39 @@ def seo_opportunity_score(analysis: GSCPageAnalysis, max_impressions: int) -> in
         position_score = 6.0
     else:
         position_score = 0.0
-    business_score = {"high": 20.0, "medium": 11.0, "low": 3.0}.get(analysis.business_value, 3.0)
+    business_score = {"high": 25.0, "medium": 10.0, "low": 0.0}.get(analysis.business_value, 0.0)
     query_score = 5.0 if analysis.main_query and analysis.main_query != "la requête principale" else 0.0
-    monetization_score = 10.0 if analysis.monetization_possible != "none" else 0.0
+    monetization_score = 15.0 if analysis.monetization_possible != "none" else 0.0
     gain_score = 5.0 if analysis.estimated_recoverable_clicks else 0.0
+    action_score = 0.0
+    if is_snippet_opportunity(analysis):
+        action_score += 10.0
+    if 4 <= analysis.position <= 15:
+        action_score += 10.0
     if analysis.impressions < 50:
-        impressions_score *= 0.4
+        impressions_score = max(0.0, impressions_score - 20.0)
         ctr_gap_score *= 0.4
-    if analysis.business_value == "low" and analysis.position > 15:
-        position_score *= 0.4
-    score = impressions_score + ctr_gap_score + position_score + business_score + query_score + monetization_score + gain_score
+    if analysis.position > 30 and analysis.business_value != "high":
+        position_score = max(0.0, position_score - 20.0)
+    low_business_penalty = 15.0 if analysis.business_value == "low" else 0.0
+    cannibalization_penalty = 10.0 if analysis.cannibalization_confidence == "high" else 0.0
+    score = (
+        impressions_score
+        + ctr_gap_score
+        + position_score
+        + business_score
+        + query_score
+        + monetization_score
+        + gain_score
+        + action_score
+        - low_business_penalty
+        - cannibalization_penalty
+    )
     return int(round(max(0.0, min(100.0, score))))
+
+
+def calculate_opportunity_score(page: GSCPageAnalysis, max_impressions: int = 1) -> int:
+    return seo_opportunity_score(page, max_impressions=max_impressions)
 
 
 def priority_label_for_score(analysis: GSCPageAnalysis) -> str:
@@ -1341,6 +1416,8 @@ def priority_label_for_score(analysis: GSCPageAnalysis) -> str:
 def action_type_for_analysis(analysis: GSCPageAnalysis) -> str:
     if analysis.cannibalization_group_id:
         return "cannibalization"
+    if analysis.business_value == "high":
+        return "business page"
     if is_snippet_opportunity(analysis):
         return "snippet"
     if 4 <= analysis.position <= 12:
@@ -1353,15 +1430,53 @@ def action_type_for_analysis(analysis: GSCPageAnalysis) -> str:
 
 
 def specific_recommendation_for_page(analysis: GSCPageAnalysis) -> str:
-    query = analysis.main_query or keyword_phrase_from_url(analysis.url)
-    if analysis.action_type == "snippet":
-        return f"Retravailler le title et la meta autour de « {query} » pour améliorer le CTR sans changer l'intention de la page."
-    if analysis.action_type == "internal linking":
-        return "Ajouter des liens internes depuis les pages déjà visibles et renforcer les sous-sections qui répondent à l'intention principale."
-    if analysis.action_type == "cannibalization":
+    return generate_page_recommendation(
+        page=analysis.url,
+        main_queries=[analysis.main_query] if analysis.main_query else [],
+        page_type=analysis.page_type,
+        business_value=analysis.business_value,
+        analysis=analysis,
+    )
+
+
+def generate_page_recommendation(
+    page: str,
+    main_queries: list[str] | None,
+    page_type: str,
+    business_value: str,
+    analysis: GSCPageAnalysis | None = None,
+) -> str:
+    query = (main_queries or [keyword_phrase_from_url(page)])[0] or keyword_phrase_from_url(page)
+    lower = strip_accents(f"{page} {query} {page_type}").lower()
+    if "tournoi-padel-p100" in lower:
+        return "Ajouter un bloc « Quel niveau pour jouer un P100 ? », un tableau points / inscription / classement, puis une FAQ sur les cuts, le partenaire, le prix d'inscription et la préparation du premier tournoi."
+    if "tournoi-padel-p500" in lower:
+        return "Clarifier le nombre de points, le niveau attendu et les conditions d'inscription, puis ajouter des liens vers les pages P100, P250 et le guide global des tournois."
+    if "tournoi" in lower and re.search(r"p\d{2,4}", lower):
+        level = (re.search(r"p\d{2,4}", lower) or re.search(r"p\d{2,4}", query.lower()))
+        label = level.group(0).upper() if level else "ce niveau"
+        return f"Structurer la page {label} autour du niveau attendu, des points, du format, des conditions d'inscription et des liens vers le guide global des tournois."
+    if "tenir-raquette-padel" in lower:
+        return "Ajouter des visuels de prise, une section sur la prise continentale, les erreurs fréquentes et des liens vers coups de base, service et raquette débutant."
+    if "pressurisateur" in lower:
+        return "Renforcer l'intention achat : critères de choix, modèles recommandés, limites réelles, puis liens vers balles padel et comparaisons Decathlon/Amazon si pertinentes."
+    if "chaussures-padel" in lower and "test-chaussures" not in lower:
+        return "Structurer la page autour des critères d'achat : semelle, maintien, amorti, surface et morphologie, puis lier vers les tests chaussures Kuikma, Asics, Nox et Joma."
+    if "raquette-padel" in lower and "/test-" not in lower:
+        return "Recentrer la page sur l'aide au choix : tableau par niveau, forme, mousse, poids et budget, puis liens vers les tests et comparatifs raquettes."
+    if "/test-" in lower or "test-" in lower:
+        return "Ajouter un verdict en haut de page, les profils de joueurs concernés, les limites du produit et des liens vers la page catégorie ou le comparatif correspondant."
+    if "sac-padel" in lower or "balles-padel" in lower:
+        return "Transformer la page en aide au choix avec critères d'achat, cas d'usage, erreurs fréquentes et liens vers les tests ou produits associés."
+    action_type = analysis.action_type if analysis is not None else ""
+    if action_type == "cannibalization":
         return analysis.cannibalization_recommendation or "Clarifier le rôle de chaque URL du cluster avant d'optimiser les contenus."
-    if analysis.business_value == "high":
-        return "Enrichir la page avec critères de choix, limites, comparaisons et liens vers les offres ou ressources utiles."
+    if action_type == "snippet":
+        return f"Réécrire le title autour de « {query} », puis faire porter la meta sur le bénéfice exact de la page et les éléments consultables dès l'arrivée."
+    if action_type == "internal linking":
+        return f"Créer des liens internes vers cette page depuis les contenus du même cluster avec des ancres proches de « {query} », puis renforcer les sections qui répondent aux sous-intentions visibles."
+    if business_value == "high":
+        return "Ajouter critères de décision, limites, comparaisons et liens de monétisation utiles afin de transformer la visibilité Google en clics business qualifiés."
     return "Garder en suivi GSC et prioriser seulement si les impressions ou la position progressent."
 
 
@@ -1497,7 +1612,7 @@ def write_csv(results: list[GSCPageAnalysis], output_path: str) -> Path:
                     "url": item.url,
                     "clicks": item.clicks,
                     "impressions": item.impressions,
-                    "ctr": format_ctr(item.ctr),
+                    "ctr": format_ctr_ratio(item.ctr),
                     "position": f"{item.position:.1f}",
                     "business_value": item.business_value,
                     "business_reason": item.business_reason,
@@ -1529,7 +1644,7 @@ def write_json(results: list[GSCPageAnalysis], output_path: str) -> Path:
     payload: list[dict[str, object]] = []
     for item in results:
         row = asdict(item)
-        row["ctr"] = format_ctr(item.ctr)
+        row["ctr"] = format_ctr_ratio(item.ctr)
         payload.append(row)
     with output_file.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
@@ -1554,6 +1669,8 @@ def write_executive_exports(
         write_dict_csv(folder / "queries_opportunities.csv", query_rows),
         write_dict_csv(folder / "snippets_rewrite.csv", snippet_rows),
         write_dict_csv(folder / "cannibalization_groups.csv", cannibalization_rows),
+        write_dict_csv(folder / "full_pages_export.csv", page_rows),
+        write_dict_csv(folder / "full_queries_export.csv", query_rows),
         write_dict_csv(folder / "pages_full_export.csv", page_rows),
         write_dict_csv(folder / "queries_full_export.csv", query_rows),
         write_dict_csv(folder / "snippets_full_export.csv", snippet_rows),
@@ -1578,7 +1695,7 @@ def pages_opportunity_export_row(item: GSCPageAnalysis) -> dict[str, object]:
         "url": item.url,
         "clicks": item.clicks,
         "impressions": item.impressions,
-        "ctr": format_ctr(item.ctr),
+        "ctr_recalculated": format_ctr_ratio(item.ctr),
         "position": f"{item.position:.2f}",
         "business_value": item.business_value,
         "opportunity_score": item.opportunity_score,
@@ -1597,7 +1714,7 @@ def queries_opportunity_export_row(query: GSCQueryData, results: list[GSCPageAna
         "query": query.query,
         "clicks": query.clicks,
         "impressions": query.impressions,
-        "ctr": format_ctr(query.ctr),
+        "ctr_recalculated": format_ctr_ratio(query.ctr),
         "position": f"{query.position:.2f}",
         "intent": probable_intent_from_keyword(query.query),
         "recommendation": recommendation,
@@ -1611,6 +1728,7 @@ def snippet_export_row(item: GSCPageAnalysis) -> dict[str, object]:
         page=item.url,
         main_query=item.main_query or keyword_phrase_from_url(item.url),
         page_type=item.page_type,
+        business_value=item.business_value,
         intent=probable_intent_from_keyword(item.main_query),
         gsc_data=asdict(item),
     )
@@ -1636,6 +1754,15 @@ def cannibalization_export_row(group: dict[str, Any]) -> dict[str, object]:
 
 
 def best_target_url_for_query(query: GSCQueryData, results: list[GSCPageAnalysis]) -> str:
+    query_slug = re.sub(r"[^a-z0-9]+", "-", strip_accents(query.query).lower()).strip("-")
+    if query_slug:
+        exact_matches = [
+            item.url
+            for item in results
+            if query_slug in re.sub(r"[^a-z0-9]+", "-", strip_accents(urlparse(item.url).path).lower())
+        ]
+        if exact_matches:
+            return sorted(exact_matches, key=len)[0]
     tokens = query_token_set(query.query)
     if not tokens:
         return ""
@@ -1780,6 +1907,8 @@ def build_report(
             "queries_opportunities.csv",
             "snippets_rewrite.csv",
             "cannibalization_groups.csv",
+            "full_pages_export.csv",
+            "full_queries_export.csv",
             "pages_full_export.csv",
             "queries_full_export.csv",
             "snippets_full_export.csv",
@@ -2051,7 +2180,8 @@ def query_token_set(query: str) -> set[str]:
     return {
         strip_accents(word).lower()
         for word in re.findall(r"[\w'-]+", query)
-        if len(word) > 3 and strip_accents(word).lower() not in stopwords
+        if (len(word) > 3 or re.fullmatch(r"p\d{2,4}", strip_accents(word).lower()))
+        and strip_accents(word).lower() not in stopwords
     }
 
 
@@ -2233,6 +2363,7 @@ def action_label_from_type(action_type: str) -> str:
         "snippet": "Snippet",
         "content refresh": "Contenu",
         "internal linking": "Maillage interne",
+        "business page": "Page business",
         "new content": "Nouveau contenu",
         "cannibalization": "Cannibalisation",
         "technical check": "Technique",
@@ -2299,44 +2430,16 @@ def impact_for_page(item: GSCPageAnalysis) -> str:
 
 
 def precise_actions_for_page(item: GSCPageAnalysis) -> list[str]:
-    actions: list[str] = []
-    keyword = item.main_query or keyword_phrase_from_url(item.url)
+    primary = specific_recommendation_for_page(item)
+    actions: list[str] = [primary]
     if is_dead_gsc_page(item):
         return [
             "vérifier si la page répond encore à une intention utile",
             "fusionner avec une page plus forte si le sujet est déjà couvert",
             "prévoir une redirection 301 ou un retrait propre si la page n’a plus de rôle",
         ]
-    if item.cannibalization_group_id:
-        actions.append(item.cannibalization_recommendation or "clarifier le rôle de cette URL dans son cluster")
-    if is_snippet_opportunity(item):
-        actions.extend(
-            [
-                f"réécrire le title autour de l’intention « {keyword} »",
-                "rendre la meta description plus concrète sur ce que l'internaute va trouver",
-                "aligner l’introduction avec la question principale de l’internaute",
-            ]
-        )
-    if 4 <= item.position <= 10:
-        actions.extend(
-            [
-                "ajouter une FAQ courte sur les questions récurrentes du sujet",
-                "mettre à jour les informations clés et les exemples",
-                "ajouter des liens internes depuis les pages thématiquement proches",
-            ]
-        )
-    elif 10 < item.position <= 20:
-        actions.extend(
-            [
-                "enrichir la page avec une structure plus complète",
-                "créer des liens internes depuis les contenus déjà visibles",
-                "traiter les sous-intentions manquantes dans des sections dédiées",
-            ]
-        )
     if item.click_delta is not None and item.click_delta < -10:
         actions.append("contrôler la fraîcheur du contenu et les changements visibles dans les résultats Google")
-    if item.business_value == "high":
-        actions.append("mettre en avant les critères d'achat, les limites et les liens de monétisation utiles")
     return (list(dict.fromkeys(actions)) or ["garder la page en suivi et réévaluer lors du prochain export GSC"])[:5]
 
 
@@ -2355,6 +2458,7 @@ def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
         page=item.url,
         main_query=keyword,
         page_type=item.page_type,
+        business_value=item.business_value,
         intent=probable_intent_from_keyword(keyword),
         gsc_data={"clicks": item.clicks, "impressions": item.impressions, "ctr": item.ctr, "position": item.position},
     )
@@ -2374,34 +2478,44 @@ def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
 def generate_snippet_recommendation(
     page: str,
     main_query: str,
-    page_type: str,
-    intent: str,
+    page_type: str = "",
+    business_value: str = "",
     gsc_data: dict[str, Any] | None = None,
+    intent: str = "",
 ) -> dict[str, str]:
     query = clean_query_for_snippet(main_query or keyword_phrase_from_url(page))
-    lower = strip_accents(f"{page} {query} {page_type} {intent}").lower()
+    lower = strip_accents(f"{page} {query} {page_type} {business_value} {intent}").lower()
     if "p100" in lower or "p250" in lower or "p500" in lower:
         level = "P100" if "p100" in lower else "P250" if "p250" in lower else "P500"
         title = f"Tournoi {level} padel : niveau, points et inscription"
         meta = f"Comprenez le niveau requis en {level}, les points à gagner, les règles d'inscription et les repères pour préparer votre tournoi."
+    elif "par 4" in lower or "par-4" in lower:
+        title = "Par 4 au padel : réussir le smash qui sort du terrain"
+        meta = "Placement, hauteur de balle, timing et erreurs fréquentes : les repères pour tenter un par 4 plus proprement en match."
     elif "tenir" in lower and "raquette" in lower:
         title = "Comment tenir sa raquette de padel sans se crisper"
         meta = "Placement de la main, prise continentale, erreurs fréquentes : les bases pour mieux tenir votre raquette et gagner en contrôle."
+    elif "agustin" in lower or "tapia" in lower:
+        title = "Agustín Tapia : profil, palmarès et style de jeu"
+        meta = "Découvrez le parcours d'Agustín Tapia, son style sur le circuit pro, ses forces en match et les repères clés pour suivre sa carrière."
     elif "pressurisateur" in lower:
         title = "Meilleur pressurisateur de balles de padel : comparatif"
         meta = "Comparez les pressurisateurs utiles pour prolonger la durée de vie des balles, avec critères d'achat, limites et conseils pratiques."
+    elif "chaussure" in lower:
+        title = "Chaussures de padel : modèles, critères et erreurs à éviter"
+        meta = "Semelle, maintien, confort, surface de jeu : les critères à vérifier avant de choisir une paire de chaussures de padel."
     elif any(term in lower for term in ("meilleur", "comparatif", "avis", "test", "raquette", "chaussure", "balle", "sac")):
         title = title_case_snippet(f"{query} : critères, avis et choix utiles")
-        meta = f"Comparez les options autour de {query}, avec les critères à vérifier, les limites à connaître et les profils pour lesquels elles conviennent."
+        meta = f"Comparez les options autour de {query}, avec les critères de choix, les limites à connaître et les profils pour lesquels elles conviennent."
     elif lower.startswith("comment") or "comment " in lower:
         title = title_case_snippet(f"{query} : méthode simple et erreurs à éviter")
         meta = f"Retrouvez les gestes, repères et erreurs fréquentes pour {query.replace('comment ', '')}, avec une approche concrète à appliquer sur le terrain."
     elif "tournoi" in lower:
         title = title_case_snippet(f"{query} : règles, niveau et inscription")
-        meta = f"Faites le point sur {query} : format, niveau attendu, inscription, points et éléments à vérifier avant de vous engager."
+        meta = f"Faites le point sur {query} : format, niveau attendu, inscription, points et repères utiles avant de vous engager."
     else:
-        title = title_case_snippet(f"{query} : réponse précise et exemples utiles")
-        meta = f"Comprenez {query} avec une réponse structurée, des exemples concrets et les points à vérifier avant de passer à l'action."
+        title = title_case_snippet(f"{query} : repères pratiques et erreurs à éviter")
+        meta = f"Comprenez {query} avec une réponse structurée, des exemples concrets et les critères utiles pour décider quoi faire ensuite."
     title = sanitize_snippet_text(trim_to_length(title, 60))
     meta = sanitize_snippet_text(trim_to_length(meta, 160))
     if len(meta) < 120:
@@ -2409,7 +2523,7 @@ def generate_snippet_recommendation(
     return {
         "title": title,
         "meta": meta,
-        "reason": f"Aligner le résultat Google sur l'intention « {query} » avec une promesse concrète et vérifiable.",
+        "reason": f"Faire correspondre le résultat Google à l'intention « {query} » avec un angle précis et vérifiable.",
     }
 
 
@@ -2432,11 +2546,17 @@ def trim_to_length(value: str, max_length: int) -> str:
 def sanitize_snippet_text(value: str) -> str:
     cleaned = value
     replacements = {
+        "conseils et points clés": "repères pratiques",
+        "conseils et points cles": "repères pratiques",
         "guide clair": "réponse précise",
         "points clés": "repères utiles",
         "points cles": "repères utiles",
+        "points à vérifier": "critères utiles",
+        "points a verifier": "critères utiles",
         "Découvrez les informations essentielles": "Retrouvez les informations utiles",
         "conseils pour avancer plus simplement": "repères pour décider quoi faire ensuite",
+        "promesse plus concrète": "angle plus précis",
+        "promesse plus concrete": "angle plus précis",
     }
     for bad, good in replacements.items():
         cleaned = re.sub(re.escape(bad), good, cleaned, flags=re.I)
@@ -2571,8 +2691,8 @@ def render_executive_report(report: dict[str, object]) -> str:
     priority_cards = render_priority_page_cards(report.get("priority_pages", []))  # type: ignore[arg-type]
     queries = render_executive_query_opportunities(report.get("top_query_opportunities", []))  # type: ignore[arg-type]
     snippets = render_snippet_section(report.get("snippet_pages", []))  # type: ignore[arg-type]
-    breakthrough = render_breakthrough_section(report.get("breakthrough_pages", []))  # type: ignore[arg-type]
     business = render_business_section(report.get("business_opportunities", []))  # type: ignore[arg-type]
+    cannibalization = render_cannibalization_groups_section(report.get("cannibalization_groups", []))  # type: ignore[arg-type]
     annexes = render_annex_links(report.get("annex_files", []))  # type: ignore[arg-type]
     source_notes = "".join(f"<li>{html.escape(str(note))}</li>" for note in report.get("source_notes", []))  # type: ignore[union-attr]
     mode_label = str(report.get("report_mode_label") or "Current period only")
@@ -2584,6 +2704,7 @@ def render_executive_report(report: dict[str, object]) -> str:
             ("pages-prioritaires", "Pages"),
             ("requetes", "Requêtes"),
             ("snippets", "Snippets"),
+            ("cannibalisation", "Cannibalisation"),
             ("business", "Business"),
             ("plan", "30 jours"),
             ("methodologie", "Méthode"),
@@ -2651,6 +2772,11 @@ def render_executive_report(report: dict[str, object]) -> str:
     .business-note {{ margin:10px 0 0; color:var(--muted); }}
     .annex-list {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
     .annex-item {{ background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; font-family:"Helvetica Neue", Arial, sans-serif; font-weight:700; }}
+    .compact-table {{ width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; font-family:"Helvetica Neue", Arial, sans-serif; font-size:11px; }}
+    .compact-table th,.compact-table td {{ border-bottom:1px solid var(--border); padding:7px 8px; text-align:left; vertical-align:top; }}
+    .compact-table th {{ background:var(--accent-soft); color:var(--accent); font-size:10px; text-transform:uppercase; }}
+    .compact-table tr:last-child td {{ border-bottom:0; }}
+    .compact-table .url-cell {{ overflow-wrap:anywhere; max-width:220px; }}
     .empty-state {{ background:var(--surface); border:1px dashed var(--border); border-radius:8px; padding:14px; color:var(--muted); }}
     @media print {{
       @page {{ size:A4; margin:14mm 13mm; }}
@@ -2660,6 +2786,7 @@ def render_executive_report(report: dict[str, object]) -> str:
       .cover-page {{ margin:0; min-height:267mm; background:#124E78!important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
       .report-section {{ break-before:auto; page-break-before:auto; }}
       .page-card,.snippet-card,.appendix-card,.query-card,.priority-item {{ break-inside:avoid; page-break-inside:avoid; }}
+      .compact-table tr {{ break-inside:avoid; page-break-inside:avoid; }}
       .kpi-grid {{ grid-template-columns:repeat(3,minmax(0,1fr)); }}
       h1 {{ font-size:42px; }}
     }}
@@ -2698,7 +2825,7 @@ def render_executive_report(report: dict[str, object]) -> str:
     <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>Top 10 pages prioritaires</h2><p class="section-intro">Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business.</p></div>{priority_cards}</section>
     <section class="report-section" id="requetes"><div class="section-header"><h2>Top 20 requêtes à exploiter</h2><p class="section-intro">Regroupées par intention d’action : snippet/title, FAQ, section, contenu, maillage ou faible valeur.</p></div>{queries}</section>
     {snippets}
-    {breakthrough}
+    {cannibalization}
     <section class="report-section" id="business"><div class="section-header"><h2>Business opportunities</h2><p class="section-intro">Pages à forte valeur business : équipement, comparatifs, tests, affiliation, leads ou produits numériques.</p></div>{business}</section>
     {render_action_plan_section()}
     {render_methodology_section(str(report.get("report_mode") or "current_period_only"))}
@@ -3531,12 +3658,7 @@ def render_client_page_card(page: dict[str, object]) -> str:
         "</div>"
         for label, value in dict(page.get("metrics", {})).items()
     )
-    actions = "".join(f"<li>{html.escape(str(action))}</li>" for action in page.get("actions", []))  # type: ignore[arg-type]
     action_labels = "".join(f"<span class='type-tag'>{html.escape(str(label))}</span>" for label in page.get("action_type_labels", []))  # type: ignore[arg-type]
-    overlap = ""
-    if page.get("overlap_queries"):
-        queries = " · ".join(str(query) for query in page["overlap_queries"])  # type: ignore[index]
-        overlap = f"<p class='query-note'>Cannibalisation à vérifier sur: {html.escape(queries)}</p>"
     business = (
         "<div class='insight'><span class='mini-label'>Valeur business</span>"
         f"<strong>{html.escape(str(page.get('business_value', '')))} · {html.escape(str(page.get('monetization_possible', '')))}</strong></div>"
@@ -3564,17 +3686,12 @@ def render_client_page_card(page: dict[str, object]) -> str:
         </div>
         <div class="page-constat"><span class="constat-label">Constat</span>{html.escape(str(page.get("diagnostic", "")))}</div>
         {recommendation}
-        <div class="page-actions">
-          <div class="actions-label">Ce qu'on recommande</div>
-          <ul class="actions-list">{actions}</ul>
-        </div>
         <div class="insight-grid">
           <div class="insight"><span class="mini-label">Effort estimé</span><strong>{html.escape(str(page.get("effort", "")))}</strong></div>
           {business}
           <div class="insight"><span class="mini-label">Type d'action</span><div class="chip-row">{action_labels}</div></div>
           <div class="insight"><span class="mini-label">Impact attendu</span><strong>{html.escape(str(page.get("impact", "")))}</strong></div>
         </div>
-        {overlap}
       </article>
 """
 
@@ -3658,30 +3775,26 @@ def render_query_sections(sections: list[dict[str, object]], has_queries: bool) 
 def render_executive_query_opportunities(rows: list[dict[str, object]]) -> str:
     if not rows:
         return render_empty_state("Export Requêtes non fourni ou aucune requête exploitable détectée.")
-    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    table_rows = []
     for row in rows[:20]:
-        grouped[str(row.get("recommendation") or "section à ajouter")].append(row)
-    cards: list[str] = []
-    order = ["snippet/title", "FAQ", "section à ajouter", "nouveau contenu", "maillage interne", "à ignorer / faible valeur"]
-    for group in order:
-        group_rows = grouped.get(group, [])
-        if not group_rows:
-            continue
-        body = "".join(
-            "<article class='appendix-card'>"
-            f"<h3>{html.escape(str(row.get('query', '')))}</h3>"
-            "<div class='data-grid'>"
-            f"{render_data_item('Clics', row.get('clicks', ''))}"
-            f"{render_data_item('Impressions', row.get('impressions', ''))}"
-            f"{render_data_item('CTR', row.get('ctr', ''))}"
-            f"{render_data_item('Position', row.get('position', ''))}"
-            f"{render_data_item('Cible', row.get('target_url', '') or 'à valider')}"
-            "</div>"
-            "</article>"
-            for row in group_rows
+        table_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('recommendation', '')))}</td>"
+            f"<td>{html.escape(str(row.get('query', '')))}</td>"
+            f"<td>{html.escape(str(row.get('clicks', '')))}</td>"
+            f"<td>{html.escape(str(row.get('impressions', '')))}</td>"
+            f"<td>{html.escape(str(row.get('ctr', '')))}</td>"
+            f"<td>{html.escape(str(row.get('position', '')))}</td>"
+            f"<td class='url-cell'>{html.escape(str(row.get('target_url', '') or 'à valider'))}</td>"
+            "</tr>"
         )
-        cards.append(f"<div class='query-card'><h3>{html.escape(group)}</h3>{body}</div>")
-    return "".join(cards)
+    return (
+        "<table class='compact-table'><thead><tr>"
+        "<th>Action</th><th>Requête</th><th>Clics</th><th>Impr.</th><th>CTR</th><th>Pos.</th><th>Cible</th>"
+        "</tr></thead><tbody>"
+        f"{''.join(table_rows)}"
+        "</tbody></table>"
+    )
 
 
 def render_query_table(rows: object) -> str:
@@ -3771,23 +3884,61 @@ def render_breakthrough_section(pages: list[dict[str, object]]) -> str:
 def render_business_section(pages: list[dict[str, object]]) -> str:
     if not pages:
         return render_empty_state("Aucune page high business value ne ressort clairement dans cet export.")
-    cards = []
+    rows = []
     for page in pages[:10]:
-        cards.append(
-            "<article class='appendix-card'>"
-            f"<h3><a href='{html.escape(str(page.get('url', '')))}'>{html.escape(str(page.get('slug', '')))}</a></h3>"
-            "<div class='data-grid'>"
-            f"{render_data_item('Valeur', page.get('business_value', ''))}"
-            f"{render_data_item('Monétisation', page.get('monetization_possible', ''))}"
-            f"{render_data_item('Score', page.get('opportunity_score', ''))}"
-            f"{render_data_item('Requête', page.get('main_query', ''))}"
-            f"{render_data_item('Action', ', '.join(page.get('action_type_labels', [])) if isinstance(page.get('action_type_labels'), list) else '')}"
-            "</div>"
-            f"<p class='business-note'>{html.escape(str(page.get('business_reason', '')))}</p>"
-            f"<p class='business-note'>{html.escape(str(page.get('recommendation', '')))}</p>"
-            "</article>"
+        action = ", ".join(page.get("action_type_labels", [])) if isinstance(page.get("action_type_labels"), list) else ""
+        rows.append(
+            "<tr>"
+            f"<td class='url-cell'><a href='{html.escape(str(page.get('url', '')))}'>{html.escape(str(page.get('slug', '')))}</a></td>"
+            f"<td>{html.escape(str(page.get('business_value', '')))}</td>"
+            f"<td>{html.escape(str(page.get('monetization_possible', '')))}</td>"
+            f"<td>{html.escape(str(page.get('opportunity_score', '')))}</td>"
+            f"<td>{html.escape(str(page.get('main_query', '')))}</td>"
+            f"<td>{html.escape(action)}</td>"
+            f"<td>{html.escape(str(page.get('recommendation', '')))}</td>"
+            "</tr>"
         )
-    return f"<div class='data-card-list'>{''.join(cards)}</div>"
+    return (
+        "<table class='compact-table'><thead><tr>"
+        "<th>Page</th><th>Valeur</th><th>Monétisation</th><th>Score</th><th>Requête</th><th>Action</th><th>Recommandation</th>"
+        "</tr></thead><tbody>"
+        f"{''.join(rows)}"
+        "</tbody></table>"
+    )
+
+
+def render_cannibalization_groups_section(groups: list[dict[str, Any]]) -> str:
+    visible_groups = [group for group in groups if str(group.get("confidence") or "") in {"medium", "high"}][:5]
+    if not visible_groups:
+        body = render_empty_state("Aucun groupe de cannibalisation suffisamment fiable à afficher dans le PDF client.")
+    else:
+        cards = []
+        for group in visible_groups:
+            urls = [str(url) for url in group.get("urls") or []][:8]
+            shared = [str(query) for query in group.get("shared_queries") or []][:6]
+            url_items = "".join(f"<li>{html.escape(url)}</li>" for url in urls)
+            shared_label = " · ".join(shared) if shared else "à valider avec l'export Requêtes"
+            cards.append(
+                "<article class='appendix-card'>"
+                f"<h3>{html.escape(str(group.get('topic') or group.get('group_id') or 'Cluster à valider'))}</h3>"
+                "<div class='data-grid'>"
+                f"{render_data_item('Groupe', group.get('group_id', ''))}"
+                f"{render_data_item('Confiance', group.get('confidence', ''))}"
+                f"{render_data_item('Requêtes partagées', shared_label)}"
+                f"{render_data_item('URLs', len(urls))}"
+                f"{render_data_item('Action', 'clarification du cluster')}"
+                "</div>"
+                f"<ul class='actions'>{url_items}</ul>"
+                f"<p class='business-note'>{html.escape(str(group.get('recommendation') or 'Clarifier les rôles des URLs avant optimisation.'))}</p>"
+                "</article>"
+            )
+        body = f"<div class='data-card-list'>{''.join(cards)}</div>"
+    return f"""
+    <section class="report-section" id="cannibalisation">
+      <div class="section-header"><h2>Cannibalisation potentielle</h2><p class="section-intro">Seulement les groupes précis et exploitables. Les alertes faibles restent dans les CSV.</p></div>
+      {body}
+    </section>
+"""
 
 
 def render_action_plan_section() -> str:
@@ -3866,7 +4017,7 @@ def render_annex_links(files: list[str]) -> str:
     items = "".join(f"<div class='annex-item'>{html.escape(str(filename))}</div>" for filename in files)
     return f"""
     <section class="report-section appendix" id="annexes">
-      <div class="section-header"><h2>Annexes séparées</h2><p class="section-intro">Le PDF principal reste court. Les tableaux complets sont exportés à côté pour l'exécution.</p></div>
+      <div class="section-header"><h2>Annexes séparées</h2><p class="section-intro">Les tableaux complets sont fournis en annexes CSV. Le PDF principal reste volontairement court pour la décision.</p></div>
       <div class="annex-list">{items}</div>
     </section>
 """
@@ -4054,6 +4205,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--appareils", help="Export GSC appareils")
     parser.add_argument("--gsc-folder", help="Dossier avec exports GSC")
     parser.add_argument("--mode", choices=["full", "executive"], default="full")
+    parser.add_argument("--site-context", default="affiliate_media")
+    parser.add_argument("--export-csv", default="true", choices=["true", "false"])
     parser.add_argument("-o", "--output", default="gsc_report.csv", help="CSV de sortie")
     parser.add_argument("--html", dest="html_output", help="Rapport HTML")
     parser.add_argument("--json", dest="json_output", help="Rapport JSON")

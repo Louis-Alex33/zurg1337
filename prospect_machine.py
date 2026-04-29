@@ -168,6 +168,8 @@ def build_parser() -> argparse.ArgumentParser:
     gsc_parser.add_argument("--domain", default="", help="Alias for --site")
     gsc_parser.add_argument("--url", default="", help="Alias used to infer the site label")
     gsc_parser.add_argument("--lang", choices=["fr", "en"], default="fr", help="Reserved for report language")
+    gsc_parser.add_argument("--site-context", default="affiliate_media", help="Business context used for prioritization")
+    gsc_parser.add_argument("--export-csv", default="true", choices=["true", "false"], help="Write annex CSV files")
     gsc_parser.add_argument("--gsc-folder", help="Folder with GSC exports")
     gsc_parser.add_argument("--mode", choices=["full", "executive"], default="full", help="Report mode")
     gsc_parser.add_argument("--html", dest="html_output", help="HTML output path")
@@ -341,6 +343,8 @@ def main(argv: list[str] | None = None) -> int:
                 niche_stopwords=args.niche_stopwords,
                 auto_niche_stopwords=args.auto_niche_stopwords,
                 mode=args.mode,
+                site_context=args.site_context,
+                export_csv=args.export_csv == "true",
             )
             high = sum(1 for item in results if item.priority == "HIGH")
             medium = sum(1 for item in results if item.priority == "MEDIUM")
