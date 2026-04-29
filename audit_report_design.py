@@ -656,7 +656,7 @@ def prepare_audit_report_context(
     signal_principal = str(data.get("signal_principal") or build_primary_signal(summary, business_signals, lang=active_lang))
     pages_prioritaires = normalize_priority_pages(data.get("pages_prioritaires") or top_pages, pages_by_url, lang=active_lang)
     urls_crawlees = normalize_crawled_urls(data.get("urls_crawlees") or pages)
-    enrich_priority_pages_with_maillage(pages_prioritaires, urls_crawlees, domain)
+    enrich_priority_pages_with_maillage(pages_prioritaires, urls_crawlees, domain, lang=active_lang)
     urls_crawlees = generate_seo_suggestions_for_priority_pages(urls_crawlees, pages_prioritaires)
     perf = build_perf_data(urls_crawlees)
     analyste_nom = str(data.get("analyste_nom") or DEFAULT_ANALYSTE_NOM).strip()
@@ -1011,7 +1011,10 @@ def render_priority_pages(context: dict[str, Any]) -> str:
         nb_liens = get_int(page, "nb_liens_internes", 0)
         plural = "s" if nb_liens != 1 else ""
         link_label = t("internal_link") if nb_liens == 1 else t("internal_links")
-        maillage_label = str(page.get("maillage_label") or classify_maillage(nb_liens))
+        maillage_label = translate_maillage_label(
+            str(page.get("maillage_label") or classify_maillage(nb_liens)),
+            context_lang(context),
+        )
         maillage_alert = (
             f'<span class="fiche-maillage-alerte"> ⚠ {escape("No page links to this one" if context_lang(context) == "en" else "Aucune page ne pointe vers celle-ci")}</span>'
             if nb_liens == 0
@@ -1935,24 +1938,41 @@ def enrich_priority_pages_with_maillage(
     pages_prioritaires: list[dict[str, Any]],
     urls_crawlees: list[dict[str, Any]],
     domain: str,
+    lang: str = "fr",
 ) -> None:
+    active_lang = sanitize_report_language(lang)
     link_map = build_internal_link_map(urls_crawlees, domain)
     for page in pages_prioritaires:
         path = normalized_url_path(str(page.get("url") or ""), domain)
         nb = link_map.get(path, get_int(page, "incoming_links_observed", 0))
         page["nb_liens_internes"] = nb
-        page["maillage_label"] = classify_maillage(nb)
+        page["maillage_label"] = classify_maillage(nb, lang=active_lang)
         page["maillage_class"] = classify_maillage_class(nb)
 
 
-def classify_maillage(nb_liens: int) -> str:
+def classify_maillage(nb_liens: int, lang: str = "fr") -> str:
+    is_en = sanitize_report_language(lang) == "en"
     if nb_liens == 0:
-        return "isolée"
+        return "isolated" if is_en else "isolée"
     if nb_liens < 3:
-        return "faible"
+        return "weak" if is_en else "faible"
     if nb_liens < 8:
-        return "correct"
-    return "bien reliée"
+        return "healthy" if is_en else "correct"
+    return "well linked" if is_en else "bien reliée"
+
+
+def translate_maillage_label(value: str, lang: str = "fr") -> str:
+    if sanitize_report_language(lang) != "en":
+        return value
+    labels = {
+        "isolée": "isolated",
+        "isolee": "isolated",
+        "faible": "weak",
+        "correct": "healthy",
+        "bien reliée": "well linked",
+        "bien reliee": "well linked",
+    }
+    return labels.get(value.strip().lower(), value)
 
 
 def classify_maillage_class(nb_liens: int) -> str:
@@ -1961,7 +1981,7 @@ def classify_maillage_class(nb_liens: int) -> str:
         "faible": "score-mid",
         "correct": "score-high",
         "bien reliée": "score-high",
-    }[classify_maillage(nb_liens)]
+    }[classify_maillage(nb_liens, lang="fr")]
 
 
 def generate_seo_suggestions_for_priority_pages(
@@ -2372,9 +2392,54 @@ def translate_issue(value: str, lang: str = "fr") -> str:
         "Canonical à vérifier": "Canonical to check",
         "Trop de redirections detectees sur la page": "Too many redirects detected on the page",
         "Timeout detecte pendant le crawl": "Timeout detected during the crawl",
+        "Date visible à actualiser": "Visible date to update",
+        "date visible à actualiser": "visible date to update",
+        "Titre Google absent sur la page analysée": "Missing Google title on the analyzed page",
     }
     translated = replacements.get(value, value)
     translated = re.sub(r"HTTP (\d+) detecte sur la page", r"HTTP \1 detected on the page", translated)
+    translated = translated.replace("Date visible à actualiser", "Visible date to update")
+    translated = translated.replace("date visible à actualiser", "visible date to update")
+    translated = re.sub(
+        r"(\d+) redirection\(s\) observée\(s\) avant la page finale",
+        r"\1 redirect(s) observed before the final page",
+        translated,
+    )
+    translated = re.sub(
+        r"Titre Google probablement trop court \((\d+) caractères\)",
+        r"Google title is probably too short (\1 characters)",
+        translated,
+    )
+    translated = re.sub(
+        r"Titre Google probablement trop long \((\d+) caractères\)",
+        r"Google title is probably too long (\1 characters)",
+        translated,
+    )
+    translated = re.sub(
+        r"Temps de chargement observé élevé \(([^)]+)\)",
+        r"High observed load time (\1)",
+        translated,
+    )
+    translated = re.sub(
+        r"Description Google probablement trop courte \((\d+) caractères\)",
+        r"Google description is probably too short (\1 characters)",
+        translated,
+    )
+    translated = re.sub(
+        r"Description Google probablement trop longue \((\d+) caractères\)",
+        r"Google description is probably too long (\1 characters)",
+        translated,
+    )
+    translated = re.sub(
+        r"(\d+) image\(s\) sans texte alternatif repérée\(s\)",
+        r"\1 image(s) without alt text found",
+        translated,
+    )
+    translated = re.sub(
+        r"(\d+) titres principaux repérés sur la page",
+        r"\1 main headings found on the page",
+        translated,
+    )
     return translated
 
 

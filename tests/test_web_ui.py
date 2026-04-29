@@ -464,6 +464,22 @@ class WebUITests(unittest.TestCase):
                     "weak_internal_linking_pages": 3,
                     "dated_content_signals": 1
                   },
+                  "pages": [
+                    {
+                      "url": "https://example.com/",
+                      "internal_links_out": ["https://example.com/blog/test"]
+                    },
+                    {
+                      "url": "https://example.com/blog/test",
+                      "title": "Test Page With A Long Google Title",
+                      "word_count": 180,
+                      "issues": [
+                        "1 redirection(s) observée(s) avant la page finale",
+                        "Titre Google probablement trop long (71 caractères)",
+                        "Date visible à actualiser"
+                      ]
+                    }
+                  ],
                   "business_priority_signals": [{"key": "dated_content_signals", "signal": "Contenus qui paraissent datés", "severity": "HIGH", "count": 1}],
                   "top_pages_to_rework": [{"url": "https://example.com/blog/test", "priority_score": 6, "word_count": 180, "depth": 2, "reasons": ["date visible à actualiser"], "confidence": "medium"}],
                   "dated_content_signals": [{"url": "https://example.com/blog/test", "references": ["Date visible dans le titre: 2024"]}]
@@ -489,7 +505,12 @@ class WebUITests(unittest.TestCase):
         self.assertIn("lang=en", page)
         self.assertIn(">FR</a>", page)
         self.assertIn(">EN</a>", page)
+        self.assertIn("180 words, 1 redirect(s) observed before the final page, Google title is probably too long (71 characters)", page)
+        self.assertIn("— weak", page)
         self.assertNotIn("Synthèse exécutive", page)
+        self.assertNotIn("observée(s) avant la page finale", page)
+        self.assertNotIn("Titre Google probablement trop long", page)
+        self.assertNotIn("Date visible à actualiser", page)
 
     def test_render_file_page_for_audit_json_supports_portfolio_variant(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
