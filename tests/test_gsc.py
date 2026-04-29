@@ -7,11 +7,15 @@ from zipfile import ZipFile
 
 from gsc import (
     analyze_pages,
+    build_report,
     derive_auto_stopwords,
     detect_possible_query_overlap,
     estimate_recoverable_clicks,
+    load_appareils,
+    load_pays,
     parse_pages_csv,
     parse_queries_csv,
+    render_report,
     run_gsc_analysis,
 )
 from models import GSCPageAnalysis, GSCPageData, GSCQueryData
@@ -38,8 +42,68 @@ class GSCAnalysisTests(unittest.TestCase):
         gain, label = estimate_recoverable_clicks(analysis)
 
         self.assertIsNotNone(gain)
-        self.assertIn("periode analysee", label)
+        self.assertIn("période analysée", label)
         self.assertNotIn("mois", label.lower())
+
+    def test_build_report_deduplicates_urls_across_sections(self) -> None:
+        shared = GSCPageAnalysis(
+            url="https://example.com/tournoi-padel-p100/",
+            clicks=5,
+            impressions=1000,
+            ctr=0.005,
+            position=8.0,
+            click_delta=-20,
+            impression_delta=-200,
+            position_delta=2.0,
+            score=72,
+            priority="HIGH",
+            actions=[
+                "Revoir title et méta description pour mieux convertir les impressions",
+                "Revoir title et méta description pour mieux convertir les impressions",
+                "Densifier le contenu avec sections, FAQ et signaux de fraîcheur",
+            ],
+            estimated_recoverable_clicks=55,
+            impact_label="+55 clics récupérables estimés sur la période analysée si la page gagne environ 3 positions",
+            possible_overlap_queries=["tournoi padel"],
+        )
+        near = GSCPageAnalysis(
+            url="https://example.com/guide-raquette/",
+            clicks=10,
+            impressions=180,
+            ctr=0.055,
+            position=11.0,
+            score=32,
+            priority="LOW",
+            actions=["Renforcer fortement le contenu et le maillage interne"],
+            estimated_recoverable_clicks=12,
+        )
+
+        report = build_report([shared, near])
+        all_urls = [page["url"] for section in report["sections"] for page in section["pages"]]
+
+        self.assertEqual(len(all_urls), len(set(all_urls)))
+        self.assertIn("https://example.com/tournoi-padel-p100/", all_urls)
+
+    def test_build_report_deduplicates_actions_per_page(self) -> None:
+        item = GSCPageAnalysis(
+            url="https://example.com/title-test/",
+            clicks=2,
+            impressions=600,
+            ctr=0.003,
+            position=9.0,
+            score=70,
+            priority="HIGH",
+            actions=[
+                "Revoir title et méta description pour mieux convertir les impressions",
+                "Revoir title et méta description pour mieux convertir les impressions",
+            ],
+            estimated_recoverable_clicks=30,
+        )
+
+        report = build_report([item])
+        for section in report["sections"]:
+            for page in section["pages"]:
+                self.assertEqual(len(page["actions"]), len(set(page["actions"])))
 
     def test_analyze_pages_sets_priorities(self) -> None:
         current = parse_pages_csv("tests/fixtures/pages_recent.csv")
@@ -127,10 +191,15 @@ class GSCAnalysisTests(unittest.TestCase):
 
             report = output_html.read_text(encoding="utf-8")
 
-        self.assertIn("Plan d'action GSC - Example", report)
-        self.assertIn("1. Pages a traiter en premier", report)
-        self.assertIn("3. Snippets a retravailler", report)
-        self.assertIn("Export Pages precedent: fourni", report)
+        self.assertIn("Rapport SEO — Example", report)
+        self.assertIn("Opportunités prioritaires", report)
+        self.assertIn("Résultats Google à améliorer", report)
+        self.assertIn("Export Pages précédent: fourni", report)
+        self.assertIn("Exporter en PDF", report)
+        self.assertIn("@media print", report)
+        self.assertNotIn("ACTION CONSEILLEE", report)
+        self.assertNotIn("PRIORITE", report)
+        self.assertNotIn("Snippets à retravailler", report)
 
     def test_run_gsc_analysis_accepts_full_search_console_zip(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -152,6 +221,7 @@ class GSCAnalysisTests(unittest.TestCase):
                     "guide padel,10,800,1.25%,7\n",
                 )
                 zip_file.writestr("Pays.csv", "Pays,Clics,Impressions,CTR,Position\nFrance,1,2,50%,1\n")
+                zip_file.writestr("Appareils.csv", "Appareil,Clics,Impressions,CTR,Position\nMobile,1,2,50%,1\n")
 
             results = run_gsc_analysis(
                 current_csv=str(archive),
@@ -164,7 +234,56 @@ class GSCAnalysisTests(unittest.TestCase):
 
         self.assertEqual(len(results), 2)
         self.assertTrue(csv_exists)
-        self.assertIn("Export Requetes: fourni", report)
+        self.assertIn("Export Requêtes: fourni", report)
+        self.assertIn("Origine du trafic", report)
+        self.assertIn("France", report)
+        self.assertIn("Mobile", report)
+
+    def test_missing_optional_gsc_csvs_do_not_crash_report_rendering(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pages_csv = root / "Pages.csv"
+            pages_csv.write_text(
+                "Page,Clicks,Impressions,CTR,Position\n"
+                "https://example.com/guide,4,100,4%,12\n",
+                encoding="utf-8",
+            )
+
+            report = build_report(
+                pages_csv,
+                graphique_csv=root / "Graphique.csv",
+                pays_csv=root / "Pays.csv",
+                appareils_csv=root / "Appareils.csv",
+            )
+            html = render_report(report)
+
+        self.assertIsNotNone(html)
+        self.assertNotIn("Aucun élément prioritaire dans cette section", html)
+
+    def test_dimension_loaders_sort_and_limit_data(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pays_csv = root / "Pays.csv"
+            appareils_csv = root / "Appareils.csv"
+            pays_csv.write_text(
+                "Pays,Clics,Impressions,CTR,Position\n"
+                "Canada,49,100,49%,2\n"
+                "France,1891,2000,94.55%,1\n"
+                "Belgique,167,300,55.6%,1.5\n",
+                encoding="utf-8",
+            )
+            appareils_csv.write_text(
+                "Appareil,Clics,Impressions,CTR,Position\n"
+                "Ordinateur,653,1000,65.3%,2\n"
+                "Mobile,1636,2000,81.8%,1\n",
+                encoding="utf-8",
+            )
+
+            pays = load_pays(str(pays_csv))
+            appareils = load_appareils(str(appareils_csv))
+
+        self.assertEqual(pays[0]["pays"], "France")
+        self.assertEqual(appareils[0]["appareil"], "Mobile")
 
 
 if __name__ == "__main__":

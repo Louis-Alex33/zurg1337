@@ -135,11 +135,21 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
             ).encode("utf-8") + payload
             message = BytesParser(policy=default).parsebytes(raw_message)
             form: dict[str, str] = {}
-            upload_fields = {"current_upload", "previous_upload", "queries_upload"}
+            upload_fields = {
+                "current_upload",
+                "previous_upload",
+                "queries_upload",
+                "graphique_upload",
+                "pays_upload",
+                "appareils_upload",
+            }
             upload_targets = {
                 "current_upload": "current_csv",
                 "previous_upload": "previous_csv",
                 "queries_upload": "queries_csv",
+                "graphique_upload": "graphique_csv",
+                "pays_upload": "pays_csv",
+                "appareils_upload": "appareils_csv",
             }
             for part in message.iter_parts():
                 name = part.get_param("name", header="content-disposition")

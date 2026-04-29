@@ -197,7 +197,7 @@ class WebUITests(unittest.TestCase):
         self.assertNotEqual(html_index, -1)
         self.assertNotEqual(csv_index, -1)
         self.assertLess(html_index, csv_index)
-        self.assertIn("Plan d'action GSC", page)
+        self.assertIn("Rapport SEO GSC", page)
         self.assertIn("Ouvrir le rapport", page)
 
     def test_request_job_cancel_marks_running_job_and_recent_cards_show_it(self) -> None:

@@ -135,6 +135,9 @@ def build_parser() -> argparse.ArgumentParser:
     gsc_parser.add_argument("current", help="Current pages export CSV")
     gsc_parser.add_argument("previous", nargs="?", help="Previous pages export CSV")
     gsc_parser.add_argument("-q", "--queries", help="Optional queries export CSV")
+    gsc_parser.add_argument("--graphique", help="Optional chart export CSV")
+    gsc_parser.add_argument("--pays", help="Optional countries export CSV")
+    gsc_parser.add_argument("--appareils", help="Optional devices export CSV")
     gsc_parser.add_argument("--site", default="", help="Site label for HTML report")
     gsc_parser.add_argument("--html", dest="html_output", help="HTML output path")
     gsc_parser.add_argument("--json", dest="json_output", help="JSON output path")
@@ -270,6 +273,9 @@ def main(argv: list[str] | None = None) -> int:
                 current_csv=args.current,
                 previous_csv=args.previous,
                 queries_csv=args.queries,
+                graphique_csv=args.graphique,
+                pays_csv=args.pays,
+                appareils_csv=args.appareils,
                 output_csv=args.output,
                 output_html=args.html_output,
                 output_json=args.json_output,
@@ -279,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             high = sum(1 for item in results if item.priority == "HIGH")
             medium = sum(1 for item in results if item.priority == "MEDIUM")
-            print(f"{len(results)} pages analysees | high={high} | medium={medium} | csv={args.output}")
+            print(f"{len(results)} pages analysées | high={high} | medium={medium} | csv={args.output}")
             return 0
 
         if args.command == "ui":

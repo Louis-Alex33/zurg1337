@@ -203,6 +203,9 @@ def run_gsc_job(job_id: str) -> None:
     current_csv = (job.params.get("current_csv") or "").strip()
     previous_csv = (job.params.get("previous_csv") or "").strip() or None
     queries_csv = (job.params.get("queries_csv") or "").strip() or None
+    graphique_csv = (job.params.get("graphique_csv") or "").strip() or None
+    pays_csv = (job.params.get("pays_csv") or "").strip() or None
+    appareils_csv = (job.params.get("appareils_csv") or "").strip() or None
     output_csv = (job.params.get("output_csv") or "reports/gsc_report.csv").strip()
     output_json = (job.params.get("output_json") or "reports/gsc_report.json").strip()
     output_html = (job.params.get("output_html") or "reports/gsc_report.html").strip()
@@ -218,6 +221,9 @@ def run_gsc_job(job_id: str) -> None:
             current_csv=current_csv,
             previous_csv=previous_csv,
             queries_csv=queries_csv,
+            graphique_csv=graphique_csv,
+            pays_csv=pays_csv,
+            appareils_csv=appareils_csv,
             output_csv=output_csv,
             output_html=output_html,
             output_json=output_json,
@@ -226,7 +232,7 @@ def run_gsc_job(job_id: str) -> None:
             auto_niche_stopwords=auto_niche_stopwords,
         )
         summary = [
-            f"{len(results)} pages GSC analysees",
+            f"{len(results)} pages GSC analysées",
             f"CSV: {output_csv}",
         ]
         return [output_csv, output_json, output_html], summary

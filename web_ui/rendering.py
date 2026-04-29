@@ -315,8 +315,8 @@ def render_gsc_report_callout(relative_path: str) -> str:
     <section class="panel">
       <div class="panel-head">
         <div>
-          <h2>Plan d'action GSC</h2>
-          <p class="section-intro">C'est la sortie principale du job: elle regroupe les pages a traiter, les snippets faibles, les pages proches d'un gain et les chevauchements a verifier.</p>
+          <h2>Rapport SEO GSC</h2>
+          <p class="section-intro">C’est la sortie principale du job: elle regroupe les opportunités prioritaires, les résultats Google à améliorer, les pages proches d'une percée et les conflits de mots-clés potentiels.</p>
         </div>
         <div class="panel-tools">
           <a class="button" href="/files?path={quote(relative_path)}">Ouvrir le rapport</a>
@@ -572,31 +572,54 @@ def render_audit_card() -> str:
 def render_gsc_card() -> str:
     return """
     <section class="panel accent-gold">
-      <div class="panel-head"><h2>Audit GSC</h2><span class="badge">plan d'action</span></div>
-      <p class="card-lede">Transforme un export Google Search Console en liste de pages a retravailler: gains rapides, pertes, CTR faible et chevauchements possibles.</p>
-      <div class="card-tip">Tu peux uploader directement le ZIP complet exporte par GSC. Le tool trouvera automatiquement <strong>Pages.csv</strong> et <strong>Requetes.csv</strong>.</div>
+      <div class="panel-head"><h2>Audit GSC</h2><span class="badge">plan d’action</span></div>
+      <p class="card-lede">Transforme un export Google Search Console en rapport client: opportunités, pages à surveiller, résultats Google à améliorer et conflits de mots-clés potentiels.</p>
+      <div class="card-tip">Tu peux uploader directement le ZIP complet exporté par GSC. Le tool trouvera automatiquement <strong>Pages.csv</strong>, <strong>Requêtes.csv</strong>, <strong>Pays.csv</strong>, <strong>Appareils.csv</strong> et <strong>Graphique.csv</strong> quand ils sont présents.</div>
       <form method="post" action="/run/gsc" class="stack" enctype="multipart/form-data">
-        <label>1. Export GSC recent
+        <label>1. Export GSC récent
           <input type="text" name="current_csv" value="" placeholder="exports/performance-search.zip ou exports/pages_recent.csv">
         </label>
-        <label>Uploader l'export GSC recent
+        <label>Uploader l’export GSC récent
           <input type="file" name="current_upload" accept=".zip,.csv,.tsv,.txt,text/csv,application/zip">
         </label>
         <p class="field-help">Obligatoire. Le plus simple: upload le ZIP complet de Search Console. Sinon, mets seulement le CSV Pages.</p>
-        <label>2. Export Pages precedent
+        <label>2. Export Pages précédent
           <input type="text" name="previous_csv" value="" placeholder="exports/pages_old.csv">
         </label>
-        <label>Uploader l'export Pages precedent
+        <label>Uploader l’export Pages précédent
           <input type="file" name="previous_upload" accept=".zip,.csv,.tsv,.txt,text/csv,application/zip">
         </label>
-        <p class="field-help">Optionnel. Mets un export Pages ancien, ou un ancien ZIP GSC, seulement si tu veux comparer deux periodes.</p>
-        <label>3. Export Requetes
+        <p class="field-help">Optionnel. Mets un export Pages ancien, ou un ancien ZIP GSC, seulement si tu veux comparer deux périodes.</p>
+        <label>3. Export Requêtes
           <input type="text" name="queries_csv" value="" placeholder="exports/queries.csv">
         </label>
-        <label>Uploader l'export Requetes
+        <label>Uploader l’export Requêtes
           <input type="file" name="queries_upload" accept=".csv,.tsv,.txt,text/csv">
         </label>
-        <p class="field-help">Optionnel. Si tu as uploadé un ZIP complet en 1, tu peux laisser ce champ vide: les requetes seront lues automatiquement.</p>
+        <p class="field-help">Optionnel. Si tu as uploadé un ZIP complet en 1, tu peux laisser ce champ vide: les requêtes seront lues automatiquement.</p>
+        <div class="inline-fields">
+          <label>Graphique CSV
+            <input type="text" name="graphique_csv" value="" placeholder="exports/Graphique.csv">
+          </label>
+          <label>Pays CSV
+            <input type="text" name="pays_csv" value="" placeholder="exports/Pays.csv">
+          </label>
+          <label>Appareils CSV
+            <input type="text" name="appareils_csv" value="" placeholder="exports/Appareils.csv">
+          </label>
+        </div>
+        <div class="inline-fields">
+          <label>Uploader Graphique
+            <input type="file" name="graphique_upload" accept=".csv,.tsv,.txt,text/csv">
+          </label>
+          <label>Uploader Pays
+            <input type="file" name="pays_upload" accept=".csv,.tsv,.txt,text/csv">
+          </label>
+          <label>Uploader Appareils
+            <input type="file" name="appareils_upload" accept=".csv,.tsv,.txt,text/csv">
+          </label>
+        </div>
+        <p class="field-help">Optionnel. Ces fichiers alimentent le graphique 90 jours et la section Origine du trafic. Un ZIP complet suffit souvent.</p>
         <label>Site label
           <input type="text" name="site_name" value="">
         </label>
@@ -618,8 +641,8 @@ def render_gsc_card() -> str:
         <label>Output HTML
           <input type="text" name="output_html" value="reports/gsc_report.html">
         </label>
-        <p class="field-help">Ouvre d'abord le HTML: il est maintenant pense comme un plan d'action. Le CSV et le JSON restent la pour retraiter les donnees.</p>
-        <button class="button" type="submit">4. Creer Le Plan D'Action GSC</button>
+        <p class="field-help">Ouvre d’abord le HTML: il est maintenant pensé comme un rapport client. Le CSV et le JSON restent là pour retraiter les données.</p>
+        <button class="button" type="submit">4. Créer Le Rapport SEO GSC</button>
       </form>
     </section>
     """
