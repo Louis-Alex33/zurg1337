@@ -8,11 +8,15 @@ from zipfile import ZipFile
 from gsc import (
     analyze_pages,
     build_report,
+    calculate_ctr,
     compare_gsc_periods,
     derive_auto_stopwords,
+    detect_cannibalization_groups,
     detect_csv_dialect,
     detect_possible_query_overlap,
     estimate_recoverable_clicks,
+    format_ctr,
+    generate_snippet_recommendation,
     load_gsc_csv,
     load_appareils,
     load_pays,
@@ -337,7 +341,7 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertEqual(rows[0]["page"], "https://www.example.com/Guide/?utm=1")
         self.assertEqual(rows[0]["clicks"], 1234)
         self.assertEqual(rows[0]["impressions"], 2500)
-        self.assertAlmostEqual(rows[0]["ctr"], 0.125)
+        self.assertAlmostEqual(rows[0]["ctr"], 1234 / 2500)
         self.assertAlmostEqual(rows[0]["position"], 4.2)
 
     def test_phase2_parsing_and_period_comparison_handle_zero_division(self) -> None:
@@ -353,6 +357,44 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertIsNone(comparison[0]["clicks_delta_pct"])
         self.assertEqual(comparison[0]["status"], "existing")
         self.assertEqual(comparison[0]["clicks_delta"], 10)
+
+    def test_ctr_is_recalculated_from_clicks_and_impressions(self) -> None:
+        self.assertAlmostEqual(calculate_ctr(1, 1564), 0.000639386, places=6)
+        self.assertEqual(format_ctr(calculate_ctr(1, 1564)), "0,06 %")
+        self.assertEqual(format_ctr(calculate_ctr(155, 13689)), "1,13 %")
+        self.assertEqual(format_ctr(calculate_ctr(2322, 131243)), "1,77 %")
+
+    def test_snippet_recommendation_avoids_generic_ai_phrases(self) -> None:
+        snippet = generate_snippet_recommendation(
+            page="https://eversportzone.com/tournoi-padel-p100/",
+            main_query="tournoi padel p100",
+            page_type="cluster guide",
+            intent="Recherche d’explication pratique",
+            gsc_data={},
+        )
+        combined = f"{snippet['title']} {snippet['meta']}".lower()
+
+        self.assertIn("p100", combined)
+        self.assertNotIn("guide clair", combined)
+        self.assertNotIn("points clés", combined)
+        self.assertNotIn("découvrez les informations essentielles", combined)
+
+    def test_detect_cannibalization_groups_stays_cluster_specific(self) -> None:
+        pages = [
+            GSCPageData(url="https://example.com/tournoi-padel-p100/", impressions=1000, position=8),
+            GSCPageData(url="https://example.com/tournoi-padel-p250/", impressions=800, position=9),
+            GSCPageData(url="https://example.com/tenir-raquette-padel/", impressions=700, position=7),
+        ]
+        queries = [
+            GSCQueryData(query="tournoi padel p100", impressions=200, position=8),
+            GSCQueryData(query="tournoi padel inscription", impressions=160, position=9),
+        ]
+
+        groups = detect_cannibalization_groups(pages, queries)
+
+        self.assertEqual(len(groups), 1)
+        self.assertIn("tournoi", groups[0]["topic"])
+        self.assertNotIn("https://example.com/tenir-raquette-padel/", groups[0]["urls"])
 
     def test_phase2_url_normalization_and_crawl_matching(self) -> None:
         page = AuditPage(

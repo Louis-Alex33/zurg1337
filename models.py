@@ -272,3 +272,17 @@ class GSCPageAnalysis:
     possible_overlap_queries: list[str] = field(default_factory=list)
     estimated_recoverable_clicks: int | None = None
     impact_label: str = ""
+    page_type: str = ""
+    business_value: str = "low"
+    business_reason: str = ""
+    monetization_possible: str = "none"
+    opportunity_score: int = 0
+    priority_label: str = "Watch"
+    action_type: str = "content refresh"
+    main_query: str = ""
+    recommendation: str = ""
+    cannibalization_group_id: str = ""
+    urls_in_group: list[str] = field(default_factory=list)
+    shared_queries: list[str] = field(default_factory=list)
+    cannibalization_confidence: str = ""
+    cannibalization_recommendation: str = ""

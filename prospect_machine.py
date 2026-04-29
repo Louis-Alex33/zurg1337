@@ -17,7 +17,7 @@ from config import (
 )
 from discover import discover_domains, discovery_to_console_rows, import_domains_from_file
 from doctor import format_doctor_results, run_doctor
-from gsc import run_gsc_analysis
+from gsc import resolve_gsc_standalone_inputs, run_gsc_analysis
 from qualify import qualify_domains
 from utils import CLIError, parse_csv_list
 from web_ui import launch_ui
@@ -158,13 +158,18 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.add_argument("--json", dest="json_output", help="Optional JSON output path")
 
     gsc_parser = subparsers.add_parser("gsc", help="Analyze GSC page exports")
-    gsc_parser.add_argument("current", help="Current pages export CSV")
+    gsc_parser.add_argument("current", nargs="?", help="Current pages export CSV")
     gsc_parser.add_argument("previous", nargs="?", help="Previous pages export CSV")
     gsc_parser.add_argument("-q", "--queries", help="Optional queries export CSV")
     gsc_parser.add_argument("--graphique", help="Optional chart export CSV")
     gsc_parser.add_argument("--pays", help="Optional countries export CSV")
     gsc_parser.add_argument("--appareils", help="Optional devices export CSV")
     gsc_parser.add_argument("--site", default="", help="Site label for HTML report")
+    gsc_parser.add_argument("--domain", default="", help="Alias for --site")
+    gsc_parser.add_argument("--url", default="", help="Alias used to infer the site label")
+    gsc_parser.add_argument("--lang", choices=["fr", "en"], default="fr", help="Reserved for report language")
+    gsc_parser.add_argument("--gsc-folder", help="Folder with GSC exports")
+    gsc_parser.add_argument("--mode", choices=["full", "executive"], default="full", help="Report mode")
     gsc_parser.add_argument("--html", dest="html_output", help="HTML output path")
     gsc_parser.add_argument("--json", dest="json_output", help="JSON output path")
     gsc_parser.add_argument("--output", default="reports/gsc_report.csv", help="CSV output path")
@@ -310,23 +315,38 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if all(check.get("ok") for check in checks) else 1
 
         if args.command == "gsc":
+            gsc_inputs = resolve_gsc_standalone_inputs(
+                current=args.current,
+                previous=args.previous,
+                queries=args.queries,
+                graphique=args.graphique,
+                pays=args.pays,
+                appareils=args.appareils,
+                gsc_folder=args.gsc_folder,
+            )
+            if not gsc_inputs.get("current"):
+                raise CLIError("Le module gsc attend un CSV Pages courant ou --gsc-folder.")
+            output_html = args.html_output or ("reports/gsc_report.html" if args.mode == "executive" else None)
             results = run_gsc_analysis(
-                current_csv=args.current,
-                previous_csv=args.previous,
-                queries_csv=args.queries,
-                graphique_csv=args.graphique,
-                pays_csv=args.pays,
-                appareils_csv=args.appareils,
+                current_csv=str(gsc_inputs["current"]),
+                previous_csv=gsc_inputs.get("previous"),
+                queries_csv=gsc_inputs.get("queries"),
+                graphique_csv=gsc_inputs.get("graphique"),
+                pays_csv=gsc_inputs.get("pays"),
+                appareils_csv=gsc_inputs.get("appareils"),
                 output_csv=args.output,
-                output_html=args.html_output,
+                output_html=output_html,
                 output_json=args.json_output,
-                site_name=args.site,
+                site_name=args.domain or args.site or args.url,
                 niche_stopwords=args.niche_stopwords,
                 auto_niche_stopwords=args.auto_niche_stopwords,
+                mode=args.mode,
             )
             high = sum(1 for item in results if item.priority == "HIGH")
             medium = sum(1 for item in results if item.priority == "MEDIUM")
             print(f"{len(results)} pages analysées | high={high} | medium={medium} | csv={args.output}")
+            if output_html:
+                print(f"HTML: {output_html}")
             return 0
 
         if args.command == "ui":
