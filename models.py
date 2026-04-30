@@ -121,8 +121,11 @@ class AuditPage:
     has_structured_data: bool = False
     structured_data_text: str = ""
     page_type: str = ""
+    page_type_confidence: str = ""
+    page_type_reason: str = ""
     business_value: str = ""
     business_reason: str = ""
+    monetization_potential: str = ""
     date_signals: list[dict[str, str | int]] = field(default_factory=list)
     outdated_date_signal: bool = False
     date_signal_locations: list[str] = field(default_factory=list)
@@ -136,12 +139,15 @@ class AuditPage:
     linked_from_high_value_pages: bool = False
     anchors_received: list[str] = field(default_factory=list)
     duplicate_anchors: list[str] = field(default_factory=list)
+    recommended_source_pages: list[str] = field(default_factory=list)
+    recommended_anchor_texts: list[str] = field(default_factory=list)
     internal_links_to_redirected_urls: list[str] = field(default_factory=list)
     duplicate_group_id: str = ""
     duplicate_group_size: int = 0
     duplicate_type: str = ""
     recommended_unique_angle: str = ""
     recovery_opportunity_score: int = 0
+    crawl_based_recovery_score: int = 0
     recovery_priority: str = ""
     recovery_reason: str = ""
     needs_gsc_validation: bool = True
@@ -185,6 +191,10 @@ class AuditPage:
     trust_signal_score: int = 0
     intent_clarity_score: int = 0
     content_recommendations: list[str] = field(default_factory=list)
+    recommended_action: str = ""
+    suggested_title: str = ""
+    suggested_meta_description: str = ""
+    all_requested_urls: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -193,7 +203,12 @@ class AuditReport:
     audited_at: str
     pages_crawled: int
     observed_health_score: int
+    technical_health_score: int = 0
+    seo_opportunity_score: int = 0
+    urgency_level: str = ""
     report_type: str = "standard"
+    report_mode: str = "executive"
+    site_context: str = ""
     lang: str = "fr"
     recovery_opportunity_score: int = 0
     confidence_level: str = ""

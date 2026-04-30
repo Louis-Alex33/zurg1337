@@ -982,6 +982,50 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertEqual(classify_page_type("https://example.com/blog/test"), "blog")
         self.assertEqual(classify_page_type("https://example.com/product/test"), "product")
         self.assertEqual(classify_page_type("https://example.com/any", title="Guide complet"), "guide")
+        self.assertEqual(
+            classify_page_type(
+                "https://domadapt.com/guides/maprimeadapt-locataire",
+                title="MaPrimeAdapt locataire : conditions et demarches 2026",
+                content="aides financieres subvention adaptation logement",
+                lang="fr",
+            ),
+            "financial_aid",
+        )
+        self.assertEqual(
+            classify_page_type(
+                "https://domadapt.com/guides/douche-italienne-senior",
+                title="Douche italienne senior : prix et aides",
+                content="salle de bain prevention des chutes",
+                lang="fr",
+            ),
+            "home_adaptation",
+        )
+
+    def test_build_report_deduplicates_final_urls_before_ranking(self) -> None:
+        first = make_page(
+            url="https://example.com/guide?utm_source=test",
+            requested_url="http://www.example.com/guide?utm_source=test#top",
+            final_url="https://example.com/guide/",
+            title="Guide complet",
+            meta_description="Description utile pour le guide complet avec assez de contexte.",
+            word_count=500,
+            issues=["Date visible à actualiser"],
+        )
+        duplicate = make_page(
+            url="https://example.com/guide/",
+            requested_url="https://example.com/old-guide",
+            final_url="https://example.com/guide",
+            title="Guide complet",
+            meta_description="Description utile pour le guide complet avec assez de contexte.",
+            word_count=620,
+            issues=["Description Google absente"],
+        )
+
+        report = build_report([first, duplicate], domain="example.com")
+
+        self.assertEqual(report.pages_crawled, 1)
+        self.assertEqual(len(report.top_pages_to_rework), len({item["url"] for item in report.top_pages_to_rework}))
+        self.assertIn("https://example.com/old-guide", report.pages[0]["all_requested_urls"])
 
     def test_find_dated_references_ignores_current_year_but_flags_older_dates(self) -> None:
         references = find_dated_references(

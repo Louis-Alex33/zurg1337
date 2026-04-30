@@ -102,9 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument(
         "--mode",
         default=DEFAULT_AUDIT_MODE,
-        choices=sorted(AUDIT_MODE_CONFIGS),
-        help="Audit mode optimized for lightweight prospecting or deeper review",
+        choices=sorted([*AUDIT_MODE_CONFIGS.keys(), "executive", "full"]),
+        help="Audit crawl mode, or report mode alias: executive/full",
     )
+    audit_parser.add_argument("--audit-mode", choices=sorted(AUDIT_MODE_CONFIGS), help="Explicit crawl/audit depth mode")
+    audit_parser.add_argument("--report-mode", choices=["executive", "full"], default="executive", help="Report length/detail mode")
     audit_parser.add_argument("--top", type=int, help="Only audit the top N domains")
     audit_parser.add_argument("--min-score", type=int, help="Only audit domains with score >= this value")
     audit_parser.add_argument("--output-dir", default="reports/audits", help="Directory for JSON reports")
@@ -119,7 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--timeout", type=int, help="HTTP timeout per request")
     audit_parser.add_argument("--retries", type=int, default=1, help="Limited network retries per URL")
     audit_parser.add_argument("--lang", choices=["fr", "en"], default="fr", help="Report language")
-    audit_parser.add_argument("--report-type", choices=["standard", "recovery"], default="standard", help="Report structure")
+    audit_parser.add_argument("--report-type", choices=["crawl", "standard", "recovery"], default="standard", help="Report structure")
+    audit_parser.add_argument("--site-context", choices=["affiliate_media", "b2b_manufacturer", "editorial_info", "local_service", "saas", "ecommerce"], default="", help="Business context used for page value and recommendations")
     audit_parser.add_argument("--gsc-folder", help="Folder with GSC exports named pages_before.csv, pages_after.csv, queries_before.csv, queries_after.csv, countries_before.csv, countries_after.csv, devices_before.csv, devices_after.csv and dates.csv")
     audit_parser.add_argument("--gsc-pages-before", help="GSC Pages export for the before period")
     audit_parser.add_argument("--gsc-pages-after", help="GSC Pages export for the after period")
@@ -242,12 +245,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "audit":
+            audit_mode = args.audit_mode or (DEFAULT_AUDIT_MODE if args.mode in {"executive", "full"} else args.mode)
+            report_mode = args.mode if args.mode in {"executive", "full"} else args.report_mode
             reports = audit_domains(
                 input_csv=args.input_csv,
                 output_dir=args.output_dir,
                 top=args.top,
                 min_score=args.min_score,
-                mode=args.mode,
+                mode=audit_mode,
                 delay=args.delay,
                 max_pages=args.max_pages,
                 max_depth=args.max_depth,
@@ -270,7 +275,9 @@ def main(argv: list[str] | None = None) -> int:
                 cache_dir=args.cache_dir,
                 cache_ttl_seconds=args.cache_ttl_seconds,
                 report_type=args.report_type,
+                report_mode=report_mode,
                 lang=args.lang,
+                site_context=args.site_context,
                 gsc_folder=args.gsc_folder,
                 gsc_pages_before=args.gsc_pages_before,
                 gsc_pages_after=args.gsc_pages_after,
@@ -286,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{len(reports)} audits ecrits dans {args.output_dir}")
             for report in reports[:5]:
                 print(
-                    f"- {report.domain} | pages={report.pages_crawled} | score={report.observed_health_score} | "
+                    f"- {report.domain} | pages={report.pages_crawled} | technical={report.technical_health_score} | seo_opportunity={report.seo_opportunity_score} | "
                     f"findings={len(report.critical_findings)}"
                 )
             return 0

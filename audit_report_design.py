@@ -145,7 +145,7 @@ REPORT_TEXT = {
         "method_dates": "Dates visibles dans les titres, URLs et contenus",
         "method_links": "Maillage interne et accessibilité des pages",
         "analysis_limits": "Limites de cette analyse",
-        "analysis_limits_text": "Ce rapport s'appuie sur un crawl de surface. Il ne couvre pas les données Search Console, les backlinks, ni les performances Core Web Vitals en conditions réelles. {pages} pages analysées sur {sitemap_urls} détectées dans le sitemap.",
+        "analysis_limits_text": "Ce rapport s'appuie sur un crawl de surface. Il ne couvre pas les donnees Search Console, les backlinks, ni les performances Core Web Vitals en conditions reelles. Couverture du crawl : {pages} pages crawlées, {sitemap_urls} URLs sitemap détectées.",
         "appendix_toggle": "Voir l'annexe technique",
         "appendix_print": "Imprimer avec annexe",
         "appendix": "Annexe",
@@ -285,7 +285,7 @@ REPORT_TEXT = {
         "method_dates": "Visible dates in titles, URLs and content",
         "method_links": "Internal linking and page accessibility",
         "analysis_limits": "Limits of this analysis",
-        "analysis_limits_text": "This report is based on a surface crawl. It does not cover Search Console data, backlinks, or real-world Core Web Vitals performance. {pages} pages analyzed out of {sitemap_urls} detected in the sitemap.",
+        "analysis_limits_text": "This report is based on a surface crawl. It does not cover Search Console data, backlinks, or real-world Core Web Vitals performance. Crawl coverage: {pages} pages crawled, {sitemap_urls} sitemap URLs detected.",
         "appendix_toggle": "View technical appendix",
         "appendix_print": "Print with appendix",
         "appendix": "Appendix",
@@ -649,7 +649,9 @@ def prepare_audit_report_context(
     business_signals = [as_dict(item) for item in data.get("business_priority_signals", []) if isinstance(item, dict)]
     dated_content = [as_dict(item) for item in data.get("dated_content_signals", []) if isinstance(item, dict)]
 
-    score = clamp_score(get_int(data, "score_global", get_int(data, "observed_health_score", 0)))
+    technical_score = clamp_score(get_int(data, "technical_health_score", get_int(summary, "technical_health_score", get_int(data, "observed_health_score", 0))))
+    seo_opportunity_score = clamp_score(get_int(data, "seo_opportunity_score", get_int(summary, "seo_opportunity_score", get_int(data, "observed_health_score", 0))))
+    score = technical_score
     domain = str(data.get("domain") or ("Audited domain" if active_lang == "en" else "Domaine audité"))
     pages_analysees = get_int(data, "pages_analysees", get_int(data, "pages_crawled", get_int(summary, "pages_crawled", len(pages))))
     pages_erreur = get_int(data, "pages_erreur", get_int(summary, "pages_with_errors", 0))
@@ -680,6 +682,7 @@ def prepare_audit_report_context(
     context = {
         "lang": active_lang,
         "report_type": str(data.get("report_type") or "standard"),
+        "report_mode": str(data.get("report_mode") or "executive"),
         "tool_name": str(data.get("tool_name") or DEFAULT_TOOL_NAME),
         "tool_tagline": str(data.get("tool_tagline") or DEFAULT_TOOL_TAGLINE),
         "logo_url": logo_url,
@@ -692,9 +695,11 @@ def prepare_audit_report_context(
         "domain": domain,
         "audit_date": str(data.get("audit_date") or format_audit_date(str(data.get("audited_at") or ""), lang=active_lang)),
         "score_global": score,
+        "technical_health_score": technical_score,
+        "seo_opportunity_score": seo_opportunity_score,
         "recovery_opportunity_score": clamp_score(get_int(data, "recovery_opportunity_score", get_int(summary, "recovery_opportunity_score", 0))),
         "confidence_level": str(data.get("confidence_level") or ("low" if active_lang == "en" else "faible")),
-        "urgency_level": str(data.get("urgency_level") or infer_urgency(score, summary, business_signals, lang=active_lang)),
+        "urgency_level": str(data.get("urgency_level") or summary.get("urgency_level") or infer_urgency(score, summary, business_signals, lang=active_lang)),
         "base_status": str(data.get("base_status") or infer_base_status(score, lang=active_lang)),
         "pages_analysees": pages_analysees,
         "pages_saines": get_int(data, "pages_saines", get_int(summary, "pages_ok", max(0, pages_analysees - pages_erreur))),
@@ -804,14 +809,15 @@ def render_cover(context: dict[str, Any]) -> str:
     <div class="cover-center">
       <div>
         <p class="label">{escape(t("audit_done_on"))} {escape(context["audit_date"])}</p>
-        <h1 class="cover-title">{escape("SEO Recovery Audit" if context.get("report_type") == "recovery" and context_lang(context) == "en" else t("seo_audit"))}</h1>
+        <h1 class="cover-title">{escape("SEO Crawl & Recovery Opportunity Audit" if context.get("report_type") == "recovery" else t("seo_audit"))}</h1>
         <p class="cover-domain">{escape(context["domain"])}</p>
       </div>
       <div class="cover-score">
         {render_score_gauge(int(context["score_global"]), score_class)}
         <div class="score-context">
-          <span class="score-badge {score_class}">{int(context["score_global"])}/100</span>
-          <p>{escape(context["base_status"])}</p>
+          <span class="score-badge {score_class}">{int(context["technical_health_score"])}/100</span>
+          <p>{escape("Technical health" if context_lang(context) == "en" else "Santé technique")}</p>
+          <p><strong>{int(context["seo_opportunity_score"])}/100</strong> {escape("SEO opportunity" if context_lang(context) == "en" else "Opportunité SEO")}</p>
           {render_recovery_cover_score(context)}
         </div>
       </div>
@@ -839,8 +845,11 @@ def render_recovery_cover_score(context: dict[str, Any]) -> str:
 
 def render_gsc_cover_badge(context: dict[str, Any]) -> str:
     traffic_drop = as_dict(context.get("traffic_drop")) or as_dict(context.get("traffic_drop_investigation"))
-    if context.get("report_type") != "recovery" or not traffic_drop.get("gsc_data_available"):
+    if context.get("report_type") != "recovery":
         return ""
+    if not traffic_drop.get("gsc_data_available"):
+        label = "Crawl-based audit - GSC validation required" if context_lang(context) == "en" else "Audit base sur le crawl - validation GSC requise"
+        return f"<span class='gsc-badge'>{escape(label)}</span>"
     before = str(traffic_drop.get("period_before") or "before")
     after = str(traffic_drop.get("period_after") or "after")
     return f"<span class='gsc-badge'>GSC-enhanced · {escape(before)} / {escape(after)}</span>"
@@ -856,7 +865,7 @@ def render_page_footer(context: dict[str, Any]) -> str:
 
 
 def render_dirigeant_summary(context: dict[str, Any]) -> str:
-    score = int(context["score_global"])
+    score = int(context["technical_health_score"])
     t = lambda key: text_for(context, key)
     return f"""
   <section class="report-page section-dirigeant">
@@ -865,7 +874,8 @@ def render_dirigeant_summary(context: dict[str, Any]) -> str:
       <div class="dirigeant-header">
         <div class="dirigeant-score-bloc">
           <span class="dirigeant-score-value {score_color_class(score)}">{score}/100</span>
-          <span class="dirigeant-score-label">{escape(t("overall_site_status"))}</span>
+          <span class="dirigeant-score-label">{escape("technical health" if context_lang(context) == "en" else "sante technique")}</span>
+          <span class="dirigeant-score-label">{int(context["seo_opportunity_score"])}/100 {escape("SEO opportunity" if context_lang(context) == "en" else "opportunite SEO")}</span>
         </div>
         <div class="dirigeant-phrase">{escape(context["resume_dirigeant"])}</div>
       </div>
@@ -1115,7 +1125,7 @@ def render_priority_pages(context: dict[str, Any]) -> str:
         </section>
         <section class="rewrite-angle">
           <p class="label fiche-section-label">{escape(t("possible_angle"))}</p>
-          <p>{escape(str(page.get("angle") or ("Clarify the promise and strengthen the main intent." if is_en else "Clarifier la promesse et renforcer l'intention principale.")))}</p>
+            <p>{escape(str(page.get("angle") or ("Turn this URL into a concrete brief with criteria, proof points, FAQ and internal links." if is_en else "Transformer cette URL en brief concret avec criteres, preuves, FAQ et liens internes.")))}</p>
         </section>
         <div class="fiche-meta-bas">
           <div class="fiche-effort-temps">
@@ -1152,8 +1162,15 @@ def render_traffic_drop_investigation(context: dict[str, Any]) -> str:
     if not data:
         return ""
     is_en = context_lang(context) == "en"
-    title = "Traffic Drop Investigation" if is_en else "Investigation de baisse de trafic"
-    limits = str(data.get("limits_statement") or "This crawl cannot confirm the traffic drop cause without Search Console / analytics data.")
+    title = "Traffic Drop Investigation - crawl-based" if is_en else "Traffic Drop Investigation - base sur le crawl"
+    if data.get("gsc_data_available"):
+        limits = str(data.get("limits_statement") or "Search Console data was supplied, but findings still require validation.")
+    else:
+        limits = (
+            "This crawl cannot confirm the cause of a traffic drop without Google Search Console or analytics data."
+            if is_en
+            else "Ce crawl ne permet pas de confirmer la cause d'une baisse de trafic sans donnees Google Search Console ou analytics."
+        )
     intro = "However, the crawl highlights several areas to validate." if is_en else "Le crawl met toutefois en avant plusieurs zones à valider."
     areas = [str(item) for item in data.get("crawl_suggests", []) if str(item).strip()]
     required = [str(item) for item in data.get("data_required", []) if str(item).strip()]
@@ -1361,6 +1378,7 @@ def render_top_recovery_opportunities(context: dict[str, Any]) -> str:
             f"<td>{escape(str(item.get('business_value') or '-'))}</td>"
             f"<td><span class='score-pill {score_color_class(get_int(item, 'recovery_score', 0))}'>{get_int(item, 'recovery_score', 0)}/100</span></td>"
             f"<td>{escape(str(item.get('main_issue') or '-'))}</td>"
+            f"<td>{escape(str(item.get('why_it_matters') or '-'))}</td>"
             f"<td>{escape(str(item.get('recommended_action') or '-'))}</td>"
             f"<td>{escape(str(item.get('effort') or '-'))}</td>"
             f"<td>{escape(str(item.get('impact') or '-'))}</td>"
@@ -1375,7 +1393,7 @@ def render_top_recovery_opportunities(context: dict[str, Any]) -> str:
     </div>
     <p class="suggestions-intro">{escape("These pages should be checked first because they combine business value with fixable SEO issues." if is_en else "Ces pages doivent être vérifiées en premier car elles combinent valeur business et problèmes SEO corrigeables.")}</p>
     <table class="technical-table">
-      <thead><tr><th>URL</th><th>{escape("Type" if is_en else "Type")}</th><th>{escape("Business" if is_en else "Business")}</th><th>{escape("Score" if is_en else "Score")}</th><th>{escape("Main issue" if is_en else "Problème")}</th><th>{escape("Recommended action" if is_en else "Action")}</th><th>{escape("Effort" if is_en else "Effort")}</th><th>{escape("Impact" if is_en else "Impact")}</th><th>GSC</th></tr></thead>
+      <thead><tr><th>URL</th><th>{escape("Type" if is_en else "Type")}</th><th>{escape("Business" if is_en else "Business")}</th><th>{escape("Score" if is_en else "Score")}</th><th>{escape("Main issue" if is_en else "Probleme")}</th><th>{escape("Why it matters" if is_en else "Pourquoi")}</th><th>{escape("Recommended action" if is_en else "Action")}</th><th>{escape("Effort" if is_en else "Effort")}</th><th>{escape("Impact" if is_en else "Impact")}</th><th>GSC</th></tr></thead>
       <tbody>{''.join(rows)}</tbody>
     </table>
     {render_page_footer(context)}
@@ -1418,11 +1436,10 @@ def render_internal_linking_recovery_section(context: dict[str, Any]) -> str:
     rows = "".join(
         "<tr>"
         f"<td>{escape(truncate(str(item.get('target_url') or ''), 54))}</td>"
-        f"<td>{escape(str(item.get('page_type') or '-'))}</td>"
         f"<td>{escape(str(item.get('business_value') or '-'))}</td>"
         f"<td>{get_int(item, 'inbound_links', 0)}</td>"
-        f"<td>{escape(str(item.get('issue') or '-'))}</td>"
-        f"<td>{escape(str(item.get('recommended_internal_links') or '-'))}</td>"
+        f"<td>{escape('; '.join(truncate(str(url), 40) for url in (item.get('recommended_source_pages') or item.get('suggested_source_urls') or [])[:3]) or '-')}</td>"
+        f"<td>{escape('; '.join(str(anchor) for anchor in (item.get('recommended_anchor_texts') or [])[:3]) or '-')}</td>"
         "</tr>"
         for item in items[:10]
     )
@@ -1432,7 +1449,7 @@ def render_internal_linking_recovery_section(context: dict[str, Any]) -> str:
       <p class="label section-label">{escape("Internal Linking" if is_en else "Maillage interne")}</p>
       <h2>{escape("Internal Linking Opportunities" if is_en else "Opportunités de maillage interne")}</h2>
     </div>
-    <table class="technical-table"><thead><tr><th>URL</th><th>Type</th><th>Business</th><th>{escape("Inbound links" if is_en else "Liens entrants")}</th><th>{escape("Issue" if is_en else "Problème")}</th><th>{escape("Recommended internal links" if is_en else "Liens recommandés")}</th></tr></thead><tbody>{rows}</tbody></table>
+    <table class="technical-table"><thead><tr><th>{escape("Target page" if is_en else "Page cible")}</th><th>{escape("Business value" if is_en else "Valeur business")}</th><th>{escape("Current inbound links" if is_en else "Liens entrants actuels")}</th><th>{escape("Suggested source pages" if is_en else "Pages sources suggerees")}</th><th>{escape("Suggested anchors" if is_en else "Ancres suggerees")}</th></tr></thead><tbody>{rows}</tbody></table>
     {render_page_footer(context)}
   </section>"""
 
@@ -2071,6 +2088,10 @@ def render_method_about(context: dict[str, Any]) -> str:
     t = lambda key: text_for(context, key)
     pages_visitees = get_int(method, "pages_visitees", int(context["pages_analysees"]))
     sitemap_urls = get_int(method, "sitemap_urls", 0)
+    internal_urls = get_int(method, "internal_urls_discovered", 0)
+    total_urls = get_int(method, "total_urls_discovered", 0)
+    selected_urls = get_int(method, "urls_selected_for_crawl", 0)
+    crawl_summary = build_crawl_summary_sentence(method, lang=context_lang(context))
     analyste_nom = str(context["analyste_nom"])
     analyste_photo = str(context.get("analyste_photo") or "")
     analyste_linkedin = str(context.get("analyste_linkedin") or "")
@@ -2116,13 +2137,43 @@ def render_method_about(context: dict[str, Any]) -> str:
         </ul>
         <div class="methode-limites">
           <strong>{escape(t("analysis_limits"))}</strong>
-          <p>{escape(t("analysis_limits_text").format(pages=pages_visitees, sitemap_urls=sitemap_urls))}</p>
+          <p>{escape(crawl_summary)}</p>
+          <p>{escape("This URL-only report does not include Search Console, analytics, backlink data or field Core Web Vitals." if context_lang(context) == "en" else "Ce rapport URL-only ne couvre pas Search Console, analytics, les backlinks ni les Core Web Vitals terrain.")}</p>
         </div>
       </div>
       {analyste_card}
     </div>
     {render_page_footer(context)}
   </section>"""
+
+
+def build_crawl_summary_sentence(method: dict[str, Any], lang: str = "fr") -> str:
+    is_en = sanitize_report_language(lang) == "en"
+    sitemap_urls = get_int(method, "sitemap_urls", 0)
+    internal_urls = get_int(method, "internal_urls_discovered", 0)
+    pages = get_int(method, "pages_visitees", 0)
+    selected = get_int(method, "urls_selected_for_crawl", 0)
+    remaining = get_int(method, "urls_restantes", 0)
+    if sitemap_urls and pages > sitemap_urls and internal_urls:
+        return (
+            f"Sitemap URLs detected: {sitemap_urls}. Additional internal URLs discovered: {internal_urls}. Total URLs crawled: {pages}."
+            if is_en
+            else f"URLs sitemap detectees : {sitemap_urls}. URLs internes supplementaires decouvertes : {internal_urls}. Total d'URLs crawlees : {pages}."
+        )
+    if sitemap_urls and selected and selected < sitemap_urls:
+        not_crawled = max(0, sitemap_urls - pages)
+        return (
+            f"{sitemap_urls} URLs detected in sitemap. {pages} pages crawled in this audit. {not_crawled} sitemap URLs not crawled due to crawl limit."
+            if is_en
+            else f"{sitemap_urls} URLs detectees dans le sitemap. {pages} pages crawlees dans cet audit. {not_crawled} URLs sitemap non crawlees a cause de la limite de crawl."
+        )
+    if sitemap_urls or internal_urls:
+        return (
+            f"{pages} pages crawled from homepage, sitemap and internal links."
+            if is_en
+            else f"{pages} pages crawlees depuis l'accueil, le sitemap et les liens internes."
+        )
+    return f"{pages} pages crawled from homepage and internal links." if is_en else f"{pages} pages crawlees depuis l'accueil et les liens internes."
 
 
 def render_appendix(context: dict[str, Any]) -> str:
@@ -2275,9 +2326,15 @@ def score_gauge_values(score: int) -> dict[str, str]:
 def normalize_priority_pages(items: Any, pages_by_url: dict[str, dict[str, Any]], lang: str = "fr") -> list[dict[str, Any]]:
     active_lang = sanitize_report_language(lang)
     normalized = []
+    seen_urls: set[str] = set()
     for raw in items if isinstance(items, list) else []:
         item = as_dict(raw)
         url = str(item.get("url") or "")
+        key = canonical_url_key(url)
+        if key and key in seen_urls:
+            continue
+        if key:
+            seen_urls.add(key)
         details = pages_by_url.get(url, {})
         reasons = [str(reason) for reason in (item.get("reasons") or [])]
         raw_score = get_int(item, "score", get_int(item, "page_health_score", get_int(details, "page_health_score", -1)))
@@ -3258,7 +3315,13 @@ def build_method(data: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any
     metadata = as_dict(data.get("crawl_metadata"))
     return {
         "pages_visitees": get_int(summary, "pages_crawled", get_int(data, "pages_crawled", 0)),
-        "sitemap_urls": get_int(metadata, "sitemap_urls_found", 0),
+        "sitemap_urls": get_int(summary, "sitemap_urls_detected", get_int(metadata, "sitemap_urls_detected", get_int(metadata, "sitemap_urls_found", 0))),
+        "internal_urls_discovered": get_int(summary, "internal_urls_discovered", get_int(metadata, "internal_urls_discovered", 0)),
+        "total_urls_discovered": get_int(summary, "total_urls_discovered", get_int(metadata, "total_urls_discovered", 0)),
+        "urls_selected_for_crawl": get_int(summary, "urls_selected_for_crawl", get_int(metadata, "urls_selected_for_crawl", 0)),
+        "urls_successfully_crawled": get_int(summary, "urls_successfully_crawled", get_int(metadata, "urls_successfully_crawled", 0)),
+        "urls_failed": get_int(summary, "urls_failed", get_int(metadata, "urls_failed", 0)),
+        "unique_final_urls": get_int(summary, "unique_final_urls", get_int(metadata, "unique_final_urls", 0)),
         "urls_restantes": get_int(metadata, "queued_urls_remaining", 0),
         "raison_arret": str(metadata.get("stop_reason") or "-"),
     }
@@ -3303,7 +3366,7 @@ def page_action_from_reasons(reasons: list[str], lang: str = "fr") -> str:
     is_en = sanitize_report_language(lang) == "en"
     haystack = " ".join(reasons).lower()
     if "date" in haystack:
-        return "Update visible information and add a freshness signal." if is_en else "Mettre à jour les informations visibles et ajouter un signal de fraîcheur."
+        return "Update visible facts, check the year in title/H1 and add a last-updated note." if is_en else "Mettre a jour les donnees visibles, verifier l'annee dans le title/H1 et ajouter une mention de derniere mise a jour."
     if "liens" in haystack or "retrouver" in haystack:
         return "Add internal links from related content." if is_en else "Ajouter des liens internes depuis des contenus proches."
     if "contenu" in haystack:
@@ -3334,10 +3397,18 @@ def page_impact(priority_score: int, reasons: list[str], lang: str = "fr") -> st
 
 
 def page_angle(url: str, details: dict[str, Any], lang: str = "fr") -> str:
+    recommendation = str(details.get("recommended_action") or "").strip()
+    if recommendation:
+        return recommendation
     title = str(details.get("title") or "").strip() or slug_to_title(url)
+    page_type = str(details.get("page_type") or "").lower()
+    if page_type in {"financial_aid", "home_adaptation"}:
+        return "Ajouter conditions, prix, aides disponibles, documents utiles et liens vers les pages travaux associees."
+    if page_type in {"product", "manufacturer"}:
+        return "Ajouter specifications, preuves de confiance, conditions commerciales et CTA vers la demande de devis."
     if sanitize_report_language(lang) == "en":
-        return f"Clarify the promise of \"{title}\" and better cover the main intent."
-    return f"Clarifier la promesse de \"{title}\" et mieux couvrir l'intention principale."
+        return f"Turn \"{title}\" into a concrete page brief with criteria, proof points, FAQs and internal links."
+    return f"Transformer \"{title}\" en brief concret avec criteres, preuves, FAQ et liens internes."
 
 
 def build_page_observation(item: dict[str, Any], details: dict[str, Any], words: int, lang: str = "fr") -> str:
