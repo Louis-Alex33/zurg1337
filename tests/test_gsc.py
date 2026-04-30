@@ -256,6 +256,63 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertIn("France", report)
         self.assertIn("Mobile", report)
 
+    def test_run_gsc_analysis_uses_only_page_matched_query_for_snippet(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            current_csv = root / "pages.csv"
+            queries_csv = root / "queries.csv"
+            output_csv = root / "report.csv"
+
+            current_csv.write_text(
+                "page,clicks,impressions,ctr,position\n"
+                "https://example.com/prepa-mentale-padel/,1,1000,0.1%,8\n"
+                "https://example.com/tournoi-padel-p100/,20,1200,1.67%,7\n",
+                encoding="utf-8",
+            )
+            queries_csv.write_text(
+                "query,page,clicks,impressions,ctr,position\n"
+                "p100 padel,https://example.com/tournoi-padel-p100/,20,1200,1.67%,7\n"
+                "prepa mentale padel,https://example.com/prepa-mentale-padel/,1,80,1.25%,9\n",
+                encoding="utf-8",
+            )
+
+            results = run_gsc_analysis(
+                current_csv=str(current_csv),
+                queries_csv=str(queries_csv),
+                output_csv=str(output_csv),
+            )
+
+        by_url = {item.url: item for item in results}
+        self.assertEqual(by_url["https://example.com/prepa-mentale-padel/"].main_query, "prepa mentale padel")
+        self.assertEqual(by_url["https://example.com/tournoi-padel-p100/"].main_query, "p100 padel")
+
+    def test_run_gsc_analysis_falls_back_to_page_slug_without_query_page_column(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            current_csv = root / "pages.csv"
+            queries_csv = root / "queries.csv"
+            output_csv = root / "report.csv"
+
+            current_csv.write_text(
+                "page,clicks,impressions,ctr,position\n"
+                "https://example.com/prepa-mentale-padel/,1,1000,0.1%,8\n",
+                encoding="utf-8",
+            )
+            queries_csv.write_text(
+                "query,clicks,impressions,ctr,position\n"
+                "p100 padel,20,1200,1.67%,7\n",
+                encoding="utf-8",
+            )
+
+            results = run_gsc_analysis(
+                current_csv=str(current_csv),
+                queries_csv=str(queries_csv),
+                output_csv=str(output_csv),
+            )
+
+        self.assertEqual(results[0].main_query, "prepa mentale padel")
+        self.assertNotEqual(results[0].main_query, "p100 padel")
+
     def test_gsc_zip_detection_uses_columns_when_filename_is_ambiguous(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

@@ -265,6 +265,7 @@ class GSCQueryData:
     impressions: int = 0
     ctr: float = 0.0
     position: float = 0.0
+    target_url: str = ""
 
 
 @dataclass(slots=True)

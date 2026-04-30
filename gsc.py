@@ -894,6 +894,7 @@ def parse_queries_csv(filepath: str | None) -> list[GSCQueryData]:
                         impressions=impressions,
                         ctr=ctr,
                         position=coerce_float(row.get(headers["position"]), default=0.0),
+                        target_url=(row.get(headers["page"]) or "").strip() if "page" in headers else "",
                     )
                 )
             except ValueError:
@@ -1292,19 +1293,26 @@ def analyze_pages(
 def find_main_query_for_page(page: GSCPageData, queries: list[GSCQueryData]) -> GSCQueryData | None:
     if not queries:
         return None
-    page_tokens = extract_slug_keywords(page.url, stopwords=set(GSC_CANNIBAL_STOPWORDS))
-    best: tuple[float, GSCQueryData] | None = None
-    for query in queries:
-        query_tokens = query_token_set(query.query)
-        if not query_tokens:
-            continue
-        overlap = len(page_tokens & query_tokens)
-        score = overlap * 100 + query.impressions / 100 - query.position
-        if overlap == 0 and query.impressions < 100:
-            continue
-        if best is None or score > best[0]:
-            best = (score, query)
-    return best[1] if best else None
+    page_url = normalize_url_for_query_match(page.url)
+    page_queries = [
+        query
+        for query in queries
+        if query.target_url and normalize_url_for_query_match(query.target_url) == page_url
+    ]
+    if not page_queries:
+        return None
+    return max(page_queries, key=lambda query: (query.impressions, query.clicks, -query.position))
+
+
+def normalize_url_for_query_match(url: str) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    if parsed.scheme and parsed.netloc:
+        path = parsed.path.rstrip("/") or "/"
+        return parsed._replace(scheme=parsed.scheme.lower(), netloc=parsed.netloc.lower(), path=path).geturl()
+    return value.rstrip("/")
 
 
 def classify_page_type(url: str, main_query: str = "") -> str:
@@ -1525,7 +1533,7 @@ def suggest_actions(analysis: GSCPageAnalysis) -> list[str]:
         actions.append("Tester un angle de title plus explicite sur l'intention")
     if analysis.possible_overlap_queries:
         actions.append(
-            "Chevauchement page/requête possible à vérifier avant de conclure à une cannibalisation"
+            "Chevauchement page/requête possible à vérifier avant de conclure à des pages en concurrence"
         )
     if not actions:
         actions.append("RAS prioritaire sur la période analysée")
@@ -1554,7 +1562,7 @@ def estimate_recoverable_clicks(analysis: GSCPageAnalysis) -> tuple[int | None, 
     if ctr_gain >= position_gain and ctr_gain > 0:
         label = (
             f"+{ctr_gain} clics récupérables estimés sur la période analysée "
-            f"si le CTR se rapproche de l’attendu à position {position_bucket}"
+            f"si le taux de clic se rapproche de l’attendu à position {position_bucket}"
         )
     else:
         label = (
@@ -1857,6 +1865,13 @@ def build_report(
     query_opportunities_count = len([query for query in queries if query.impressions >= 30 and query.position <= 20])
     sections = assign_report_sections(results)
     has_query_export = has_queries if has_queries is not None else bool(queries)
+    priority_pages = build_priority_page_cards(results)[:10]
+    priority_page_urls = {normalize_url_for_query_match(str(page.get("url", ""))) for page in priority_pages}
+    snippet_pages = build_snippet_cards(results, excluded_urls=priority_page_urls)[:10]
+    estimated_gain_note = (
+        "Estimation basée sur un alignement CTR médian pour la position actuelle. "
+        "Non garanti — à valider après mise en ligne et suivi GSC sur 30-60 jours."
+    )
     return {
         "title": "GSC SEO Opportunity Report" if mode == "executive" else title,
         "subtitle": "Opportunités de croissance, pages prioritaires et actions recommandées",
@@ -1867,6 +1882,8 @@ def build_report(
         "report_mode": detected_report_mode,
         "report_mode_label": report_mode_label(detected_report_mode),
         "executive_summary": build_executive_summary(results, priority_count, snippet_count, bool(queries)),
+        "estimated_gain_value": f"+{format_number(total_recoverable)} clics potentiels",
+        "estimated_gain_note": estimated_gain_note,
         "monthly_priorities": build_monthly_priorities(results, queries),
         "source_notes": [
             "Analyse basée sur les données Google Search Console exportées.",
@@ -1886,16 +1903,20 @@ def build_report(
             {"label": "Pages analysées", "value": format_number(len(results))},
             {"label": "Clics totaux", "value": format_number(total_clicks)},
             {"label": "Impressions totales", "value": format_number(total_impressions)},
-            {"label": "CTR moyen", "value": format_percent(avg_ctr)},
+            {"label": "Taux de clic moyen", "value": format_percent(avg_ctr)},
             {"label": "Position moyenne", "value": f"{avg_position:.1f}" if avg_position else "-"},
             {"label": "Pages prioritaires", "value": format_number(priority_count)},
-            {"label": "Snippets à retravailler", "value": format_number(snippet_count)},
+            {"label": translate("Snippets à retravailler"), "value": format_number(snippet_count)},
             {"label": "Requêtes exploitables", "value": format_number(query_opportunities_count)},
-            {"label": "Clics récupérables estimés", "value": f"+{format_number(total_recoverable)}"},
+            {"label": "Gain de trafic estimé", "value": "Voir note"},
         ],
         "sections": sections,
-        "priority_pages": build_priority_page_cards(results)[:10],
-        "snippet_pages": build_snippet_cards(results)[:10],
+        "priority_pages": priority_pages,
+        "snippet_pages": snippet_pages,
+        "snippet_section_note": (
+            "Les résultats Google des pages prioritaires sont détaillés dans la section ci-dessus. "
+            "Cette section liste uniquement les pages hors Top 10 prioritaire."
+        ),
         "breakthrough_pages": build_breakthrough_cards(results)[:10],
         "query_sections": build_query_sections(queries, results),
         "top_query_opportunities": build_top_query_opportunities(queries, results, limit=20),
@@ -1988,7 +2009,7 @@ def build_executive_summary(
         else " L’absence de l’export Requêtes limite l’analyse fine de l’intention de recherche."
     )
     snippet_note = (
-        f" {format_count(snippet_count, 'snippet ressort', 'snippets ressortent')} comme candidats à une réécriture prioritaire."
+        f" {format_count(snippet_count, 'résultat Google ressort', 'résultats Google ressortent')} comme candidats à une réécriture prioritaire."
         if snippet_count
         else ""
     )
@@ -2006,14 +2027,14 @@ def build_monthly_priorities(results: list[GSCPageAnalysis], queries: list[GSCQu
     query_count = len([query for query in queries if query.impressions >= 50])
     priorities = [
         {
-            "title": "Améliorer les snippets des pages à fortes impressions",
+            "title": "Améliorer les résultats Google des pages à fortes impressions",
             "why": (
                 f"{format_count(snippet_count, 'page est déjà visible mais sous-cliquée', 'pages sont déjà visibles mais sous-cliquées')}."
                 if snippet_count
                 else "Les pages visibles doivent donner une raison plus claire de cliquer."
             ),
             "action": "Réécrire les titles, les meta descriptions et l’angle d’entrée des pages prioritaires.",
-            "impact": "Potentiel d’amélioration du CTR sans attendre une progression de position.",
+            "impact": "Potentiel d’amélioration du taux de clic sans attendre une progression de position.",
         },
         {
             "title": "Renforcer les pages proches du haut des résultats",
@@ -2062,8 +2083,16 @@ def business_sort_weight(value: str) -> int:
     return {"high": 3, "medium": 2, "low": 1}.get(value, 0)
 
 
-def build_snippet_cards(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
-    return [snippet_to_report_dict(item) for item in sorted(results, key=lambda row: row.impressions, reverse=True) if is_snippet_opportunity(item)]
+def build_snippet_cards(
+    results: list[GSCPageAnalysis],
+    excluded_urls: set[str] | None = None,
+) -> list[dict[str, object]]:
+    excluded = excluded_urls or set()
+    return [
+        snippet_to_report_dict(item)
+        for item in sorted(results, key=lambda row: row.impressions, reverse=True)
+        if is_snippet_opportunity(item) and normalize_url_for_query_match(item.url) not in excluded
+    ]
 
 
 def build_breakthrough_cards(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
@@ -2207,7 +2236,7 @@ def query_to_appendix_row(query: GSCQueryData, results: list[GSCPageAnalysis]) -
         "Requête": row["query"],
         "Clics": row["clicks"],
         "Impressions": row["impressions"],
-        "CTR": row["ctr"],
+        translate("CTR"): row["ctr"],
         "Position": row["position"],
         "Recommandation": row["recommendation"],
     }
@@ -2220,7 +2249,7 @@ def classify_query_recommendation(query: GSCQueryData, results: list[GSCPageAnal
     if lowered.startswith(QUERY_QUESTION_STARTERS) or len(lowered.split()) >= 5:
         return "FAQ"
     if query.ctr < expected_ctr_for_position(query.position) * 0.65 and query.position <= 12:
-        return "snippet/title"
+        return "résultat Google"
     if should_consider_new_content(query, results):
         return "nouveau contenu"
     if 8 < query.position <= 20:
@@ -2315,7 +2344,7 @@ def page_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
         "metrics": {
             "Clics": format_number(item.clicks),
             "Impressions": format_number(item.impressions),
-            "CTR": format_percent(item.ctr),
+            translate("CTR"): format_percent(item.ctr),
             "Position": f"{item.position:.1f}",
             "Gain estimé": f"+{format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "à confirmer",
         },
@@ -2346,7 +2375,7 @@ def action_types_for_page(actions: list[str]) -> list[str]:
     types: list[str] = []
     joined = " ".join(actions).lower()
     if "title" in joined or "méta" in joined or "meta" in joined or "ctr" in joined:
-        types.append("Snippet")
+        types.append(translate("Snippet"))
     if "contenu" in joined or "faq" in joined or "fraîcheur" in joined or "fraicheur" in joined:
         types.append("Contenu")
     if "maillage" in joined or "liens internes" in joined:
@@ -2354,25 +2383,25 @@ def action_types_for_page(actions: list[str]) -> list[str]:
     if "technique" in joined or "redirection" in joined or "supprimer" in joined:
         types.append("Technique")
     if "cannibalisation" in joined or "chevauchement" in joined:
-        types.append("Cannibalisation")
+        types.append("⚠ Pages en compétition")
     return list(dict.fromkeys(types)) or ["Contenu"]
 
 
 def action_label_from_type(action_type: str) -> str:
     labels = {
-        "snippet": "Snippet",
+        "snippet": translate("Snippet"),
         "content refresh": "Contenu",
         "internal linking": "Maillage interne",
         "business page": "Page business",
         "new content": "Nouveau contenu",
-        "cannibalization": "Cannibalisation",
+        "cannibalization": "⚠ Pages en compétition",
         "technical check": "Technique",
     }
     return labels.get(action_type, "Contenu")
 
 
 def css_action_type(label: str) -> str:
-    return strip_accents(label).lower().replace(" ", "-")
+    return re.sub(r"[^a-z0-9-]+", "", strip_accents(label).lower().replace(" ", "-"))
 
 
 def client_priority_label(item: GSCPageAnalysis) -> str:
@@ -2409,7 +2438,7 @@ def diagnostic_for_page(item: GSCPageAnalysis) -> str:
     if is_dead_gsc_page(item):
         return "La page ne capte presque pas de trafic et doit être arbitrée plutôt qu’optimisée à l’aveugle."
     if is_snippet_opportunity(item):
-        return "La page reçoit beaucoup d’impressions mais son CTR reste faible par rapport à sa visibilité."
+        return "La page reçoit beaucoup d’impressions mais son taux de clic reste faible par rapport à sa visibilité."
     if 4 <= item.position <= 10:
         return "La page est déjà proche des premières positions et peut progresser avec un renforcement ciblé."
     if 10 < item.position <= 20:
@@ -2423,7 +2452,7 @@ def impact_for_page(item: GSCPageAnalysis) -> str:
     if item.estimated_recoverable_clicks:
         return f"+{format_number(item.estimated_recoverable_clicks)} clics récupérables estimés"
     if is_snippet_opportunity(item):
-        return "Hausse potentielle du CTR"
+        return "Hausse potentielle du taux de clic"
     if item.position <= 20:
         return "Potentiel de progression SEO"
     return "Impact à confirmer: le signal actuel reste limité."
@@ -2471,7 +2500,8 @@ def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
         "angle": recommendation["reason"],
         "title_example": recommendation["title"],
         "meta_example": recommendation["meta"],
-        "metrics": f"{format_number(item.impressions)} impressions · CTR {format_percent(item.ctr)} · position {item.position:.1f}",
+        "position": item.position,
+        "metrics": f"{format_number(item.impressions)} impressions · taux de clic {format_percent(item.ctr)} · position {item.position:.1f}",
     }
 
 
@@ -2566,8 +2596,8 @@ def sanitize_snippet_text(value: str) -> str:
 def snippet_problem_for_page(item: GSCPageAnalysis) -> str:
     expected = expected_ctr_for_position(item.position)
     if item.ctr < expected * 0.6:
-        return "Cette page reçoit déjà beaucoup d'impressions, mais son CTR reste faible pour sa position."
-    return "La page est visible dans Google : le snippet peut être rendu plus spécifique à l'intention principale."
+        return "Cette page reçoit déjà beaucoup d'impressions, mais son taux de clic reste faible pour sa position."
+    return "La page est visible dans Google : le résultat affiché peut être rendu plus spécifique à l'intention principale."
 
 
 def probable_intent_from_keyword(keyword: str) -> str:
@@ -2594,11 +2624,11 @@ def page_to_breakthrough_dict(item: GSCPageAnalysis) -> dict[str, object]:
 
 def main_action_for_page(item: GSCPageAnalysis) -> str:
     if is_snippet_opportunity(item):
-        return "Retravailler le snippet"
+        return "Améliorer le résultat Google"
     if 4 <= item.position <= 10:
         return "Renforcer contenu, FAQ et maillage interne"
     if item.possible_overlap_queries:
-        return "Vérifier la cannibalisation possible"
+        return "Vérifier les pages en concurrence"
     return "Enrichir la page et créer des liens internes"
 
 
@@ -2608,7 +2638,7 @@ def page_to_appendix_row(item: GSCPageAnalysis) -> dict[str, object]:
         "Priorité": client_priority_label(item),
         "Clics": format_number(item.clicks),
         "Impressions": format_number(item.impressions),
-        "CTR": format_percent(item.ctr),
+        translate("CTR"): format_percent(item.ctr),
         "Position": f"{item.position:.1f}",
         "Gain estimé": f"+{format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "",
         "Action principale": main_action_for_page(item),
@@ -2687,10 +2717,14 @@ def write_html(
 def render_executive_report(report: dict[str, object]) -> str:
     title = str(report["title"])
     kpis = "".join(render_kpi_card(kpi) for kpi in report.get("kpis", []))  # type: ignore[arg-type]
+    estimate_box = render_estimate_box(report)
     priorities = render_monthly_priorities(report.get("monthly_priorities", []))  # type: ignore[arg-type]
     priority_cards = render_priority_page_cards(report.get("priority_pages", []))  # type: ignore[arg-type]
     queries = render_executive_query_opportunities(report.get("top_query_opportunities", []))  # type: ignore[arg-type]
-    snippets = render_snippet_section(report.get("snippet_pages", []))  # type: ignore[arg-type]
+    snippets = render_snippet_section(  # type: ignore[arg-type]
+        report.get("snippet_pages", []),
+        str(report.get("snippet_section_note") or ""),
+    )
     business = render_business_section(report.get("business_opportunities", []))  # type: ignore[arg-type]
     cannibalization = render_cannibalization_groups_section(report.get("cannibalization_groups", []))  # type: ignore[arg-type]
     annexes = render_annex_links(report.get("annex_files", []))  # type: ignore[arg-type]
@@ -2703,8 +2737,8 @@ def render_executive_report(report: dict[str, object]) -> str:
             ("priorites", "Priorités"),
             ("pages-prioritaires", "Pages"),
             ("requetes", "Requêtes"),
-            ("snippets", "Snippets"),
-            ("cannibalisation", "Cannibalisation"),
+            ("snippets", "Résultats Google"),
+            ("cannibalisation", "Pages en concurrence"),
             ("business", "Business"),
             ("plan", "30 jours"),
             ("methodologie", "Méthode"),
@@ -2749,6 +2783,9 @@ def render_executive_report(report: dict[str, object]) -> str:
     .kpi-label,.metric-label,.data-label,.mini-label,.constat-label,.actions-label {{ display:block; color:var(--muted); font-size:10px; font-weight:800; text-transform:uppercase; margin-bottom:4px; }}
     .kpi-value {{ font-size:24px; font-weight:800; }}
     .executive-summary {{ background:var(--accent-soft); border-left:4px solid var(--accent); border-radius:0 8px 8px 0; padding:16px 18px; }}
+    .estimate-box {{ margin-top:18px; background:#FFF7ED; color:#1F2937; border:1px solid #FDBA74; border-left:4px solid #D97706; border-radius:0 8px 8px 0; padding:14px 16px; }}
+    .estimate-box strong {{ display:block; font:800 18px/1.2 "Helvetica Neue", Arial, sans-serif; margin-bottom:5px; }}
+    .estimate-box p {{ margin:0; color:#4B5563; }}
     .priorities-list {{ display:flex; flex-direction:column; gap:0; }}
     .priority-item {{ display:flex; gap:20px; padding:18px 0; border-bottom:1px solid var(--border); break-inside:avoid; }}
     .priority-number {{ min-width:54px; color:#8DB4C9; font-size:42px; font-weight:900; line-height:1; }}
@@ -2764,6 +2801,11 @@ def render_executive_report(report: dict[str, object]) -> str:
     .metric,.data-item {{ padding:10px; background:#FAFAF8; border-right:1px solid #ECEAE4; min-width:0; }}
     .metric:last-child,.data-item:last-child {{ border-right:0; }}
     .metric-value,.data-value {{ display:block; overflow-wrap:anywhere; font-weight:700; }}
+    .position-bar {{ display:flex; align-items:center; gap:10px; margin:-4px 0 14px; }}
+    .position-bar-label {{ color:var(--muted); font:800 10px/1.2 "Helvetica Neue", Arial, sans-serif; text-transform:uppercase; min-width:150px; }}
+    .position-bar-track {{ flex:1; height:7px; background:var(--border); border-radius:999px; overflow:hidden; }}
+    .position-bar-fill {{ height:100%; border-radius:999px; }}
+    .position-bar-value {{ color:var(--muted); font:800 12px/1 "Helvetica Neue", Arial, sans-serif; min-width:30px; text-align:right; }}
     .actions-list,.actions {{ margin:0; padding-left:18px; }}
     .actions-list li,.actions li {{ margin-bottom:5px; }}
     .insight-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; border-top:1px solid var(--border); margin-top:12px; padding-top:12px; }}
@@ -2810,6 +2852,7 @@ def render_executive_report(report: dict[str, object]) -> str:
           <div><span class="cover-meta-label">Période analysée</span><span class="cover-meta-value">{html.escape(str(report.get("period_label", "")).replace("Période analysée: ", ""))}</span></div>
           <div><span class="cover-meta-label">Date de génération</span><span class="cover-meta-value">{html.escape(str(report.get("generated_at") or ""))}</span></div>
         </div>
+        {estimate_box}
         <button onclick="exportPDF()" class="btn-export no-print">Exporter en PDF</button>
       </div>
       <div class="cover-footer">Current period only = opportunités actuelles. Before/After = comparaison entre deux exports.</div>
@@ -2819,11 +2862,12 @@ def render_executive_report(report: dict[str, object]) -> str:
     <section class="report-section" id="synthese">
       <div class="section-header"><h2>Synthèse exécutive</h2><p class="section-intro">Les chiffres et décisions à retenir avant l’exécution.</p></div>
       <section class="kpi-grid">{kpis}</section>
+      {estimate_box}
       <div class="executive-summary"><p>{html.escape(str(report.get("executive_summary", "")))}</p></div>
     </section>
     <section class="report-section" id="priorites"><div class="section-header"><h2>Les 3 priorités du mois</h2></div>{priorities}</section>
     <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>Top 10 pages prioritaires</h2><p class="section-intro">Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business.</p></div>{priority_cards}</section>
-    <section class="report-section" id="requetes"><div class="section-header"><h2>Top 20 requêtes à exploiter</h2><p class="section-intro">Regroupées par intention d’action : snippet/title, FAQ, section, contenu, maillage ou faible valeur.</p></div>{queries}</section>
+    <section class="report-section" id="requetes"><div class="section-header"><h2>Top 20 requêtes à exploiter</h2><p class="section-intro">Regroupées par intention d’action : résultat Google, FAQ, section, contenu, maillage ou faible valeur.</p></div>{queries}</section>
     {snippets}
     {cannibalization}
     <section class="report-section" id="business"><div class="section-header"><h2>Business opportunities</h2><p class="section-intro">Pages à forte valeur business : équipement, comparatifs, tests, affiliation, leads ou produits numériques.</p></div>{business}</section>
@@ -2852,7 +2896,7 @@ def render_report(report: dict[str, object]) -> str:
         ("priorites", "Priorités"),
         ("pages-prioritaires", "Pages"),
         ("requetes", "Requêtes"),
-        ("snippets", "Snippets"),
+        ("snippets", "Résultats Google"),
         ("renforcer", "À renforcer"),
         ("methodologie", "Méthode"),
         ("annexes", "Annexes"),
@@ -3602,19 +3646,32 @@ def render_kpi_card(kpi: dict[str, object]) -> str:
     label_lower = strip_accents(label).lower()
     classes = ["kpi-card"]
     note = ""
-    if "ctr" in label_lower:
+    if "ctr" in label_lower or "taux de clic" in label_lower:
         classes.append("kpi-card--warning")
         note = "<div class='kpi-note'>À surveiller selon la position moyenne</div>"
     elif "prioritaires" in label_lower:
         classes.append("kpi-card--accent")
-    elif "recuperables" in label_lower or value.startswith("+"):
+    elif "recuperables" in label_lower or "gain" in label_lower or value.startswith("+"):
         classes.append("kpi-card--positive")
-        note = "<div class='kpi-note'>clics récupérables</div>"
+        note = "<div class='kpi-note'>estimation qualifiée</div>"
     return (
         f"<div class='{' '.join(classes)}'>"
         f"<div class='kpi-label'>{html.escape(label)}</div>"
         f"<div class='kpi-value'>{html.escape(value)}</div>"
         f"{note}"
+        "</div>"
+    )
+
+
+def render_estimate_box(report: dict[str, object]) -> str:
+    value = str(report.get("estimated_gain_value") or "")
+    note = str(report.get("estimated_gain_note") or "")
+    if not value and not note:
+        return ""
+    return (
+        "<div class='estimate-box'>"
+        f"<strong>Gain de trafic estimé : {html.escape(value)}</strong>"
+        f"<p>{html.escape(note)}</p>"
         "</div>"
     )
 
@@ -3649,8 +3706,6 @@ def render_priority_page_cards(pages: list[dict[str, object]]) -> str:
 def render_client_page_card(page: dict[str, object]) -> str:
     position = parse_position_value(dict(page.get("metrics", {})).get("Position", ""))
     priority_class = page_priority_class(str(page.get("priority", "p3")))
-    position_width = position_fill_width(position)
-    position_color = position_bar_color(position)
     metrics = "".join(
         f"<div class='metric {metric_state_class(str(label))}'>"
         f"<span class='metric-label'>{html.escape(str(label))}</span>"
@@ -3679,11 +3734,7 @@ def render_client_page_card(page: dict[str, object]) -> str:
           <span class="priority-badge priority-badge--{priority_class}">{html.escape(priority_display_label(str(page.get("priority", "p3")), str(page.get("priority_label", ""))))}</span>
         </div>
         <div class="page-metrics">{metrics}</div>
-        <div class="position-bar">
-          <div class="position-bar-label">Position dans Google</div>
-          <div class="position-bar-track"><div class="position-bar-fill" style="width: {position_width:.0f}%; background: {position_color}"></div></div>
-          <span class="position-bar-value">{html.escape(format_position_value(position))}</span>
-        </div>
+        {render_position_bar(position)}
         <div class="page-constat"><span class="constat-label">Constat</span>{html.escape(str(page.get("diagnostic", "")))}</div>
         {recommendation}
         <div class="insight-grid">
@@ -3707,7 +3758,7 @@ def render_data_item(label: str, value: object) -> str:
 
 def metric_state_class(label: str) -> str:
     label_normalized = strip_accents(label).lower()
-    if "ctr" in label_normalized:
+    if "ctr" in label_normalized or "taux de clic" in label_normalized:
         return "metric--warning"
     if "gain" in label_normalized:
         return "metric--positive"
@@ -3757,6 +3808,18 @@ def position_bar_color(position: float) -> str:
     return "#991B1B"
 
 
+def render_position_bar(position: float) -> str:
+    position_width = position_fill_width(position)
+    position_color = position_bar_color(position)
+    return f"""
+        <div class="position-bar">
+          <div class="position-bar-label">Position actuelle dans Google</div>
+          <div class="position-bar-track"><div class="position-bar-fill" style="width: {position_width:.0f}%; background: {position_color}"></div></div>
+          <span class="position-bar-value">{html.escape(format_position_value(position))}</span>
+        </div>
+"""
+
+
 def render_query_sections(sections: list[dict[str, object]], has_queries: bool) -> str:
     if not has_queries:
         return render_empty_state("Export Requêtes non fourni ou non exploitable dans l’export fourni.")
@@ -3790,7 +3853,7 @@ def render_executive_query_opportunities(rows: list[dict[str, object]]) -> str:
         )
     return (
         "<table class='compact-table'><thead><tr>"
-        "<th>Action</th><th>Requête</th><th>Clics</th><th>Impr.</th><th>CTR</th><th>Pos.</th><th>Cible</th>"
+        "<th>Action</th><th>Requête</th><th>Clics</th><th>Impr.</th><th>Taux de clic</th><th>Pos.</th><th>Cible</th>"
         "</tr></thead><tbody>"
         f"{''.join(table_rows)}"
         "</tbody></table>"
@@ -3809,7 +3872,7 @@ def render_query_table(rows: object) -> str:
             "<div class='data-grid'>"
             f"{render_data_item('Clics', row.get('clicks', ''))}"
             f"{render_data_item('Impressions', row.get('impressions', ''))}"
-            f"{render_data_item('CTR', row.get('ctr', ''))}"
+            f"{render_data_item('Taux de clic', row.get('ctr', ''))}"
             f"{render_data_item('Position', row.get('position', ''))}"
             f"{render_data_item('Recommandation', row.get('recommendation', ''))}"
             "</div>"
@@ -3818,21 +3881,24 @@ def render_query_table(rows: object) -> str:
     return f"<div class='data-card-list'>{''.join(cards)}</div>"
 
 
-def render_snippet_section(snippets: list[dict[str, object]]) -> str:
+def render_snippet_section(snippets: list[dict[str, object]], note: str = "") -> str:
     body = (
         f"<div class='cards-grid'>{''.join(render_snippet_card(item) for item in snippets)}</div>"
         if snippets
         else render_empty_state()
     )
+    note_html = f"<p class='reliability-note'>{html.escape(note)}</p>" if note else ""
     return f"""
     <section class="report-section" id="snippets">
-      <div class="section-header"><h2 class="section-title">Snippets à retravailler</h2><p class="section-intro">Des propositions concrètes pour rendre les résultats Google plus cliquables.</p></div>
+      <div class="section-header"><h2 class="section-title">Résultats Google à améliorer</h2><p class="section-intro">Des propositions concrètes pour rendre les titres et descriptions Google plus cliquables.</p></div>
+      {note_html}
       {body}
     </section>
 """
 
 
 def render_snippet_card(item: dict[str, object]) -> str:
+    position = parse_position_value(item.get("position", ""))
     return f"""
       <article class="snippet-card">
         <div class="page-card-header">
@@ -3840,9 +3906,10 @@ def render_snippet_card(item: dict[str, object]) -> str:
             <span class="page-slug">{html.escape(str(item.get("slug", "")))}</span>
             <a class="page-url" href="{html.escape(str(item.get("url", "")))}">{html.escape(str(item.get("url", "")))} ↗</a>
           </div>
-          <span class="priority-badge priority-badge--medium">Snippet</span>
+          <span class="priority-badge priority-badge--medium">Résultat Google</span>
         </div>
         <p class="small-note">{html.escape(str(item.get("metrics", "")))}</p>
+        {render_position_bar(position)}
         <div class="page-constat"><span class="constat-label">Problème</span>{html.escape(str(item.get("problem", "")))}</div>
         <div class="data-grid">
           {render_data_item("Intention", item.get("intent", ""))}
@@ -3910,7 +3977,7 @@ def render_business_section(pages: list[dict[str, object]]) -> str:
 def render_cannibalization_groups_section(groups: list[dict[str, Any]]) -> str:
     visible_groups = [group for group in groups if str(group.get("confidence") or "") in {"medium", "high"}][:5]
     if not visible_groups:
-        body = render_empty_state("Aucun groupe de cannibalisation suffisamment fiable à afficher dans le PDF client.")
+        body = render_empty_state("Aucun groupe de pages en concurrence suffisamment fiable à afficher dans le PDF client.")
     else:
         cards = []
         for group in visible_groups:
@@ -3923,7 +3990,7 @@ def render_cannibalization_groups_section(groups: list[dict[str, Any]]) -> str:
                 f"<h3>{html.escape(str(group.get('topic') or group.get('group_id') or 'Cluster à valider'))}</h3>"
                 "<div class='data-grid'>"
                 f"{render_data_item('Groupe', group.get('group_id', ''))}"
-                f"{render_data_item('Confiance', group.get('confidence', ''))}"
+                f"{render_data_item('Signal', confidence_label(group.get('confidence', '')))}"
                 f"{render_data_item('Requêtes partagées', shared_label)}"
                 f"{render_data_item('URLs', len(urls))}"
                 f"{render_data_item('Action', 'clarification du cluster')}"
@@ -3935,18 +4002,27 @@ def render_cannibalization_groups_section(groups: list[dict[str, Any]]) -> str:
         body = f"<div class='data-card-list'>{''.join(cards)}</div>"
     return f"""
     <section class="report-section" id="cannibalisation">
-      <div class="section-header"><h2>Cannibalisation potentielle</h2><p class="section-intro">Seulement les groupes précis et exploitables. Les alertes faibles restent dans les CSV.</p></div>
+      <div class="section-header"><h2>Pages en concurrence</h2><p class="section-intro">Seulement les groupes précis et exploitables. Les signaux faibles restent dans les CSV.</p></div>
       {body}
     </section>
 """
 
 
+def confidence_label(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "high":
+        return "Signal fort"
+    if normalized == "medium":
+        return "Signal à vérifier"
+    return str(value or "")
+
+
 def render_action_plan_section() -> str:
     weeks = [
-        ("Semaine 1", "Réécrire les 5 snippets prioritaires, corriger titles/metas et valider les requêtes principales."),
+        ("Semaine 1", "Réécrire les 5 résultats Google prioritaires, corriger titres/descriptions et valider les requêtes principales."),
         ("Semaine 2", "Enrichir les 3 pages proches du top 10, ajouter une FAQ utile et renforcer les introductions."),
         ("Semaine 3", "Créer les liens internes depuis les pages visibles et optimiser les ancres autour des intentions cibles."),
-        ("Semaine 4", "Suivre CTR, position et clics dans GSC, puis ajuster les pages dont le signal ne bouge pas."),
+        ("Semaine 4", "Suivre taux de clic, position et clics dans GSC, puis ajuster les pages dont le signal ne bouge pas."),
     ]
     body = "".join(
         "<article class='appendix-card'>"
@@ -3974,10 +4050,10 @@ def render_traffic_section(traffic_chart: str) -> str:
 
 def render_methodology_section(report_mode: str = "current_period_only") -> str:
     items = [
-        "Les clics récupérables sont des estimations, pas des promesses.",
+        "Les gains de trafic estimés sont des ordres de grandeur, pas des promesses.",
         "Les positions sont des moyennes Google Search Console.",
-        "Les priorités sont calculées selon impressions, CTR, position et potentiel d’amélioration.",
-        "Les signaux de cannibalisation doivent être vérifiés manuellement.",
+        "Les priorités sont calculées selon impressions, taux de clic, position et potentiel d’amélioration.",
+        "Les signaux de pages en concurrence doivent être vérifiés manuellement.",
         "Les résultats sont à confirmer après mise en ligne et suivi dans GSC.",
     ]
     if report_mode == "current_period_only":
@@ -4005,7 +4081,7 @@ def render_appendices(pages: list[dict[str, object]], queries: list[dict[str, ob
       {queries_table}
       <h3>Détails méthodologiques et limites</h3>
       <ul class="actions">
-        <li>Google Search Console agrège les positions et les CTR: ce ne sont pas des mesures page par page en temps réel.</li>
+        <li>Google Search Console agrège les positions et les taux de clic: ce ne sont pas des mesures page par page en temps réel.</li>
         <li>Le rapport ne remplace pas une vérification SERP, une analyse de contenu ni un crawl technique complet.</li>
         <li>Les estimations de clics récupérables donnent un ordre de grandeur sur la période exportée.</li>
       </ul>
