@@ -557,6 +557,12 @@ def render_audit_card() -> str:
         <label>Output HTML
           <input type="text" name="html_output" value="" placeholder="reports/audits/audit.html">
         </label>
+        <label>Langue du rapport
+          <select name="lang">
+            <option value="fr" selected>FR</option>
+            <option value="en">EN</option>
+          </select>
+        </label>
         <div class="inline-fields">
           <label class="checkbox-line"><input type="checkbox" name="cache_enabled"> Cache HTTP</label>
           <label class="checkbox-line"><input type="checkbox" name="skip_robots"> Ignorer robots.txt</label>
@@ -883,6 +889,55 @@ def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str
     </section>
     """
     return page_shell(f"File - {relative_path}", content)
+
+
+def render_audit_html_as_toggleable_report(path: Path, variant: str = "full", lang: str = "fr") -> str | None:
+    audit_json = find_audit_json_for_html(path)
+    if not audit_json:
+        return None
+    root_dir = _root_dir()
+    relative_path = audit_json.relative_to(root_dir)
+    return render_audit_report_page(
+        audit_json,
+        relative_path=relative_path,
+        file_size=human_file_size(audit_json.stat().st_size),
+        variant=variant,
+        lang=lang,
+    )
+
+
+def find_audit_json_for_html(path: Path) -> Path | None:
+    root_dir = _root_dir()
+    try:
+        relative_path = path.relative_to(root_dir)
+    except ValueError:
+        return None
+    if path.suffix.lower() != ".html" or not str(relative_path).startswith("reports/audits/"):
+        return None
+
+    candidates = [path.with_suffix(".json")]
+    history_dir = path.with_suffix("")
+    if history_dir.is_dir():
+        candidates.extend(sorted(history_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True))
+    if path.parent.name != path.stem:
+        sibling_history_dir = path.parent / path.stem
+        if sibling_history_dir.is_dir():
+            candidates.extend(sorted(sibling_history_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True))
+
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file() and looks_like_audit_report_json(candidate):
+            return candidate
+    return None
+
+
+def looks_like_audit_report_json(path: Path) -> bool:
+    try:
+        payload = json.loads(path.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and bool(payload.get("domain")) and (
+        "pages_crawled" in payload or "observed_health_score" in payload or "summary" in payload
+    )
 
 
 def file_view_link(path: str, variant: str, lang: str = "fr") -> str:

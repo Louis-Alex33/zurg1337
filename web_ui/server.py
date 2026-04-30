@@ -21,7 +21,7 @@ from .jobs import (
     run_gsc_job,
     run_qualify_job,
 )
-from .rendering import render_dashboard, render_file_page, render_job_page
+from .rendering import render_audit_html_as_toggleable_report, render_dashboard, render_file_page, render_job_page
 
 MAX_POST_BODY_BYTES = 52_428_800
 
@@ -210,6 +210,10 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
             return
         if file_path.suffix.lower() == ".html":
+            audit_report = render_audit_html_as_toggleable_report(file_path, variant=variant, lang=lang)
+            if audit_report is not None:
+                self._send_html(audit_report)
+                return
             self._send_html(file_path.read_text("utf-8", errors="ignore"))
             return
         self._send_html(render_file_page(file_path, variant=variant, lang=lang))

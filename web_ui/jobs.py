@@ -145,6 +145,7 @@ def run_audit_job(job_id: str) -> None:
     input_csv = (job.params.get("input_csv") or "data/domains_scored.csv").strip()
     output_dir = (job.params.get("output_dir") or "reports/audits").strip()
     html_output = (job.params.get("html_output") or "").strip()
+    lang = sanitize_gsc_language((job.params.get("lang") or "fr").strip())
     mode = (job.params.get("mode") or DEFAULT_AUDIT_MODE).strip() or DEFAULT_AUDIT_MODE
     crawl_source = (job.params.get("crawl_source") or DEFAULT_CRAWL_SOURCE).strip() or DEFAULT_CRAWL_SOURCE
     top_raw = (job.params.get("top") or "").strip()
@@ -172,6 +173,7 @@ def run_audit_job(job_id: str) -> None:
             crawl_source=crawl_source,
             respect_robots=respect_robots,
             html_output=html_output or None,
+            lang=lang,
             cache_enabled=cache_enabled,
             site=site or None,
             cancel_callback=job_cancel_callback(job),
@@ -180,6 +182,7 @@ def run_audit_job(job_id: str) -> None:
             f"{len(reports)} audits termines",
             f"Mode: {mode}",
             f"Crawl source: {crawl_source}",
+            f"Langue: {lang.upper()}",
             (
                 f"Budget temps/site: {format_duration(float(max_seconds_raw))}"
                 if max_seconds_raw

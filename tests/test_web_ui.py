@@ -121,6 +121,7 @@ class WebUITests(unittest.TestCase):
             crawl_source="mixed",
             respect_robots=True,
             html_output=None,
+            lang="fr",
             cache_enabled=False,
             site="eversportzone.com",
             cancel_callback=mock_audit_domains.call_args.kwargs["cancel_callback"],
@@ -518,6 +519,46 @@ class WebUITests(unittest.TestCase):
         self.assertNotIn("observée(s) avant la page finale", page)
         self.assertNotIn("Titre Google probablement trop long", page)
         self.assertNotIn("Date visible à actualiser", page)
+
+    def test_audit_html_can_be_rerendered_with_language_toggle_from_json_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            audits_dir = root / "reports" / "audits"
+            history_dir = audits_dir / "example.com"
+            history_dir.mkdir(parents=True, exist_ok=True)
+            audit_html = audits_dir / "example.com.html"
+            audit_html.write_text("<html><body>old static report</body></html>", encoding="utf-8")
+            (history_dir / "2026-04-30T10-00-00.json").write_text(
+                """
+                {
+                  "domain": "example.com",
+                  "audited_at": "2026-04-30T10:00:00",
+                  "pages_crawled": 1,
+                  "observed_health_score": 70,
+                  "summary": {"pages_ok": 1},
+                  "pages": [{"url": "https://example.com/"}]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            import web_ui
+            from web_ui.rendering import render_audit_html_as_toggleable_report
+
+            original_root = web_ui.ROOT_DIR
+            try:
+                web_ui.ROOT_DIR = root.resolve()
+                page = render_audit_html_as_toggleable_report(audit_html.resolve(), lang="en")
+            finally:
+                web_ui.ROOT_DIR = original_root
+
+        self.assertIsNotNone(page)
+        assert page is not None
+        self.assertIn("SEO REPORT", page)
+        self.assertIn(">FR</a>", page)
+        self.assertIn(">EN</a>", page)
+        self.assertIn("lang=en", page)
+        self.assertNotIn("old static report", page)
 
     def test_render_file_page_for_audit_json_supports_portfolio_variant(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
