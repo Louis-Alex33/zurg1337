@@ -252,6 +252,46 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertIn("Retour dashboard", french_report)
         self.assertIn("Synthèse exécutive", french_report)
 
+    def test_english_gsc_render_preserves_source_urls_queries_and_client_data(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            current_csv = root / "pages.csv"
+            queries_csv = root / "queries.csv"
+            output_csv = root / "report.csv"
+            output_html = root / "report.html"
+            source_url = "https://example.com/requetes-principales/"
+            source_query = "Requêtes principales client"
+            client_name = "Client Requêtes Brand"
+
+            current_csv.write_text(
+                "page,clicks,impressions,ctr,position\n"
+                f"{source_url},12,1000,1.2%,8\n",
+                encoding="utf-8",
+            )
+            queries_csv.write_text(
+                "query,page,clicks,impressions,ctr,position\n"
+                f"{source_query},{source_url},8,500,1.6%,7\n",
+                encoding="utf-8",
+            )
+
+            run_gsc_analysis(
+                current_csv=str(current_csv),
+                queries_csv=str(queries_csv),
+                output_csv=str(output_csv),
+                output_html=str(output_html),
+                site_name=client_name,
+                mode="full",
+                lang="en",
+            )
+
+            report = output_html.read_text(encoding="utf-8")
+
+        self.assertIn("Query opportunities", report)
+        self.assertIn(source_url, report)
+        self.assertIn(source_query, report)
+        self.assertIn(client_name, report)
+        self.assertNotIn("main queries client", report)
+
     def test_run_gsc_analysis_accepts_full_search_console_zip(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
