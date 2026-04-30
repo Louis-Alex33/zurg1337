@@ -209,6 +209,7 @@ def run_gsc_job(job_id: str) -> None:
     output_csv = (job.params.get("output_csv") or "reports/gsc_report.csv").strip()
     output_json = (job.params.get("output_json") or "reports/gsc_report.json").strip()
     output_html = (job.params.get("output_html") or "reports/gsc_report.html").strip()
+    mode = (job.params.get("mode") or "executive").strip() or "executive"
     site_name = (job.params.get("site_name") or "").strip()
     niche_stopwords = parse_csv_list((job.params.get("niche_stopwords") or "").strip())
     auto_niche_stopwords = job.params.get("auto_niche_stopwords") == "on"
@@ -230,9 +231,11 @@ def run_gsc_job(job_id: str) -> None:
             site_name=site_name,
             niche_stopwords=niche_stopwords,
             auto_niche_stopwords=auto_niche_stopwords,
+            mode=mode,
         )
         summary = [
             f"{len(results)} pages GSC analysées",
+            f"Mode: {mode}",
             f"CSV: {output_csv}",
         ]
         return [output_csv, output_json, output_html], summary

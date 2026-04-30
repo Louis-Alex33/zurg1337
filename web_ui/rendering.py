@@ -624,6 +624,13 @@ def render_gsc_card() -> str:
           <input type="text" name="site_name" value="">
         </label>
         <p class="field-help">Nom lisible du site ou du client, juste pour rendre les sorties plus propres.</p>
+        <label>Mode rapport
+          <select name="mode">
+            <option value="executive" selected>Executive</option>
+            <option value="full">Full</option>
+          </select>
+        </label>
+        <p class="field-help">Executive garde le PDF court et sort les tableaux complets en annexes CSV. Full inclut les annexes dans le HTML.</p>
         <label>Niche stopwords
           <input type="text" name="niche_stopwords" value="" placeholder="padel,tennis,mutuelle">
         </label>

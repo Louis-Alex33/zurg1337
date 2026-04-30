@@ -198,6 +198,7 @@ class GSCAnalysisTests(unittest.TestCase):
                 output_csv=str(output_csv),
                 output_html=str(output_html),
                 site_name="Example",
+                mode="full",
             )
 
             report = output_html.read_text(encoding="utf-8")
@@ -242,6 +243,7 @@ class GSCAnalysisTests(unittest.TestCase):
                 current_csv=str(archive),
                 output_csv=str(output_csv),
                 output_html=str(output_html),
+                mode="full",
             )
 
             report = output_html.read_text(encoding="utf-8")

@@ -138,7 +138,7 @@ def run_gsc_analysis(
     site_name: str = "",
     niche_stopwords: list[str] | None = None,
     auto_niche_stopwords: bool = False,
-    mode: str = "full",
+    mode: str = "executive",
     annexes_dir: str | None = None,
     site_context: str = "affiliate_media",
     export_csv: bool = False,
@@ -1794,7 +1794,7 @@ def build_report(
     pays_data: list[dict[str, object]] | None = None,
     appareils_data: list[dict[str, object]] | None = None,
     filters_data: dict[str, str] | None = None,
-    mode: str = "full",
+    mode: str = "executive",
     report_mode: str | None = None,
     cannibalization_groups: list[dict[str, Any]] | None = None,
 ) -> dict[str, object]:
@@ -2659,7 +2659,7 @@ def write_html(
     pays_data: list[dict[str, object]] | None = None,
     appareils_data: list[dict[str, object]] | None = None,
     filters_data: dict[str, str] | None = None,
-    mode: str = "full",
+    mode: str = "executive",
     report_mode: str | None = None,
     cannibalization_groups: list[dict[str, Any]] | None = None,
 ) -> Path:
@@ -4204,7 +4204,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pays", help="Export GSC pays")
     parser.add_argument("--appareils", help="Export GSC appareils")
     parser.add_argument("--gsc-folder", help="Dossier avec exports GSC")
-    parser.add_argument("--mode", choices=["full", "executive"], default="full")
+    parser.add_argument("--mode", choices=["executive", "full"], default="executive")
     parser.add_argument("--site-context", default="affiliate_media")
     parser.add_argument("--export-csv", default="true", choices=["true", "false"])
     parser.add_argument("-o", "--output", default="gsc_report.csv", help="CSV de sortie")
