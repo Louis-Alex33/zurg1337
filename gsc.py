@@ -1739,7 +1739,13 @@ def write_executive_exports(
     folder.mkdir(parents=True, exist_ok=True)
     page_rows = [pages_opportunity_export_row(item) for item in results]
     query_rows = [queries_opportunity_export_row(query, results) for query in queries]
-    snippet_rows = [snippet_export_row(item) for item in results if is_snippet_opportunity(item)]
+    snippet_rows = [
+        row
+        for item in results
+        if is_snippet_opportunity(item)
+        for row in [snippet_export_row(item)]
+        if row
+    ]
     cannibalization_rows = [cannibalization_export_row(group) for group in cannibalization_groups]
     paths = [
         write_dict_csv(folder / "pages_opportunities.csv", page_rows),
@@ -1809,6 +1815,8 @@ def snippet_export_row(item: GSCPageAnalysis) -> dict[str, object]:
         intent=probable_intent_from_keyword(item.main_query),
         gsc_data=asdict(item),
     )
+    if not snippet.get("title"):
+        return {}
     return {
         "url": item.url,
         "main_query": item.main_query,
@@ -1831,6 +1839,9 @@ def cannibalization_export_row(group: dict[str, Any]) -> dict[str, object]:
 
 
 def best_target_url_for_query(query: GSCQueryData, results: list[GSCPageAnalysis]) -> str:
+    if query.target_url:
+        result_urls = {normalize_url_for_query_match(item.url): item.url for item in results}
+        return result_urls.get(normalize_url_for_query_match(query.target_url), query.target_url)
     query_slug = re.sub(r"[^a-z0-9]+", "-", strip_accents(query.query).lower()).strip("-")
     if query_slug:
         exact_matches = [
@@ -1934,13 +1945,13 @@ def build_report(
     )
 
     priority_count = sum(1 for item in results if item.priority in {"HIGH", "MEDIUM"} and not is_dead_gsc_page(item))
-    snippet_count = sum(1 for item in results if is_snippet_opportunity(item))
     query_opportunities_count = len([query for query in queries if query.impressions >= 30 and query.position <= 20])
     sections = assign_report_sections(results)
     has_query_export = has_queries if has_queries is not None else bool(queries)
     priority_pages = build_priority_page_cards(results)[:10]
     priority_page_urls = {normalize_url_for_query_match(str(page.get("url", ""))) for page in priority_pages}
     snippet_pages = build_snippet_cards(results, excluded_urls=priority_page_urls)[:10]
+    snippet_count = len(snippet_pages)
     estimated_gain_note = (
         "Estimation basée sur un alignement CTR médian pour la position actuelle. "
         "Non garanti — à valider après mise en ligne et suivi GSC sur 30-60 jours."
@@ -2164,11 +2175,17 @@ def build_snippet_cards(
     excluded_urls: set[str] | None = None,
 ) -> list[dict[str, object]]:
     excluded = excluded_urls or set()
-    return [
-        snippet_to_report_dict(item)
-        for item in sorted(results, key=lambda row: row.impressions, reverse=True)
-        if is_snippet_opportunity(item) and normalize_url_for_query_match(item.url) not in excluded
-    ]
+    cards: list[dict[str, object]] = []
+    for item in sorted(results, key=lambda row: row.impressions, reverse=True):
+        if (
+            not is_pdf_snippet_opportunity(item)
+            or normalize_url_for_query_match(item.url) in excluded
+        ):
+            continue
+        card = snippet_to_report_dict(item)
+        if card:
+            cards.append(card)
+    return cards
 
 
 def build_breakthrough_cards(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
@@ -2262,7 +2279,44 @@ def build_top_query_opportunities(
 def build_business_opportunities(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
     high_value = [item for item in results if item.business_value == "high" and not is_dead_gsc_page(item)]
     high_value.sort(key=lambda item: (item.opportunity_score, item.impressions, item.estimated_recoverable_clicks or 0), reverse=True)
-    return [page_to_report_dict(item) for item in high_value]
+    by_url: dict[str, GSCPageAnalysis] = {}
+    for item in high_value:
+        key = normalize_url_for_query_match(item.url)
+        current = by_url.get(key)
+        if current is None or item.opportunity_score > current.opportunity_score:
+            by_url[key] = item
+    deduped = sorted(
+        by_url.values(),
+        key=lambda item: (item.opportunity_score, item.impressions, item.estimated_recoverable_clicks or 0),
+        reverse=True,
+    )
+    return [page_to_report_dict(item) for item in deduped]
+
+
+def has_specific_snippet_angle(title: str, query: str) -> bool:
+    normalized_title = strip_accents(title).lower()
+    normalized_query = strip_accents(clean_query_for_snippet(query)).lower()
+    if not normalized_title or normalized_title == normalized_query:
+        return False
+    return any(
+        marker in normalized_title
+        for marker in (
+            "critere",
+            "avis",
+            "choix",
+            "methode",
+            "erreur",
+            "regle",
+            "niveau",
+            "inscription",
+            "comparatif",
+            "profil",
+            "style",
+            "reussir",
+            "controle",
+            "points",
+        )
+    )
 
 
 def expected_ctr_for_position(position: float) -> float:
@@ -2353,7 +2407,7 @@ def assign_report_sections(results: list[GSCPageAnalysis]) -> list[dict[str, obj
     predicates = [
         ("opportunites", is_priority_opportunity),
         ("surveiller", is_declining_page),
-        ("google", is_snippet_opportunity),
+        ("google", is_pdf_snippet_opportunity),
         ("percee", is_near_breakthrough),
         ("traction", is_weak_page),
         ("conflits", lambda item: bool(item.possible_overlap_queries)),
@@ -2398,6 +2452,10 @@ def is_snippet_opportunity(item: GSCPageAnalysis) -> bool:
         and bool(item.estimated_recoverable_clicks)
         and any("ctr" in action.lower() or "title" in action.lower() or "méta" in action.lower() for action in item.actions)
     )
+
+
+def is_pdf_snippet_opportunity(item: GSCPageAnalysis) -> bool:
+    return is_snippet_opportunity(item) and item.position <= 30
 
 
 def is_near_breakthrough(item: GSCPageAnalysis) -> bool:
@@ -2567,10 +2625,13 @@ def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
         intent=probable_intent_from_keyword(keyword),
         gsc_data={"clicks": item.clicks, "impressions": item.impressions, "ctr": item.ctr, "position": item.position},
     )
+    if not recommendation.get("title"):
+        return {}
     return {
         "url": item.url,
         "slug": display_slug(item.url),
         "main_query": keyword,
+        "priority": priority_css_class(item),
         "problem": snippet_problem_for_page(item),
         "intent": probable_intent_from_keyword(keyword),
         "angle": recommendation["reason"],
@@ -2620,10 +2681,11 @@ def generate_snippet_recommendation(
         title = title_case_snippet(f"{query} : règles, niveau et inscription")
         meta = f"Faites le point sur {query} : format, niveau attendu, inscription, points et repères utiles avant de vous engager."
     else:
-        title = title_case_snippet(f"{query} : repères pratiques et erreurs à éviter")
-        meta = f"Comprenez {query} avec une réponse structurée, des exemples concrets et les critères utiles pour décider quoi faire ensuite."
+        return {"title": "", "meta": "", "reason": ""}
     title = sanitize_snippet_text(trim_to_length(title, 60))
     meta = sanitize_snippet_text(trim_to_length(meta, 160))
+    if not has_specific_snippet_angle(title, query):
+        return {"title": "", "meta": "", "reason": ""}
     if len(meta) < 120:
         meta = sanitize_snippet_text(f"{meta} Une synthèse pratique pour décider quoi faire ensuite.")
     return {
@@ -2918,13 +2980,19 @@ def render_executive_report(report: dict[str, object]) -> str:
     .position-bar {{ display:flex; align-items:center; gap:10px; margin:-4px 0 14px; }}
     .position-bar-label {{ color:var(--muted); font:800 10px/1.2 "Helvetica Neue", Arial, sans-serif; text-transform:uppercase; min-width:150px; }}
     .position-bar-track {{ flex:1; height:7px; background:var(--border); border-radius:999px; overflow:hidden; }}
-    .position-bar-fill {{ height:100%; border-radius:999px; }}
+    .position-bar-fill {{ height:100%; border-radius:999px; transition:width 600ms ease; }}
     .position-bar-value {{ color:var(--muted); font:800 12px/1 "Helvetica Neue", Arial, sans-serif; min-width:30px; text-align:right; }}
     .actions-list,.actions {{ margin:0; padding-left:18px; }}
     .actions-list li,.actions li {{ margin-bottom:5px; }}
     .insight-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; border-top:1px solid var(--border); margin-top:12px; padding-top:12px; }}
     .chip-row {{ display:flex; flex-wrap:wrap; gap:6px; }}
     .type-tag,.chip {{ display:inline-block; border-radius:999px; padding:3px 8px; background:var(--accent-soft); color:var(--accent); font:700 11px/1.3 "Helvetica Neue", Arial, sans-serif; }}
+    .filter-bar,.summary-links {{ display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 16px; }}
+    .filter-group {{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; }}
+    .filter-label {{ color:var(--muted); font:800 10px/1 "Helvetica Neue", Arial, sans-serif; text-transform:uppercase; margin-right:2px; }}
+    .filter-btn,.summary-link {{ appearance:none; border:1px solid var(--border); background:var(--surface); color:var(--ink); border-radius:8px; padding:7px 10px; font:700 12px/1 "Helvetica Neue", Arial, sans-serif; text-decoration:none; cursor:pointer; }}
+    .filter-btn.is-active {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
+    .is-filtered-out {{ display:none!important; }}
     .business-note {{ margin:10px 0 0; color:var(--muted); }}
     .annex-list {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
     .annex-item {{ background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; font-family:"Helvetica Neue", Arial, sans-serif; font-weight:700; }}
@@ -2936,11 +3004,12 @@ def render_executive_report(report: dict[str, object]) -> str:
     .empty-state {{ background:var(--surface); border:1px dashed var(--border); border-radius:8px; padding:14px; color:var(--muted); }}
     @media print {{
       @page {{ size:A4; margin:14mm 13mm; }}
-      nav,.btn-export,.no-print {{ display:none!important; }}
+      nav,.btn-export,.no-print,.filter-bar,.summary-links {{ display:none!important; }}
       body {{ background:#fff; font-size:11.5px; }}
       .report-container {{ max-width:none; padding:0; }}
       .cover-page {{ margin:0; min-height:267mm; background:#124E78!important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
       .report-section {{ break-before:auto; page-break-before:auto; }}
+      .position-bar-fill {{ width:var(--print-position-width, 100%)!important; }}
       .page-card,.snippet-card,.appendix-card,.query-card,.priority-item {{ break-inside:avoid; page-break-inside:avoid; }}
       .compact-table tr {{ break-inside:avoid; page-break-inside:avoid; }}
       .kpi-grid {{ grid-template-columns:repeat(3,minmax(0,1fr)); }}
@@ -2979,9 +3048,10 @@ def render_executive_report(report: dict[str, object]) -> str:
       <section class="kpi-grid">{kpis}</section>
       {estimate_box}
       <div class="executive-summary"><p>{html.escape(_(str(report.get("executive_summary", ""))))}</p></div>
+      {render_summary_links(active_lang)}
     </section>
     <section class="report-section" id="priorites"><div class="section-header"><h2>{html.escape(_("Les 3 priorités du mois"))}</h2></div>{priorities}</section>
-    <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>{html.escape(_("Top 10 pages prioritaires"))}</h2><p class="section-intro">{html.escape(_("Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business."))}</p></div>{priority_cards}</section>
+    <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>{html.escape(_("Top 10 pages prioritaires"))}</h2><p class="section-intro">{html.escape(_("Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business."))}</p></div>{render_filter_bar("pages-prioritaires")}{priority_cards}</section>
     <section class="report-section" id="requetes"><div class="section-header"><h2>{html.escape(_("Top 20 requêtes à exploiter"))}</h2><p class="section-intro">{html.escape(_("Regroupées par intention d’action : résultat Google, FAQ, section, contenu, maillage ou faible valeur."))}</p></div>{queries}</section>
     {snippets}
     {cannibalization}
@@ -2997,6 +3067,35 @@ def render_executive_report(report: dict[str, object]) -> str:
       window.print();
       document.title = original;
     }}
+    document.addEventListener('DOMContentLoaded', function() {{
+      document.querySelectorAll('.position-bar-fill').forEach(function(bar, index) {{
+        bar.style.transitionDelay = (index * 80) + 'ms';
+        requestAnimationFrame(function() {{
+          bar.style.width = (bar.dataset.positionWidth || '0') + '%';
+        }});
+      }});
+      document.querySelectorAll('.filter-btn[data-filter-kind="priority"]').forEach(function(button) {{
+        button.addEventListener('click', function() {{
+          const section = document.getElementById(button.dataset.section || '');
+          if (!section) return;
+          const value = button.dataset.filterValue || 'all';
+          section.querySelectorAll('.filter-btn[data-filter-kind="priority"]').forEach(function(peer) {{
+            peer.classList.toggle('is-active', peer === button);
+          }});
+          section.querySelectorAll('.page-card, .snippet-card').forEach(function(card) {{
+            card.classList.toggle('is-filtered-out', value !== 'all' && card.dataset.priority !== value);
+          }});
+        }});
+      }});
+      document.querySelectorAll('#synthese a[href^="#"]').forEach(function(link) {{
+        link.addEventListener('click', function(event) {{
+          const target = document.querySelector(link.getAttribute('href'));
+          if (!target) return;
+          event.preventDefault();
+          target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+        }});
+      }});
+    }});
   </script>
 </body>
 </html>"""
@@ -3458,6 +3557,7 @@ def render_report(report: dict[str, object]) -> str:
       height: 100%;
       border-radius: 3px;
       background: var(--color-positive);
+      transition: width 600ms ease;
     }}
     .position-bar-value {{
       font-size: 12px;
@@ -3544,6 +3644,36 @@ def render_report(report: dict[str, object]) -> str:
       border-radius: 20px;
       font-weight: 500;
     }}
+    .filter-bar, .summary-links {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0 16px;
+    }}
+    .filter-group {{ display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }}
+    .filter-label {{
+      color: var(--color-text-muted);
+      font: 700 10px/1 "Helvetica Neue", Arial, sans-serif;
+      text-transform: uppercase;
+      margin-right: 2px;
+    }}
+    .filter-btn, .summary-link {{
+      appearance: none;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text-primary);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font: 700 12px/1 "Helvetica Neue", Arial, sans-serif;
+      text-decoration: none;
+      cursor: pointer;
+    }}
+    .filter-btn.is-active {{
+      background: var(--color-accent);
+      border-color: var(--color-accent);
+      color: #fff;
+    }}
+    .is-filtered-out {{ display: none !important; }}
     .why {{ font-style: italic; margin: 0; color: var(--color-text-secondary); }}
     .query-note {{
       color: var(--color-medium);
@@ -3670,6 +3800,8 @@ def render_report(report: dict[str, object]) -> str:
     @media print {{
       .btn-export,
       nav,
+      .filter-bar,
+      .summary-links,
       .no-print {{ display: none !important; }}
       @page {{
         size: A4;
@@ -3710,6 +3842,7 @@ def render_report(report: dict[str, object]) -> str:
       .page-card {{ display: block !important; }}
       .report-section, .report-panel {{ break-before: auto; page-break-before: auto; }}
       .appendix {{ break-inside: auto; page-break-inside: auto; }}
+      .position-bar-fill {{ width: var(--print-position-width, 100%) !important; }}
     }}
   </style>
 </head>
@@ -3750,6 +3883,7 @@ def render_report(report: dict[str, object]) -> str:
       <div class="section-header"><h2 class="section-title">{html.escape(_("Synthèse exécutive"))}</h2><p class="section-intro">{html.escape(_("Les indicateurs à retenir avant d’entrer dans le détail."))}</p></div>
       <section class="kpi-grid" aria-label="{html.escape(_("Indicateurs clés"))}">{kpis}</section>
       <div class="executive-summary"><p>{html.escape(_(str(report.get("executive_summary", ""))))}</p></div>
+      {render_summary_links(active_lang)}
     </section>
 
     <section class="report-section priorities-section" id="priorites">
@@ -3759,6 +3893,7 @@ def render_report(report: dict[str, object]) -> str:
 
     <section class="report-section" id="pages-prioritaires">
       <div class="section-header"><div class="section-tag">{html.escape(_("Priorité 1"))}</div><h2 class="section-title">{html.escape(_("Top pages à traiter en premier"))}</h2><p class="section-intro">{html.escape(_("Les pages avec le meilleur rapport visibilité, effort et potentiel."))}</p></div>
+      {render_filter_bar("pages-prioritaires")}
       {priority_cards}
       <p class="reliability-note">{html.escape(_("Les clics récupérables estimés sont un ordre de grandeur, pas une promesse. À confirmer après mise en ligne et suivi dans Google Search Console."))}</p>
     </section>
@@ -3784,6 +3919,35 @@ def render_report(report: dict[str, object]) -> str:
       window.print();
       document.title = original;
     }}
+    document.addEventListener('DOMContentLoaded', function() {{
+      document.querySelectorAll('.position-bar-fill').forEach(function(bar, index) {{
+        bar.style.transitionDelay = (index * 80) + 'ms';
+        requestAnimationFrame(function() {{
+          bar.style.width = (bar.dataset.positionWidth || '0') + '%';
+        }});
+      }});
+      document.querySelectorAll('.filter-btn[data-filter-kind="priority"]').forEach(function(button) {{
+        button.addEventListener('click', function() {{
+          const section = document.getElementById(button.dataset.section || '');
+          if (!section) return;
+          const value = button.dataset.filterValue || 'all';
+          section.querySelectorAll('.filter-btn[data-filter-kind="priority"]').forEach(function(peer) {{
+            peer.classList.toggle('is-active', peer === button);
+          }});
+          section.querySelectorAll('.page-card, .snippet-card').forEach(function(card) {{
+            card.classList.toggle('is-filtered-out', value !== 'all' && card.dataset.priority !== value);
+          }});
+        }});
+      }});
+      document.querySelectorAll('#synthese a[href^="#"]').forEach(function(link) {{
+        link.addEventListener('click', function(event) {{
+          const target = document.querySelector(link.getAttribute('href'));
+          if (!target) return;
+          event.preventDefault();
+          target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+        }});
+      }});
+    }});
   </script>
 </body>
 </html>"""
@@ -3879,7 +4043,7 @@ def render_client_page_card(page: dict[str, object], lang: str = "fr") -> str:
         else ""
     )
     return f"""
-      <article class="page-card page-card--{priority_class}">
+      <article class="page-card page-card--{priority_class}" data-priority="{html.escape(priority_class)}">
         <div class="page-card-header">
           <div class="page-info">
             <span class="page-slug">{html.escape(str(page.get("slug", "")))}</span>
@@ -3958,10 +4122,10 @@ def position_fill_width(position: float) -> float:
 
 def position_bar_color(position: float) -> str:
     if position <= 3:
-        return "#059669"
+        return "#22c55e"
     if position <= 10:
-        return "#D97706"
-    return "#991B1B"
+        return "#f59e0b"
+    return "#ef4444"
 
 
 def render_position_bar(position: float, lang: str = "fr") -> str:
@@ -3971,7 +4135,7 @@ def render_position_bar(position: float, lang: str = "fr") -> str:
     return f"""
         <div class="position-bar">
           <div class="position-bar-label">{html.escape(_("Position actuelle dans Google"))}</div>
-          <div class="position-bar-track"><div class="position-bar-fill" style="width: {position_width:.0f}%; background: {position_color}"></div></div>
+          <div class="position-bar-track"><div class="position-bar-fill" data-position-width="{position_width:.0f}" style="width: 0%; --print-position-width: {position_width:.0f}%; background: {position_color}"></div></div>
           <span class="position-bar-value">{html.escape(format_position_value(position))}</span>
         </div>
 """
@@ -4053,6 +4217,7 @@ def render_snippet_section(snippets: list[dict[str, object]], note: str = "", la
     <section class="report-section" id="snippets">
       <div class="section-header"><h2 class="section-title">{html.escape(_("Résultats Google à améliorer"))}</h2><p class="section-intro">{html.escape(_("Des propositions concrètes pour rendre les titres et descriptions Google plus cliquables."))}</p></div>
       {note_html}
+      {render_filter_bar("snippets")}
       {body}
     </section>
 """
@@ -4061,8 +4226,9 @@ def render_snippet_section(snippets: list[dict[str, object]], note: str = "", la
 def render_snippet_card(item: dict[str, object], lang: str = "fr") -> str:
     _ = gsc_gettext(lang)
     position = parse_position_value(item.get("position", ""))
+    priority_class = page_priority_class(str(item.get("priority", "p3")))
     return f"""
-      <article class="snippet-card">
+      <article class="snippet-card" data-priority="{html.escape(priority_class)}">
         <div class="page-card-header">
           <div class="page-info">
             <span class="page-slug">{html.escape(str(item.get("slug", "")))}</span>
@@ -4304,6 +4470,23 @@ def nav_label(title: str) -> str:
     return replacements.get(title, title)
 
 
+def render_summary_links(lang: str = "fr") -> str:
+    _ = gsc_gettext(lang)
+    links = [
+        ("pages-prioritaires", "Pages"),
+        ("snippets", "Résultats Google"),
+        ("business", "Business"),
+    ]
+    return (
+        "<div class='summary-links'>"
+        + "".join(
+            f"<a class='summary-link' href='#{html.escape(anchor)}'>{html.escape(_(label))}</a>"
+            for anchor, label in links
+        )
+        + "</div>"
+    )
+
+
 def render_report_section(section: dict[str, object]) -> str:
     pages = section.get("pages", [])
     section_id = str(section["id"])
@@ -4334,17 +4517,12 @@ def render_report_section(section: dict[str, object]) -> str:
 
 def render_filter_bar(section_id: str) -> str:
     priorities = [("all", "Toutes"), ("high", "Haute"), ("medium", "Moyenne"), ("low", "Faible")]
-    actions = [("all", "Toutes"), ("snippet", "Résultat Google"), ("contenu", "Enrichir le contenu"), ("liens", "Liens internes")]
     priority_buttons = "".join(
         filter_button(section_id, "priority", value, label, active=value == "all") for value, label in priorities
-    )
-    action_buttons = "".join(
-        filter_button(section_id, "action", value, label, active=value == "all") for value, label in actions
     )
     return f"""
       <div class="filter-bar">
         <div class="filter-group"><span class="filter-label">Urgence</span>{priority_buttons}</div>
-        <div class="filter-group"><span class="filter-label">Action</span>{action_buttons}</div>
       </div>
 """
 

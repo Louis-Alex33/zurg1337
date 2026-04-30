@@ -8,6 +8,8 @@ from zipfile import ZipFile
 from gsc import (
     analyze_pages,
     build_report,
+    build_business_opportunities,
+    build_snippet_cards,
     calculate_ctr,
     compare_gsc_periods,
     derive_auto_stopwords,
@@ -360,6 +362,55 @@ class GSCAnalysisTests(unittest.TestCase):
         by_url = {item.url: item for item in results}
         self.assertEqual(by_url["https://example.com/prepa-mentale-padel/"].main_query, "prepa mentale padel")
         self.assertEqual(by_url["https://example.com/tournoi-padel-p100/"].main_query, "p100 padel")
+
+    def test_snippet_cards_exclude_generic_fallback_and_position_over_30(self) -> None:
+        generic = GSCPageAnalysis(
+            url="https://example.com/prepa-mentale-padel/",
+            clicks=1,
+            impressions=1000,
+            ctr=0.001,
+            position=8,
+            main_query="prepa mentale padel",
+            actions=["Revoir title et méta description pour mieux convertir les impressions"],
+            estimated_recoverable_clicks=40,
+        )
+        far = GSCPageAnalysis(
+            url="https://example.com/tournoi-padel-p100/",
+            clicks=1,
+            impressions=1000,
+            ctr=0.001,
+            position=31,
+            main_query="tournoi padel p100",
+            actions=["Revoir title et méta description pour mieux convertir les impressions"],
+            estimated_recoverable_clicks=40,
+        )
+
+        cards = build_snippet_cards([generic, far])
+
+        self.assertEqual(cards, [])
+
+    def test_business_opportunities_deduplicate_urls_by_score(self) -> None:
+        low_score = GSCPageAnalysis(
+            url="https://example.com/test-raquette/",
+            impressions=500,
+            clicks=10,
+            position=8,
+            business_value="high",
+            opportunity_score=10,
+        )
+        high_score = GSCPageAnalysis(
+            url="https://example.com/test-raquette",
+            impressions=500,
+            clicks=10,
+            position=8,
+            business_value="high",
+            opportunity_score=25,
+        )
+
+        rows = build_business_opportunities([low_score, high_score])
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["opportunity_score"], 25)
 
     def test_run_gsc_analysis_falls_back_to_page_slug_without_query_page_column(self) -> None:
         with TemporaryDirectory() as tmp_dir:
