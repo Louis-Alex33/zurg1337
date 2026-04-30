@@ -375,6 +375,7 @@ class WebUITests(unittest.TestCase):
                 """
                 {
                   "domain": "example.com",
+                  "lang": "fr",
                   "audited_at": "2026-04-15T00:47:42",
                   "pages_crawled": 30,
                   "observed_health_score": 65,
@@ -462,6 +463,7 @@ class WebUITests(unittest.TestCase):
                 """
                 {
                   "domain": "example.com",
+                  "lang": "fr",
                   "audited_at": "2026-04-15T00:47:42",
                   "pages_crawled": 12,
                   "observed_health_score": 68,

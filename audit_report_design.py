@@ -603,7 +603,7 @@ def render_premium_audit_report(
     *,
     standalone: bool = True,
     overrides: dict[str, Any] | None = None,
-    lang: str = "fr",
+    lang: str | None = None,
 ) -> str:
     active_lang = sanitize_report_language(lang)
     context = prepare_audit_report_context(source, overrides=overrides, lang=active_lang)
@@ -635,13 +635,13 @@ def prepare_audit_report_context(
     source: Any,
     *,
     overrides: dict[str, Any] | None = None,
-    lang: str = "fr",
+    lang: str | None = None,
 ) -> dict[str, Any]:
     data = object_to_mapping(source)
     if overrides:
         data = {**data, **overrides}
     data = resolve_all_placeholders(data)
-    active_lang = sanitize_report_language(str(data.get("lang") or data.get("report_lang") or lang))
+    active_lang = sanitize_report_language(str(lang or data.get("lang") or data.get("report_lang") or "fr"))
     summary = as_dict(data.get("summary"))
     pages = [as_dict(page) for page in data.get("pages", []) if isinstance(page, dict)]
     pages_by_url = {str(page.get("url") or ""): page for page in pages if page.get("url")}
