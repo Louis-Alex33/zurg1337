@@ -12,7 +12,7 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from zipfile import BadZipFile, ZipFile
 
 from config import GSC_CANNIBAL_STOPWORDS, GSC_STRUCTURAL_SLUGS, GSC_TECHNICAL_URL_PATTERNS, GSC_TECHNICAL_URL_SUFFIXES
@@ -87,6 +87,199 @@ GENERIC_SNIPPET_PHRASES = (
     "promesse plus concrète",
     "promesse plus concrete",
 )
+
+SUPPORTED_GSC_LANGUAGES = {"fr", "en"}
+
+
+def sanitize_gsc_language(lang: str | None) -> str:
+    return "en" if str(lang or "").strip().lower() == "en" else "fr"
+
+
+def alternate_gsc_html_path(output_path: str, lang: str) -> str:
+    active_lang = sanitize_gsc_language(lang)
+    path = Path(output_path)
+    stem = path.stem
+    for suffix in (".fr", ".en"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    return str(path.with_name(f"{stem}.{active_lang}{path.suffix or '.html'}"))
+
+
+GSC_EN_REPLACEMENTS: dict[str, str] = {
+    "Plan d’action SEO basé sur Google Search Console": "SEO action plan based on Google Search Console",
+    "Plan d'action basé sur les données Google Search Console": "Action plan based on Google Search Console data",
+    "Opportunités de croissance, pages prioritaires et actions recommandées": "Growth opportunities, priority pages, and recommended actions",
+    "Rapport SEO · Google Search Console": "SEO Report · Google Search Console",
+    "Audit SEO GSC": "GSC SEO Audit",
+    "Basé sur les données Google Search Console exportées.": "Based on exported Google Search Console data.",
+    "Domaine analysé": "Analyzed domain",
+    "Domaine": "Domain",
+    "Non précisé": "Not specified",
+    "Période analysée": "Analyzed period",
+    "Période analysée: export Google Search Console fourni": "Analyzed period: provided Google Search Console export",
+    "Date de génération": "Generation date",
+    "Période": "Period",
+    "Généré le": "Generated on",
+    "Navigation du rapport": "Report navigation",
+    "Indicateurs clés": "Key indicators",
+    "Priorités": "Priorities",
+    "Méthode": "Method",
+    "30 jours": "30 days",
+    "Exporter en PDF": "Export PDF",
+    "Retour dashboard": "Back to dashboard",
+    "Retour home": "Back home",
+    "Synthèse exécutive": "Executive summary",
+    "Les chiffres et décisions à retenir avant l’exécution.": "The numbers and decisions to keep in mind before execution.",
+    "Les indicateurs à retenir avant d’entrer dans le détail.": "The key indicators before getting into the details.",
+    "Les 3 priorités du mois": "The 3 priorities for the month",
+    "Un plan d’action volontairement court pour décider vite.": "A deliberately short action plan for faster decisions.",
+    "Top 10 pages prioritaires": "Top 10 priority pages",
+    "Top pages à traiter en premier": "Top pages to tackle first",
+    "Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business.": "Maximum 10 pages in the main PDF, ranked by SEO potential and business value.",
+    "Les pages avec le meilleur rapport visibilité, effort et potentiel.": "Pages with the best mix of visibility, effort, and potential.",
+    "Top 20 requêtes à exploiter": "Top 20 queries to use",
+    "Exploitation des requêtes": "Query opportunities",
+    "Une sélection limitée aux requêtes utiles pour orienter les titles, FAQ et contenus.": "A shortlist of useful queries to guide titles, FAQs, and content.",
+    "Résultats Google": "Google results",
+    "Résultats Google à améliorer": "Google results to improve",
+    "Des propositions concrètes pour rendre les titres et descriptions Google plus cliquables.": "Concrete suggestions to make Google titles and descriptions more clickable.",
+    "Business opportunities": "Business opportunities",
+    "Pages à forte valeur business : équipement, comparatifs, tests, affiliation, leads ou produits numériques.": "High business value pages: equipment, comparisons, reviews, affiliation, leads, or digital products.",
+    "Pages en concurrence": "Competing pages",
+    "Seulement les groupes précis et exploitables. Les signaux faibles restent dans les CSV.": "Only precise and actionable groups. Weak signals stay in the CSV files.",
+    "Plan d'action 30 jours": "30-day action plan",
+    "Un déroulé court pour transformer le rapport en exécution.": "A short sequence to turn the report into execution.",
+    "Comment lire ce rapport": "How to read this report",
+    "Les règles de lecture pour éviter les mauvaises interprétations.": "Reading rules to avoid misinterpretation.",
+    "Annexes séparées": "Separate appendices",
+    "Les tableaux complets sont fournis en annexes CSV. Le PDF principal reste volontairement court pour la décision.": "Full tables are provided as CSV appendices. The main PDF stays intentionally short for decision-making.",
+    "Annexes": "Appendices",
+    "Données complètes et limites méthodologiques.": "Complete data and methodology limits.",
+    "Tableau complet des pages analysées": "Full table of analyzed pages",
+    "Tableau complet des requêtes": "Full query table",
+    "Détails méthodologiques et limites": "Methodology details and limits",
+    "Évolution du trafic": "Traffic trend",
+    "Évolution quotidienne des clics, si l’export Graphique est disponible.": "Daily click trend, when the Chart export is available.",
+    "Origine du trafic": "Traffic origin",
+    "Répartition des clics par pays et par appareil.": "Clicks split by country and device.",
+    "Par pays": "By country",
+    "Par appareil": "By device",
+    "Pages analysées": "Analyzed pages",
+    "Clics totaux": "Total clicks",
+    "Impressions totales": "Total impressions",
+    "Taux de clic moyen": "Average click-through rate",
+    "Position moyenne": "Average position",
+    "Pages prioritaires": "Priority pages",
+    "Requêtes exploitables": "Actionable queries",
+    "Gain de trafic estimé": "Estimated traffic gain",
+    "Gain estimé": "Estimated gain",
+    "Taux de clic": "Click-through rate",
+    "Clics": "Clicks",
+    "Impressions": "Impressions",
+    "Position": "Position",
+    "Action": "Action",
+    "Requête": "Query",
+    "Cible": "Target",
+    "Valeur": "Value",
+    "Monétisation": "Monetization",
+    "Score": "Score",
+    "Recommandation": "Recommendation",
+    "Constat": "Finding",
+    "Problème": "Problem",
+    "Intention": "Intent",
+    "Angle": "Angle",
+    "Meta": "Meta",
+    "Effort estimé": "Estimated effort",
+    "Valeur business": "Business value",
+    "Type d'action": "Action type",
+    "Impact attendu": "Expected impact",
+    "Action recommandée spécifique": "Specific recommended action",
+    "Action principale": "Main action",
+    "Position actuelle dans Google": "Current Google position",
+    "Pourquoi :": "Why:",
+    "Action :": "Action:",
+    "Impact :": "Impact:",
+    "Priorité haute": "High priority",
+    "Priorité moyenne": "Medium priority",
+    "Priorité faible": "Low priority",
+    "À arbitrer": "To decide",
+    "Priorité 1": "Priority 1",
+    "Priorité 2": "Priority 2",
+    "Priorité 3": "Priority 3",
+    "Résultat Google": "Google result",
+    "Résultat Google (titre + description)": "Google result (title + description)",
+    "Contenu": "Content",
+    "Maillage interne": "Internal linking",
+    "Page business": "Business page",
+    "Nouveau contenu": "New content",
+    "Technique": "Technical",
+    "Pages en compétition": "Competing pages",
+    "Élevé": "High",
+    "Faible": "Low",
+    "Moyen": "Medium",
+    "oui": "yes",
+    "non": "no",
+    "à confirmer": "to confirm",
+    "à valider": "to validate",
+    "à ignorer / faible valeur": "ignore / low value",
+    "résultat Google": "Google result",
+    "nouveau contenu": "new content",
+    "maillage interne": "internal linking",
+    "section à ajouter": "section to add",
+    "à utiliser dans un title/meta": "use in a title/meta",
+    "à intégrer dans une page existante": "add to an existing page",
+    "à considérer comme nouveau contenu": "consider as new content",
+    "Export Pages précédent: fourni": "Previous Pages export: provided",
+    "Export Pages précédent: non fourni": "Previous Pages export: not provided",
+    "Export Requêtes: fourni et exploité pour qualifier les intentions de recherche.": "Queries export: provided and used to qualify search intent.",
+    "Export Requêtes: non fourni, les recommandations s’appuient surtout sur les pages.": "Queries export: not provided, recommendations mostly rely on pages.",
+    "Analyse basée sur les données Google Search Console exportées.": "Analysis based on exported Google Search Console data.",
+    "Sans export précédent, ce rapport ne diagnostique pas une baisse de trafic.": "Without a previous export, this report does not diagnose a traffic drop.",
+    "Les baisses et gains doivent être lus comme des variations entre les deux exports fournis.": "Drops and gains should be read as changes between the two provided exports.",
+    "Current period only = opportunités actuelles. Before/After = comparaison entre deux exports.": "Current period only = current opportunities. Before/After = comparison between two exports.",
+    "Current period analysis: aucun export précédent fourni, ce rapport identifie des opportunités sur la visibilité actuelle.": "Current period analysis: no previous export provided, this report identifies opportunities in current visibility.",
+    "Before/After traffic comparison: export précédent fourni, les variations peuvent être contextualisées.": "Before/After traffic comparison: previous export provided, changes can be contextualized.",
+    "Les gains estimés sont des ordres de grandeur, pas des promesses de trafic.": "Estimated gains are rough orders of magnitude, not traffic promises.",
+    "Les gains de trafic estimés sont des ordres de grandeur, pas des promesses.": "Estimated traffic gains are rough orders of magnitude, not promises.",
+    "Les positions sont des moyennes Google Search Console.": "Positions are Google Search Console averages.",
+    "Les priorités sont calculées selon impressions, taux de clic, position et potentiel d’amélioration.": "Priorities are calculated from impressions, click-through rate, position, and improvement potential.",
+    "Les signaux de pages en concurrence doivent être vérifiés manuellement.": "Competing-page signals must be checked manually.",
+    "Les résultats sont à confirmer après mise en ligne et suivi dans GSC.": "Results must be confirmed after publishing and monitoring in GSC.",
+    "Aucun export précédent n’a été fourni: le rapport ne diagnostique pas une baisse de trafic.": "No previous export was provided: this report does not diagnose a traffic drop.",
+    "La comparaison Before/After dépend strictement des deux exports fournis et de leurs périodes.": "The Before/After comparison depends strictly on the two provided exports and their periods.",
+    "Analyse basée sur les données Google Search Console exportées. Les recommandations doivent être priorisées avec la connaissance métier du site.": "Analysis based on exported Google Search Console data. Recommendations should be prioritized with business knowledge of the site.",
+    "Les clics récupérables estimés sont un ordre de grandeur, pas une promesse. À confirmer après mise en ligne et suivi dans Google Search Console.": "Estimated recoverable clicks are an order of magnitude, not a promise. Confirm after publication and Google Search Console monitoring.",
+    "À surveiller selon la position moyenne": "Watch according to average position",
+    "estimation qualifiée": "qualified estimate",
+    "Aucun signal prioritaire détecté sur cette catégorie dans l’export fourni.": "No priority signal detected for this category in the provided export.",
+    "Export Requêtes non fourni ou non exploitable dans l’export fourni.": "Queries export not provided or not usable in the provided export.",
+    "Export Requêtes non fourni ou aucune requête exploitable détectée.": "Queries export not provided or no actionable query detected.",
+    "Aucune page high business value ne ressort clairement dans cet export.": "No clear high business value page stands out in this export.",
+    "Aucun groupe de pages en concurrence suffisamment fiable à afficher dans le PDF client.": "No competing-page group is reliable enough to show in the client PDF.",
+    "Aucune donnée pays disponible.": "No country data available.",
+    "Aucune donnée appareil disponible.": "No device data available.",
+    "Aucun export Requêtes exploitable dans cette analyse.": "No usable Queries export in this analysis.",
+    "Google Search Console agrège les positions et les taux de clic: ce ne sont pas des mesures page par page en temps réel.": "Google Search Console aggregates positions and click-through rates: these are not real-time page-by-page measurements.",
+    "Le rapport ne remplace pas une vérification SERP, une analyse de contenu ni un crawl technique complet.": "This report does not replace a SERP review, content analysis, or full technical crawl.",
+    "Les estimations de clics récupérables donnent un ordre de grandeur sur la période exportée.": "Recoverable click estimates give an order of magnitude for the exported period.",
+}
+
+
+def localize_gsc_html(document: str, lang: str) -> str:
+    if sanitize_gsc_language(lang) != "en":
+        return document
+    localized = document
+    for source, target in sorted(GSC_EN_REPLACEMENTS.items(), key=lambda item: len(item[0]), reverse=True):
+        localized = localized.replace(source, target)
+    localized = localized.replace("clics récupérables estimés", "estimated recoverable clicks")
+    localized = localized.replace("clics de gain estimé", "estimated click gain")
+    localized = localized.replace("période analysée", "analyzed period")
+    localized = localized.replace("requêtes principales", "main queries")
+    localized = localized.replace("requête principale", "main query")
+    localized = localized.replace("requêtes", "queries")
+    localized = localized.replace("Requêtes", "Queries")
+    return localized
 BUSINESS_HIGH_TERMS = (
     "raquette",
     "chaussure",
@@ -142,9 +335,11 @@ def run_gsc_analysis(
     annexes_dir: str | None = None,
     site_context: str = "affiliate_media",
     export_csv: bool = False,
+    lang: str = "fr",
 ) -> list[GSCPageAnalysis]:
     if mode not in {"full", "executive"}:
         raise CLIError(f"Mode GSC inconnu: {mode}. Valeurs: full, executive.")
+    active_lang = sanitize_gsc_language(lang)
     current = parse_pages_csv(current_csv)
     previous = parse_pages_csv(previous_csv) if previous_csv else None
     effective_queries_csv = queries_csv
@@ -190,6 +385,12 @@ def run_gsc_analysis(
     if output_json:
         write_json(results, output_json)
     if output_html:
+        alternate_lang = "en" if active_lang == "fr" else "fr"
+        alternate_html = alternate_gsc_html_path(output_html, alternate_lang)
+        language_paths = {
+            active_lang: output_html,
+            alternate_lang: alternate_html,
+        }
         write_html(
             results,
             output_html,
@@ -204,6 +405,27 @@ def run_gsc_analysis(
             mode=mode,
             report_mode=detect_report_mode({"current": current_csv, "previous": previous_csv}),
             cannibalization_groups=cannibalization_groups,
+            lang=active_lang,
+            html_output_path=output_html,
+            language_paths=language_paths,
+        )
+        write_html(
+            results,
+            alternate_html,
+            site_name=site_name,
+            has_previous=bool(previous_csv),
+            has_queries=bool(queries),
+            queries_data=queries,
+            graphique_data=load_graphique(effective_graphique_csv),
+            pays_data=load_pays(effective_pays_csv),
+            appareils_data=load_appareils(effective_appareils_csv),
+            filters_data=load_filters(current_csv),
+            mode=mode,
+            report_mode=detect_report_mode({"current": current_csv, "previous": previous_csv}),
+            cannibalization_groups=cannibalization_groups,
+            lang=alternate_lang,
+            html_output_path=alternate_html,
+            language_paths=language_paths,
         )
     return results
 
@@ -1805,7 +2027,11 @@ def build_report(
     mode: str = "executive",
     report_mode: str | None = None,
     cannibalization_groups: list[dict[str, Any]] | None = None,
+    lang: str = "fr",
+    html_output_path: str = "",
+    language_paths: dict[str, str] | None = None,
 ) -> dict[str, object]:
+    active_lang = sanitize_gsc_language(lang)
     if isinstance(pages_csv, list):
         results = pages_csv
         queries = queries_data or []
@@ -1878,6 +2104,9 @@ def build_report(
         "site_name": domain,
         "generated_at": datetime.now().strftime("%d/%m/%Y"),
         "period_label": build_period_label(filters),
+        "lang": active_lang,
+        "html_output_path": html_output_path,
+        "language_paths": language_paths or {},
         "mode": mode,
         "report_mode": detected_report_mode,
         "report_mode_label": report_mode_label(detected_report_mode),
@@ -2692,6 +2921,9 @@ def write_html(
     mode: str = "executive",
     report_mode: str | None = None,
     cannibalization_groups: list[dict[str, Any]] | None = None,
+    lang: str = "fr",
+    html_output_path: str = "",
+    language_paths: dict[str, str] | None = None,
 ) -> Path:
     output_file = ensure_parent_dir(output_path)
     report = build_report(
@@ -2707,6 +2939,9 @@ def write_html(
         mode=mode,
         report_mode=report_mode,
         cannibalization_groups=cannibalization_groups,
+        lang=lang,
+        html_output_path=html_output_path or output_path,
+        language_paths=language_paths,
     )
     html_doc = render_report(report)
     with output_file.open("w", encoding="utf-8") as handle:
@@ -2714,8 +2949,34 @@ def write_html(
     return output_file
 
 
+def render_gsc_report_toolbar(report: dict[str, object]) -> str:
+    active_lang = sanitize_gsc_language(str(report.get("lang") or "fr"))
+    language_paths = report.get("language_paths")
+    paths = language_paths if isinstance(language_paths, dict) else {}
+    buttons = []
+    for lang, label in (("fr", "FR"), ("en", "EN")):
+        target = str(paths.get(lang) or report.get("html_output_path") or "")
+        href = f"/files?path={quote(target)}" if target else "#"
+        active_class = " is-active" if lang == active_lang else ""
+        aria_current = ' aria-current="true"' if lang == active_lang else ""
+        buttons.append(
+            f'<a class="report-toolbar-button language-toggle{active_class}" href="{html.escape(href)}"{aria_current}>{label}</a>'
+        )
+    export_label = "Export PDF" if active_lang == "en" else "Exporter en PDF"
+    dashboard_label = "Back to dashboard" if active_lang == "en" else "Retour dashboard"
+    return (
+        '<div class="report-toolbar no-print">'
+        f'<button class="report-toolbar-button" type="button" onclick="exportPDF()">{html.escape(export_label)}</button>'
+        f'<span class="language-toggle-group">{"".join(buttons)}</span>'
+        f'<a class="report-toolbar-button" href="/">{html.escape(dashboard_label)}</a>'
+        "</div>"
+    )
+
+
 def render_executive_report(report: dict[str, object]) -> str:
+    active_lang = sanitize_gsc_language(str(report.get("lang") or "fr"))
     title = str(report["title"])
+    toolbar = render_gsc_report_toolbar(report)
     kpis = "".join(render_kpi_card(kpi) for kpi in report.get("kpis", []))  # type: ignore[arg-type]
     estimate_box = render_estimate_box(report)
     priorities = render_monthly_priorities(report.get("monthly_priorities", []))  # type: ignore[arg-type]
@@ -2744,8 +3005,8 @@ def render_executive_report(report: dict[str, object]) -> str:
             ("methodologie", "Méthode"),
         ]
     )
-    return f"""<!DOCTYPE html>
-<html lang="fr">
+    document = f"""<!DOCTYPE html>
+<html lang="{html.escape(active_lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -2771,7 +3032,11 @@ def render_executive_report(report: dict[str, object]) -> str:
     .cover-meta-label {{ display:block; opacity:.65; font-size:11px; text-transform:uppercase; margin-bottom:5px; }}
     .cover-meta-value {{ font-weight:700; overflow-wrap:anywhere; }}
     .btn-export {{ background:#fff; color:var(--accent); border:0; border-radius:8px; padding:10px 14px; font-weight:700; cursor:pointer; margin-top:24px; }}
-    nav {{ position:sticky; top:0; background:rgba(247,247,244,.96); border-bottom:1px solid var(--border); padding:12px 0; display:flex; gap:8px; flex-wrap:wrap; z-index:3; }}
+    .report-toolbar {{ position:sticky; top:0; z-index:20; max-width:880px; margin:0 auto; padding:10px 30px; background:rgba(247,247,244,.96); border-bottom:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap; }}
+    .report-toolbar-button {{ appearance:none; border:1px solid var(--border); background:var(--surface); color:var(--ink); border-radius:8px; padding:8px 11px; font:700 12px/1 "Helvetica Neue", Arial, sans-serif; text-decoration:none; cursor:pointer; }}
+    .language-toggle.is-active {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
+    .language-toggle-group {{ display:inline-flex; gap:6px; }}
+    nav {{ position:sticky; top:52px; background:rgba(247,247,244,.96); border-bottom:1px solid var(--border); padding:12px 0; display:flex; gap:8px; flex-wrap:wrap; z-index:3; }}
     nav a {{ color:var(--ink); text-decoration:none; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-weight:700; font-size:12px; }}
     .source-box,.report-section {{ margin-top:34px; padding-top:26px; border-top:2px solid var(--accent); }}
     .source-box {{ background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:0 8px 8px 0; padding:15px 18px; }}
@@ -2840,6 +3105,7 @@ def render_executive_report(report: dict[str, object]) -> str:
   </style>
 </head>
 <body>
+  {toolbar}
   <main class="report-container">
     <section class="cover-page">
       <div>
@@ -2885,11 +3151,14 @@ def render_executive_report(report: dict[str, object]) -> str:
   </script>
 </body>
 </html>"""
+    return localize_gsc_html(document, active_lang)
 
 
 def render_report(report: dict[str, object]) -> str:
     if report.get("mode") == "executive":
         return render_executive_report(report)
+    active_lang = sanitize_gsc_language(str(report.get("lang") or "fr"))
+    toolbar = render_gsc_report_toolbar(report)
     title = str(report["title"])
     nav_items = [
         ("synthese", "Synthèse"),
@@ -2920,8 +3189,8 @@ def render_report(report: dict[str, object]) -> str:
         report.get("appendix_queries", []),  # type: ignore[arg-type]
     )
 
-    return f"""<!DOCTYPE html>
-<html lang="fr">
+    document = f"""<!DOCTYPE html>
+<html lang="{html.escape(active_lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -3001,6 +3270,33 @@ def render_report(report: dict[str, object]) -> str:
       align-self: flex-start;
       border: 1px solid rgba(255,255,255,0.25);
     }}
+    .report-toolbar {{
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 10px 32px;
+      background: rgba(250, 250, 248, 0.96);
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    .report-toolbar-button {{
+      appearance: none;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text-primary);
+      border-radius: 8px;
+      padding: 8px 11px;
+      font: 700 12px/1 "Helvetica Neue", Arial, sans-serif;
+      text-decoration: none;
+      cursor: pointer;
+    }}
+    .language-toggle.is-active {{ background: var(--color-accent); border-color: var(--color-accent); color: #FFFFFF; }}
+    .language-toggle-group {{ display: inline-flex; gap: 6px; }}
     .cover-page {{
       background: var(--color-accent);
       color: #FFFFFF;
@@ -3129,7 +3425,7 @@ def render_report(report: dict[str, object]) -> str:
     .source-list {{ margin: 0; padding-left: 18px; color: var(--color-text-secondary); }}
     nav {{
       position: sticky;
-      top: 0;
+      top: 52px;
       z-index: 10;
       display: flex;
       gap: 8px;
@@ -3566,6 +3862,7 @@ def render_report(report: dict[str, object]) -> str:
   </style>
 </head>
 <body>
+  {toolbar}
   <main class="report-container">
     <section class="cover-page">
       <div class="cover-content">
@@ -3638,6 +3935,7 @@ def render_report(report: dict[str, object]) -> str:
   </script>
 </body>
 </html>"""
+    return localize_gsc_html(document, active_lang)
 
 
 def render_kpi_card(kpi: dict[str, object]) -> str:
@@ -4281,6 +4579,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--appareils", help="Export GSC appareils")
     parser.add_argument("--gsc-folder", help="Dossier avec exports GSC")
     parser.add_argument("--mode", choices=["executive", "full"], default="executive")
+    parser.add_argument("--lang", choices=["fr", "en"], default="fr", help="Report language")
     parser.add_argument("--site-context", default="affiliate_media")
     parser.add_argument("--export-csv", default="true", choices=["true", "false"])
     parser.add_argument("-o", "--output", default="gsc_report.csv", help="CSV de sortie")

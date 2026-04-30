@@ -200,6 +200,13 @@ class WebUITests(unittest.TestCase):
         self.assertIn("Rapport SEO GSC", page)
         self.assertIn("Ouvrir le rapport", page)
 
+    def test_gsc_dashboard_card_exposes_report_language_choice(self) -> None:
+        page = render_dashboard()
+
+        self.assertIn("Langue du rapport", page)
+        self.assertIn('<option value="fr" selected>FR</option>', page)
+        self.assertIn('<option value="en">EN</option>', page)
+
     def test_request_job_cancel_marks_running_job_and_recent_cards_show_it(self) -> None:
         with JOB_LOCK:
             JOBS.clear()

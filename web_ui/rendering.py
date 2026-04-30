@@ -631,6 +631,13 @@ def render_gsc_card() -> str:
           </select>
         </label>
         <p class="field-help">Executive garde le PDF court et sort les tableaux complets en annexes CSV. Full inclut les annexes dans le HTML.</p>
+        <label>Langue du rapport
+          <select name="lang">
+            <option value="fr" selected>FR</option>
+            <option value="en">EN</option>
+          </select>
+        </label>
+        <p class="field-help">Le job génère aussi la version jumelle pour basculer FR/EN depuis le rapport.</p>
         <label>Niche stopwords
           <input type="text" name="niche_stopwords" value="" placeholder="padel,tennis,mutuelle">
         </label>

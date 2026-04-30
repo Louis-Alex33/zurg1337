@@ -20,7 +20,7 @@ from config import (
     DEFAULT_UI_AUDIT_MAX_PAGES,
 )
 from discover import discover_domains, import_domains_from_file
-from gsc import run_gsc_analysis
+from gsc import alternate_gsc_html_path, run_gsc_analysis, sanitize_gsc_language
 from qualify import qualify_domains
 from utils import CLIError, parse_csv_list
 
@@ -210,10 +210,13 @@ def run_gsc_job(job_id: str) -> None:
     output_json = (job.params.get("output_json") or "reports/gsc_report.json").strip()
     output_html = (job.params.get("output_html") or "reports/gsc_report.html").strip()
     mode = (job.params.get("mode") or "executive").strip() or "executive"
+    lang = sanitize_gsc_language((job.params.get("lang") or "fr").strip())
     site_name = (job.params.get("site_name") or "").strip()
     niche_stopwords = parse_csv_list((job.params.get("niche_stopwords") or "").strip())
     auto_niche_stopwords = job.params.get("auto_niche_stopwords") == "on"
-    announce_job_outputs(job, [output_csv, output_json, output_html])
+    alternate_lang = "en" if lang == "fr" else "fr"
+    alternate_html = alternate_gsc_html_path(output_html, alternate_lang)
+    announce_job_outputs(job, [output_csv, output_json, output_html, alternate_html])
 
     def action() -> tuple[list[str], list[str]]:
         if not current_csv:
@@ -232,13 +235,15 @@ def run_gsc_job(job_id: str) -> None:
             niche_stopwords=niche_stopwords,
             auto_niche_stopwords=auto_niche_stopwords,
             mode=mode,
+            lang=lang,
         )
         summary = [
             f"{len(results)} pages GSC analysées",
             f"Mode: {mode}",
+            f"Langue: {lang.upper()}",
             f"CSV: {output_csv}",
         ]
-        return [output_csv, output_json, output_html], summary
+        return [output_csv, output_json, output_html, alternate_html], summary
 
     execute_job(job, action)
 

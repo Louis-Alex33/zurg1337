@@ -217,6 +217,35 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertNotIn("PRIORITE", report)
         self.assertNotIn("HIGH", report)
 
+    def test_run_gsc_analysis_writes_language_toggle_and_alternate_html(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            output_csv = root / "report.csv"
+            output_html = root / "report.html"
+
+            run_gsc_analysis(
+                current_csv="tests/fixtures/pages_recent.csv",
+                previous_csv="tests/fixtures/pages_old.csv",
+                queries_csv="tests/fixtures/queries.csv",
+                output_csv=str(output_csv),
+                output_html=str(output_html),
+                site_name="Example",
+                mode="full",
+                lang="en",
+            )
+
+            english_report = output_html.read_text(encoding="utf-8")
+            french_report = (root / "report.fr.html").read_text(encoding="utf-8")
+
+        self.assertIn('<html lang="en">', english_report)
+        self.assertIn("Back to dashboard", english_report)
+        self.assertIn(">FR</a>", english_report)
+        self.assertIn(">EN</a>", english_report)
+        self.assertIn("Executive summary", english_report)
+        self.assertIn('<html lang="fr">', french_report)
+        self.assertIn("Retour dashboard", french_report)
+        self.assertIn("Synthèse exécutive", french_report)
+
     def test_run_gsc_analysis_accepts_full_search_console_zip(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

@@ -352,6 +352,7 @@ def main(argv: list[str] | None = None) -> int:
                 mode=args.mode,
                 site_context=args.site_context,
                 export_csv=args.export_csv == "true",
+                lang=args.lang,
             )
             high = sum(1 for item in results if item.priority == "HIGH")
             medium = sum(1 for item in results if item.priority == "MEDIUM")
