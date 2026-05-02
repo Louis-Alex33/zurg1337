@@ -19,6 +19,7 @@ from gsc import (
     estimate_recoverable_clicks,
     format_ctr,
     generate_snippet_recommendation,
+    generate_page_recommendation,
     load_gsc_csv,
     load_appareils,
     load_pays,
@@ -30,6 +31,7 @@ from gsc import (
     parse_queries_csv,
     render_report,
     run_gsc_analysis,
+    validate_rendered_gsc_html,
 )
 from models import AuditPage, GSCPageAnalysis, GSCPageData, GSCQueryData
 
@@ -571,6 +573,67 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertNotIn("découvrez les informations essentielles", combined)
         self.assertNotIn("points à vérifier", combined)
         self.assertNotIn("promesse plus concrète", combined)
+
+    def test_tournament_recommendations_keep_page_level(self) -> None:
+        p1000 = generate_page_recommendation(
+            page="https://eversportzone.com/tournoi-padel-p1000/",
+            main_queries=["tournoi padel p1000"],
+            page_type="cluster guide",
+            business_value="medium",
+        )
+        p500 = generate_page_recommendation(
+            page="https://eversportzone.com/tournoi-padel-p500/",
+            main_queries=["tournoi padel p500"],
+            page_type="cluster guide",
+            business_value="medium",
+        )
+
+        self.assertIn("P1000", p1000)
+        self.assertNotIn("P100 ?", p1000)
+        self.assertNotIn("P100 ", p1000.replace("P1000", ""))
+        self.assertIn("P500", p500)
+        self.assertNotIn("P250", p500)
+
+    def test_executive_report_has_client_safe_wording_and_quick_decision(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            current_csv = root / "pages.csv"
+            queries_csv = root / "queries.csv"
+            output_csv = root / "report.csv"
+            output_html = root / "report.html"
+            current_csv.write_text(
+                "page,clicks,impressions,ctr,position\n"
+                "https://example.com/tournoi-padel-p1000/,17,2799,0.61%,11.19\n"
+                "https://example.com/programme-padel-pdf/,0,500,0%,8\n",
+                encoding="utf-8",
+            )
+            queries_csv.write_text(
+                "query,page,clicks,impressions,ctr,position\n"
+                "tournoi padel p1000,https://example.com/tournoi-padel-p1000/,17,2799,0.61%,11.19\n"
+                "programme padel pdf,https://example.com/programme-padel-pdf/,0,500,0%,8\n",
+                encoding="utf-8",
+            )
+
+            run_gsc_analysis(
+                current_csv=str(current_csv),
+                queries_csv=str(queries_csv),
+                output_csv=str(output_csv),
+                output_html=str(output_html),
+                site_name="Example",
+                mode="executive",
+            )
+            report = output_html.read_text(encoding="utf-8")
+
+        self.assertIn("Décision rapide", report)
+        self.assertIn("Potentiel théorique détecté", report)
+        self.assertIn("pas une promesse de trafic", report)
+        self.assertIn("fort · produit numérique", report)
+        self.assertIn("moyen · prospect", report)
+        self.assertNotIn("/files?path=", report)
+        self.assertNotIn("Current period only", report)
+        self.assertNotIn("Gain de trafic estimé", report)
+        self.assertNotIn("medium · lead", report)
+        self.assertEqual(validate_rendered_gsc_html(report, {"lang": "fr"}), [])
 
     def test_detect_cannibalization_groups_stays_cluster_specific(self) -> None:
         pages = [

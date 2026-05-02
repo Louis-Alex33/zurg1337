@@ -14,7 +14,7 @@ LABEL_MAP: dict[str, str] = {
     "Confiance high": "Signal fort",
     "Confiance medium": "Signal à vérifier",
     "Type d'action : Cannibalisation": "⚠ Pages en compétition",
-    "Clics récupérables estimés": "Gain de trafic estimé",
+    "Clics récupérables estimés": "Potentiel théorique détecté",
     "PRIORITE": "Urgence",
     "Priorité": "Urgence",
     "ACTION CONSEILLEE": "Ce qu'on recommande",

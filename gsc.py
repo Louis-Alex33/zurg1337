@@ -6,6 +6,7 @@ import html
 import io
 import json
 import re
+import sys
 import unicodedata
 from collections import defaultdict
 from dataclasses import asdict
@@ -88,6 +89,27 @@ GENERIC_SNIPPET_PHRASES = (
     "promesse plus concrète",
     "promesse plus concrete",
 )
+CLIENT_VALUE_LABELS_FR = {
+    "high": "fort",
+    "medium": "moyen",
+    "low": "faible",
+    "lead": "prospect",
+    "business opportunities": "Opportunités business",
+    "snippets": "résultats Google",
+    "pages en compétition": "pages potentiellement concurrentes",
+    "pages en competition": "pages potentiellement concurrentes",
+    "business page": "Page business",
+    "content refresh": "Actualisation contenu",
+    "internal linking": "Maillage interne",
+    "cannibalization": "Pages potentiellement concurrentes",
+    "technical check": "Vérification technique",
+    "snippet": "Résultat Google",
+    "none": "aucun",
+}
+TOURNAMENT_LEVEL_RE = re.compile(r"(?<![a-z0-9])p(25|100|250|500|1000|1500|2000)(?![a-z0-9])", re.I)
+LOCAL_PROTOTYPE_RE = re.compile(r"(127\.0\.0\.1|localhost|/files\?path=|file://|/Users/|/private/|C:\\)", re.I)
+TRAFFIC_PROMISE_RE = re.compile(r"\b(gain|trafic)\s+garanti\b|trafic\s+assuré|trafic\s+assure", re.I)
+VISIBLE_ENGLISH_BADGE_RE = re.compile(r"\b(high|medium|low|lead)\b", re.I)
 
 SUPPORTED_GSC_LANGUAGES = {"fr", "en"}
 
@@ -127,6 +149,14 @@ def translate_estimated_gain_value(value: object, lang: str) -> str:
     if text.endswith(suffix):
         return text[: -len(suffix)] + " " + _("clics potentiels")
     return _(text)
+
+
+def client_display_value(value: object, lang: str = "fr") -> str:
+    text = str(value or "")
+    if sanitize_gsc_language(lang) != "fr":
+        return text
+    normalized = strip_accents(text).strip().lower()
+    return CLIENT_VALUE_LABELS_FR.get(normalized, text)
 BUSINESS_HIGH_TERMS = (
     "raquette",
     "chaussure",
@@ -221,6 +251,7 @@ def run_gsc_analysis(
         site_context=site_context,
     )
     apply_cannibalization_groups(results, cannibalization_groups)
+    vary_repeated_recommendations(results)
     write_csv(results, output_csv)
     if mode == "executive" or export_csv:
         write_executive_exports(
@@ -1525,14 +1556,11 @@ def generate_page_recommendation(
 ) -> str:
     query = (main_queries or [keyword_phrase_from_url(page)])[0] or keyword_phrase_from_url(page)
     lower = strip_accents(f"{page} {query} {page_type}").lower()
-    if "tournoi-padel-p100" in lower:
-        return "Ajouter un bloc « Quel niveau pour jouer un P100 ? », un tableau points / inscription / classement, puis une FAQ sur les cuts, le partenaire, le prix d'inscription et la préparation du premier tournoi."
-    if "tournoi-padel-p500" in lower:
-        return "Clarifier le nombre de points, le niveau attendu et les conditions d'inscription, puis ajouter des liens vers les pages P100, P250 et le guide global des tournois."
-    if "tournoi" in lower and re.search(r"p\d{2,4}", lower):
-        level = (re.search(r"p\d{2,4}", lower) or re.search(r"p\d{2,4}", query.lower()))
-        label = level.group(0).upper() if level else "ce niveau"
-        return f"Structurer la page {label} autour du niveau attendu, des points, du format, des conditions d'inscription et des liens vers le guide global des tournois."
+    level = detect_tournament_level(page, query)
+    if "tournoi" in lower and level:
+        return tournament_recommendation(level, page, query)
+    if "tournoi" in lower:
+        return "Structurer la page tournoi autour du niveau attendu, du format, de l'inscription et des repères utiles, sans afficher de niveau précis tant qu'il n'est pas fiable."
     if "tenir-raquette-padel" in lower:
         return "Ajouter des visuels de prise, une section sur la prise continentale, les erreurs fréquentes et des liens vers coups de base, service et raquette débutant."
     if "pressurisateur" in lower:
@@ -1555,6 +1583,69 @@ def generate_page_recommendation(
     if business_value == "high":
         return "Ajouter critères de décision, limites, comparaisons et liens de monétisation utiles afin de transformer la visibilité Google en clics business qualifiés."
     return "Garder en suivi GSC et prioriser seulement si les impressions ou la position progressent."
+
+
+def detect_tournament_level(*values: object) -> str:
+    for value in values:
+        text = strip_accents(str(value or "")).lower()
+        match = TOURNAMENT_LEVEL_RE.search(text)
+        if match:
+            return f"P{match.group(1)}"
+    return ""
+
+
+def tournament_recommendation(level: str, page: str, query: str) -> str:
+    topic = strip_accents(f"{page} {query}").lower()
+    if "points" in topic or "classement" in topic:
+        return f"Clarifier pour le niveau {level} les points, le classement, les conditions d'inscription et les cas fréquents qui déclenchent le doute."
+    if "inscription" in topic or "tournoi" in topic:
+        return f"Structurer la page {level} autour du niveau attendu, du format, des conditions d'inscription et des informations à vérifier avant de s'engager."
+    return f"Recentrer la page {level} sur l'intention principale, avec une réponse claire, une FAQ courte et des liens internes vers le guide global des tournois."
+
+
+def vary_repeated_recommendations(results: list[GSCPageAnalysis], max_same: int = 3) -> None:
+    seen: dict[str, int] = defaultdict(int)
+    for item in sorted(results, key=lambda row: (-row.opportunity_score, -row.impressions, row.url)):
+        key = normalize_recommendation(item.recommendation)
+        if not key:
+            continue
+        seen[key] += 1
+        if seen[key] <= max_same:
+            continue
+        item.recommendation = varied_recommendation_for_page(item, seen[key], max_same=max_same)
+
+
+def normalize_recommendation(value: str) -> str:
+    return re.sub(r"\s+", " ", strip_accents(value).lower()).strip()
+
+
+def varied_recommendation_for_page(item: GSCPageAnalysis, index: int, max_same: int = 3) -> str:
+    query = item.main_query or keyword_phrase_from_url(item.url)
+    if item.action_type == "business page" or item.business_value == "high":
+        variants = [
+            f"Ajouter un bloc décisionnel autour de « {query} » : verdict, critères de choix, limites et liens utiles vers les pages commerciales proches.",
+            f"Transformer la page en aide au choix : cas d'usage, profils concernés, erreurs à éviter et prochain clic logique vers comparatif ou produit.",
+            f"Renforcer l'intention business avec un résumé actionnable, des critères d'achat et des liens internes vers les tests ou catégories les plus pertinentes.",
+        ]
+    elif item.action_type == "snippet":
+        variants = [
+            f"Réécrire le résultat Google autour de « {query} » avec un bénéfice précis, puis aligner l'introduction sur cette promesse éditoriale.",
+            f"Rendre le title et la meta plus spécifiques à l'intention « {query} », en évitant les formulations trop générales.",
+            f"Tester un angle de résultat Google plus concret, centré sur la réponse attendue et les informations vraiment disponibles sur la page.",
+        ]
+    elif item.action_type == "internal linking":
+        variants = [
+            f"Ajouter des liens internes vers cette URL depuis les contenus du même cluster, avec des ancres proches de « {query} ».",
+            f"Renforcer le soutien interne de la page : liens depuis les articles visibles, ancres descriptives et section complémentaire sur l'intention principale.",
+            f"Créer un petit maillage thématique autour de « {query} » pour aider Google à identifier la page cible.",
+        ]
+    else:
+        variants = [
+            f"Reprendre la page sous l'angle de l'intention « {query} » : réponse plus nette, section FAQ et liens vers les ressources proches.",
+            "Mettre à jour le contenu utile, clarifier l'introduction et ajouter une action suivante cohérente avec le type de page.",
+            "Garder une optimisation légère : améliorer la réponse principale, ajouter un exemple concret et suivre l'évolution dans GSC.",
+        ]
+    return variants[(index - max_same - 1) % len(variants)]
 
 
 def categorize_page(analysis: GSCPageAnalysis) -> str:
@@ -1630,13 +1721,13 @@ def estimate_recoverable_clicks(analysis: GSCPageAnalysis) -> tuple[int | None, 
 
     if ctr_gain >= position_gain and ctr_gain > 0:
         label = (
-            f"+{ctr_gain} clics récupérables estimés sur la période analysée "
-            f"si le taux de clic se rapproche de l’attendu à position {position_bucket}"
+            f"jusqu’à {ctr_gain} clics non captés sur la période analysée "
+            f"si le taux de clic se rapproche de l’attendu à position équivalente"
         )
     else:
         label = (
-            f"+{position_gain} clics récupérables estimés sur la période analysée "
-            f"si la page gagne environ 3 positions"
+            f"jusqu’à {position_gain} clics non captés sur la période analysée "
+            f"selon comparaison CTR à position équivalente"
         )
     return best_gain, label
 
@@ -1776,16 +1867,17 @@ def write_dict_csv(path: Path, rows: list[dict[str, object]]) -> Path:
 def pages_opportunity_export_row(item: GSCPageAnalysis) -> dict[str, object]:
     return {
         "url": item.url,
+        "label": display_page_label(item.url),
         "clicks": item.clicks,
         "impressions": item.impressions,
         "ctr_recalculated": format_ctr_ratio(item.ctr),
         "position": f"{item.position:.2f}",
-        "business_value": item.business_value,
+        "business_value": client_display_value(item.business_value),
         "opportunity_score": item.opportunity_score,
         "priority": item.priority_label,
-        "action_type": item.action_type,
+        "action_type": action_label_from_type(item.action_type),
         "estimated_gain": item.estimated_recoverable_clicks or 0,
-        "main_query": item.main_query,
+        "main_query": display_query_label(item.main_query),
         "recommendation": item.recommendation,
     }
 
@@ -1833,7 +1925,7 @@ def cannibalization_export_row(group: dict[str, Any]) -> dict[str, object]:
         "topic": group.get("topic", ""),
         "urls": " | ".join(str(url) for url in group.get("urls") or []),
         "shared_queries": " | ".join(str(query) for query in group.get("shared_queries") or []),
-        "confidence": group.get("confidence", ""),
+        "confidence": client_display_value(group.get("confidence", "")),
         "recommendation": group.get("recommendation", ""),
     }
 
@@ -1934,9 +2026,9 @@ def build_report(
     total_recoverable = sum(item.estimated_recoverable_clicks or 0 for item in results)
     detected_report_mode = report_mode or detect_report_mode({"previous": previous_csv})
     period_note = (
-        "Before/After traffic comparison: export précédent fourni, les variations peuvent être contextualisées."
+        "Comparaison entre deux périodes: export précédent fourni, les variations peuvent être contextualisées."
         if detected_report_mode == "before_after_comparison"
-        else "Current period analysis: aucun export précédent fourni, ce rapport identifie des opportunités sur la visibilité actuelle."
+        else "Analyse de la période actuelle: aucun export précédent fourni, ce rapport identifie des opportunités sur la visibilité actuelle."
     )
     previous_note = (
         "Export Pages précédent: fourni, les variations peuvent être contextualisées."
@@ -1945,19 +2037,20 @@ def build_report(
     )
 
     priority_count = sum(1 for item in results if item.priority in {"HIGH", "MEDIUM"} and not is_dead_gsc_page(item))
-    query_opportunities_count = len([query for query in queries if query.impressions >= 30 and query.position <= 20])
+    query_opportunities = select_query_opportunities(queries)
+    query_opportunities_count = len(query_opportunities)
     sections = assign_report_sections(results)
     has_query_export = has_queries if has_queries is not None else bool(queries)
     priority_pages = build_priority_page_cards(results)[:10]
     priority_page_urls = {normalize_url_for_query_match(str(page.get("url", ""))) for page in priority_pages}
     snippet_pages = build_snippet_cards(results, excluded_urls=priority_page_urls)[:10]
     snippet_count = len(snippet_pages)
+    quick_decisions = build_quick_decisions(priority_pages, snippet_pages, query_opportunities_count)
     estimated_gain_note = (
-        "Estimation basée sur un alignement CTR médian pour la position actuelle. "
-        "Non garanti — à valider après mise en ligne et suivi GSC sur 30-60 jours."
+        "Ce chiffre est un ordre de grandeur, pas une promesse de trafic."
     )
     return {
-        "title": "GSC SEO Opportunity Report" if mode == "executive" else title,
+        "title": "Rapport d’opportunités SEO GSC" if mode == "executive" else title,
         "subtitle": "Opportunités de croissance, pages prioritaires et actions recommandées",
         "site_name": domain,
         "generated_at": datetime.now().strftime("%d/%m/%Y"),
@@ -1969,11 +2062,20 @@ def build_report(
         "report_mode": detected_report_mode,
         "report_mode_label": report_mode_label(detected_report_mode),
         "executive_summary": build_executive_summary(results, priority_count, snippet_count, bool(queries)),
-        "estimated_gain_value": f"+{format_number(total_recoverable)} clics potentiels",
+        "estimated_gain_value": f"jusqu’à {format_number(total_recoverable)} clics non captés",
         "estimated_gain_note": estimated_gain_note,
         "monthly_priorities": build_monthly_priorities(results, queries),
+        "quick_decisions": quick_decisions,
+        "metrics_source": {
+            "Pages analysées": len(results),
+            "Clics totaux": total_clicks,
+            "Impressions totales": total_impressions,
+            "Pages prioritaires": priority_count,
+            "Requêtes exploitables": query_opportunities_count,
+            "Résultats Google à améliorer": snippet_count,
+        },
         "source_notes": [
-            "Analyse basée sur les données Google Search Console exportées.",
+            "Ce rapport est basé sur les exports Google Search Console fournis. Il identifie les opportunités SEO visibles dans GSC, mais ne remplace pas un audit technique crawl complet.",
             period_note if mode == "executive" else previous_note,
             (
                 "Sans export précédent, ce rapport ne diagnostique pas une baisse de trafic."
@@ -1995,7 +2097,7 @@ def build_report(
             {"label": "Pages prioritaires", "value": format_number(priority_count)},
             {"label": translate_label("Snippets à retravailler"), "value": format_number(snippet_count)},
             {"label": "Requêtes exploitables", "value": format_number(query_opportunities_count)},
-            {"label": "Gain de trafic estimé", "value": "Voir note"},
+            {"label": "Potentiel théorique détecté", "value": "Voir note"},
         ],
         "sections": sections,
         "priority_pages": priority_pages,
@@ -2006,7 +2108,7 @@ def build_report(
         ),
         "breakthrough_pages": build_breakthrough_cards(results)[:10],
         "query_sections": build_query_sections(queries, results),
-        "top_query_opportunities": build_top_query_opportunities(queries, results, limit=20),
+        "top_query_opportunities": build_top_query_opportunities(query_opportunities, results, limit=20),
         "business_opportunities": build_business_opportunities(results)[:10],
         "appendix_pages": [page_to_appendix_row(item) for item in results],
         "appendix_queries": [query_to_appendix_row(query, results) for query in queries],
@@ -2047,8 +2149,12 @@ def detect_report_mode(gsc_inputs: dict[str, Any]) -> str:
 
 def report_mode_label(value: str) -> str:
     if value == "before_after_comparison":
-        return "Before/After comparison"
-    return "Current period only"
+        return "Comparaison entre deux périodes"
+    return "Analyse de la période actuelle"
+
+
+def select_query_opportunities(queries: list[GSCQueryData]) -> list[GSCQueryData]:
+    return [query for query in queries if query.impressions >= 20 and query.position <= 30]
 
 
 def build_period_label(filters: dict[str, str]) -> str:
@@ -2151,6 +2257,67 @@ def build_monthly_priorities(results: list[GSCPageAnalysis], queries: list[GSCQu
         )
     )
     return priorities[:3]
+
+
+def build_quick_decisions(
+    priority_pages: list[dict[str, object]],
+    snippet_pages: list[dict[str, object]],
+    query_opportunities_count: int,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    top_pages = priority_pages[:5]
+    if top_pages:
+        rows.append(
+            {
+                "priority": "",
+                "action": "Traiter les pages à plus fort potentiel",
+                "pages": quick_pages_label(top_pages[:3]),
+                "impact": "Potentiel théorique prioritaire",
+                "effort": "moyen",
+                "why": "Elles concentrent les signaux visibilité, position et valeur business.",
+            }
+        )
+    if snippet_pages:
+        rows.append(
+            {
+                "priority": "",
+                "action": "Réécrire les résultats Google sous-cliqués",
+                "pages": quick_pages_label(snippet_pages[:3]),
+                "impact": "Taux de clic à améliorer",
+                "effort": "faible",
+                "why": "Ces pages sont déjà affichées dans Google.",
+            }
+        )
+    if query_opportunities_count:
+        rows.append(
+            {
+                "priority": "",
+                "action": "Exploiter les requêtes utiles",
+                "pages": f"{format_number(query_opportunities_count)} requêtes à trier",
+                "impact": "Intentions mieux couvertes",
+                "effort": "moyen",
+                "why": "Les requêtes GSC montrent les angles réellement demandés.",
+            }
+        )
+    rows.append(
+        {
+            "priority": "",
+            "action": "Valider les arbitrages avant production",
+            "pages": "Top 10 pages",
+            "impact": "Moins d'actions inutiles",
+            "effort": "faible",
+            "why": "Le rapport priorise GSC, sans remplacer un crawl technique.",
+        }
+    )
+    for index, row in enumerate(rows[:5], start=1):
+        row["priority"] = str(index)
+    return rows[:5]
+
+
+def quick_pages_label(pages: list[dict[str, object]]) -> str:
+    labels = [str(page.get("slug") or page.get("url") or "").strip("/") for page in pages]
+    cleaned = [label.split("/")[-1] or label for label in labels if label]
+    return ", ".join(cleaned[:3]) or "Pages à valider"
 
 
 def format_count(count: int, singular: str, plural: str) -> str:
@@ -2471,7 +2638,7 @@ def page_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
     action_types = [action_label_from_type(item.action_type)] if item.action_type else action_types_for_page(actions)
     return {
         "url": item.url,
-        "slug": display_slug(item.url),
+        "slug": display_page_label(item.url),
         "priority": priority_css_class(item),
         "priority_label": item.priority_label or client_priority_label(item),
         "diagnostic": diagnostic_for_page(item),
@@ -2480,7 +2647,7 @@ def page_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
             "Impressions": format_number(item.impressions),
             translate_label("CTR"): format_percent(item.ctr),
             "Position": f"{item.position:.1f}",
-            "Gain estimé": f"+{format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "à confirmer",
+            "Potentiel": f"jusqu’à {format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "à confirmer",
         },
         "business_value": item.business_value,
         "business_reason": item.business_reason,
@@ -2517,7 +2684,7 @@ def action_types_for_page(actions: list[str]) -> list[str]:
     if "technique" in joined or "redirection" in joined or "supprimer" in joined:
         types.append("Technique")
     if "cannibalisation" in joined or "chevauchement" in joined:
-        types.append("⚠ Pages en compétition")
+        types.append("Pages potentiellement concurrentes")
     return list(dict.fromkeys(types)) or ["Contenu"]
 
 
@@ -2528,7 +2695,7 @@ def action_label_from_type(action_type: str) -> str:
         "internal linking": "Maillage interne",
         "business page": "Page business",
         "new content": "Nouveau contenu",
-        "cannibalization": "⚠ Pages en compétition",
+        "cannibalization": "Pages potentiellement concurrentes",
         "technical check": "Technique",
     }
     return labels.get(action_type, "Contenu")
@@ -2584,7 +2751,7 @@ def diagnostic_for_page(item: GSCPageAnalysis) -> str:
 
 def impact_for_page(item: GSCPageAnalysis) -> str:
     if item.estimated_recoverable_clicks:
-        return f"+{format_number(item.estimated_recoverable_clicks)} clics récupérables estimés"
+        return f"jusqu’à {format_number(item.estimated_recoverable_clicks)} clics non captés"
     if is_snippet_opportunity(item):
         return "Hausse potentielle du taux de clic"
     if item.position <= 20:
@@ -2629,7 +2796,7 @@ def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
         return {}
     return {
         "url": item.url,
-        "slug": display_slug(item.url),
+        "slug": display_page_label(item.url),
         "main_query": keyword,
         "priority": priority_css_class(item),
         "problem": snippet_problem_for_page(item),
@@ -2652,8 +2819,8 @@ def generate_snippet_recommendation(
 ) -> dict[str, str]:
     query = clean_query_for_snippet(main_query or keyword_phrase_from_url(page))
     lower = strip_accents(f"{page} {query} {page_type} {business_value} {intent}").lower()
-    if "p100" in lower or "p250" in lower or "p500" in lower:
-        level = "P100" if "p100" in lower else "P250" if "p250" in lower else "P500"
+    level = detect_tournament_level(page, query)
+    if level:
         title = f"Tournoi {level} padel : niveau, points et inscription"
         meta = f"Comprenez le niveau requis en {level}, les points à gagner, les règles d'inscription et les repères pour préparer votre tournoi."
     elif "par 4" in lower or "par-4" in lower:
@@ -2750,7 +2917,7 @@ def probable_intent_from_keyword(keyword: str) -> str:
 def page_to_breakthrough_dict(item: GSCPageAnalysis) -> dict[str, object]:
     return {
         "url": item.url,
-        "slug": display_slug(item.url),
+        "slug": display_page_label(item.url),
         "position": f"{item.position:.1f}",
         "impressions": format_number(item.impressions),
         "clicks": format_number(item.clicks),
@@ -2778,7 +2945,7 @@ def page_to_appendix_row(item: GSCPageAnalysis) -> dict[str, object]:
         "Impressions": format_number(item.impressions),
         translate_label("CTR"): format_percent(item.ctr),
         "Position": f"{item.position:.1f}",
-        "Gain estimé": f"+{format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "",
+        "Potentiel": f"jusqu’à {format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "",
         "Action principale": main_action_for_page(item),
     }
 
@@ -2786,7 +2953,7 @@ def page_to_appendix_row(item: GSCPageAnalysis) -> dict[str, object]:
 def explain_reason(item: GSCPageAnalysis) -> str:
     reasons: list[str] = []
     if item.estimated_recoverable_clicks:
-        reasons.append(item.impact_label.replace("clics récupérables estimés", "clics de gain estimé"))
+        reasons.append(item.impact_label)
     if 4 <= item.position <= 10:
         reasons.append("La page est déjà proche du haut de la première page Google.")
     elif 10 < item.position <= 20:
@@ -2804,6 +2971,45 @@ def display_slug(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path.rstrip("/") or "/"
     return path if path != "/" else parsed.netloc or url
+
+
+def display_page_label(url: str) -> str:
+    parsed = urlparse(url)
+    segment = (parsed.path.rstrip("/").split("/")[-1] or parsed.netloc or url).strip()
+    if not segment:
+        return "Accueil"
+    segment = unquote(segment)
+    segment = re.sub(r"[-_]+", " ", segment)
+    segment = re.sub(r"\bchassures\b", "chaussures", segment, flags=re.I)
+    words = []
+    for word in segment.split():
+        if re.fullmatch(r"p\d{2,4}", word, re.I):
+            words.append(word.upper())
+        elif word.isupper() and len(word) <= 4:
+            words.append(word)
+        else:
+            words.append(word.lower())
+    label = " ".join(words).strip()
+    return label[:1].upper() + label[1:] if label else "Page"
+
+
+def display_query_label(value: object) -> str:
+    label = str(value or "")
+    label = re.sub(r"\bchassures\b", "chaussures", label, flags=re.I)
+    return re.sub(r"\s+", " ", label).strip()
+
+
+def compact_url_for_display(url: str, max_length: int = 76) -> str:
+    parsed = urlparse(str(url or ""))
+    if not parsed.netloc:
+        text = str(url or "")
+    else:
+        text = f"{parsed.netloc.replace('www.', '')}{parsed.path or '/'}"
+    text = unquote(text)
+    if len(text) <= max_length:
+        return text
+    keep = max(12, max_length - 1)
+    return text[:keep].rstrip("/") + "…"
 
 
 def format_number(value: int | float) -> str:
@@ -2852,10 +3058,90 @@ def write_html(
         html_output_path=html_output_path or output_path,
         language_paths=language_paths,
     )
+    warn_gsc_quality(validate_gsc_report_quality(report), output_path)
     html_doc = render_report(report)
+    warn_gsc_quality(validate_rendered_gsc_html(html_doc, report), output_path)
     with output_file.open("w", encoding="utf-8") as handle:
         handle.write(html_doc)
     return output_file
+
+
+def warn_gsc_quality(warnings: list[str], output_path: str) -> None:
+    if not warnings:
+        return
+    print(f"[GSC QA] Warning avant export {output_path}:", file=sys.stderr)
+    for warning in warnings:
+        print(f"[GSC QA] - {warning}", file=sys.stderr)
+
+
+def validate_gsc_report_quality(report: dict[str, object]) -> list[str]:
+    warnings: list[str] = []
+    priority_pages = list(report.get("priority_pages") or [])
+    if report.get("mode") == "executive" and not report.get("quick_decisions"):
+        warnings.append("section Décision rapide absente")
+    warnings.extend(validate_global_metric_consistency(report))
+    for page in priority_pages:
+        page_url = str(page.get("url") or "")
+        critical = ["slug", "main_query", "recommendation"]
+        for field in critical:
+            if not str(page.get(field) or "").strip():
+                warnings.append(f"champ critique vide sur une page prioritaire: {field} ({page_url})")
+        recommendation = str(page.get("recommendation") or "")
+        mismatch = recommendation_tournament_mismatch(page_url, str(page.get("main_query") or ""), recommendation)
+        if mismatch:
+            warnings.append(mismatch)
+        if "chassures" in strip_accents(str(page.get("slug") or "")).lower():
+            warnings.append(f"libellé visible avec faute détectée: {page.get('slug')}")
+        if "chassures" in strip_accents(display_query_label(page.get("main_query") or "")).lower():
+            warnings.append(f"requête affichée avec faute détectée: {page.get('main_query')}")
+    return warnings
+
+
+def validate_global_metric_consistency(report: dict[str, object]) -> list[str]:
+    warnings: list[str] = []
+    kpis = {str(item.get("label")): str(item.get("value")) for item in report.get("kpis", []) if isinstance(item, dict)}
+    expected = report.get("metrics_source") if isinstance(report.get("metrics_source"), dict) else {}
+    for label, actual in expected.items():
+        value = kpis.get(label)
+        if not value:
+            continue
+        parsed = coerce_int(str(value).replace(" ", ""), default=-1)
+        if parsed != actual:
+            warnings.append(f"incohérence KPI {label}: KPI={value}, source={actual}")
+    return warnings
+
+
+def recommendation_tournament_mismatch(page_url: str, main_query: str, recommendation: str) -> str:
+    page_level = detect_tournament_level(page_url) or detect_tournament_level(main_query)
+    if not page_level:
+        return ""
+    mentioned = sorted({match.group(0).upper() for match in TOURNAMENT_LEVEL_RE.finditer(strip_accents(recommendation))})
+    wrong = [level for level in mentioned if level != page_level]
+    if wrong:
+        return f"recommandation incohérente: {page_url} cible {page_level}, mais mentionne {', '.join(wrong)}"
+    return ""
+
+
+def validate_rendered_gsc_html(html_doc: str, report: dict[str, object]) -> list[str]:
+    warnings: list[str] = []
+    if LOCAL_PROTOTYPE_RE.search(html_doc):
+        warnings.append("trace locale/prototype visible détectée")
+    visible_text = rendered_visible_text(html_doc)
+    if sanitize_gsc_language(str(report.get("lang") or "fr")) == "fr":
+        badge_matches = sorted({match.group(0).lower() for match in VISIBLE_ENGLISH_BADGE_RE.finditer(visible_text)})
+        if badge_matches:
+            warnings.append(f"valeur anglaise visible côté client: {', '.join(badge_matches)}")
+    if TRAFFIC_PROMISE_RE.search(visible_text):
+        warnings.append("formulation pouvant promettre un trafic garanti")
+    if "Gain de trafic estimé" in visible_text:
+        warnings.append("ancien libellé 'Gain de trafic estimé' encore visible")
+    return warnings
+
+
+def rendered_visible_text(html_doc: str) -> str:
+    text = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ", html_doc, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return html.unescape(re.sub(r"\s+", " ", text))
 
 
 def render_gsc_report_toolbar(report: dict[str, object]) -> str:
@@ -2865,7 +3151,7 @@ def render_gsc_report_toolbar(report: dict[str, object]) -> str:
     buttons = []
     for lang, label in (("fr", "FR"), ("en", "EN")):
         target = str(paths.get(lang) or report.get("html_output_path") or "")
-        href = f"/files?path={quote(target)}" if target else "#"
+        href = Path(target).name if target else "#"
         active_class = " is-active" if lang == active_lang else ""
         aria_current = ' aria-current="true"' if lang == active_lang else ""
         buttons.append(
@@ -2877,7 +3163,7 @@ def render_gsc_report_toolbar(report: dict[str, object]) -> str:
         '<div class="report-toolbar no-print">'
         f'<button class="report-toolbar-button" type="button" onclick="exportPDF()">{html.escape(export_label)}</button>'
         f'<span class="language-toggle-group">{"".join(buttons)}</span>'
-        f'<a class="report-toolbar-button" href="/">{html.escape(dashboard_label)}</a>'
+        f'<a class="report-toolbar-button" href="./">{html.escape(dashboard_label)}</a>'
         "</div>"
     )
 
@@ -2901,11 +3187,12 @@ def render_executive_report(report: dict[str, object]) -> str:
     cannibalization = render_cannibalization_groups_section(report.get("cannibalization_groups", []), active_lang)  # type: ignore[arg-type]
     annexes = render_annex_links(report.get("annex_files", []), active_lang)  # type: ignore[arg-type]
     source_notes = "".join(f"<li>{html.escape(_(str(note)))}</li>" for note in report.get("source_notes", []))  # type: ignore[union-attr]
-    mode_label = _(str(report.get("report_mode_label") or "Current period only"))
+    mode_label = _(str(report.get("report_mode_label") or "Analyse de la période actuelle"))
     nav = "".join(
         f"<a href='#{anchor}'>{html.escape(_(label))}</a>"
         for anchor, label in [
             ("synthese", "Synthèse"),
+            ("decision-rapide", "Décision rapide"),
             ("priorites", "Priorités"),
             ("pages-prioritaires", "Pages"),
             ("requetes", "Requêtes"),
@@ -3002,9 +3289,11 @@ def render_executive_report(report: dict[str, object]) -> str:
     .compact-table tr:last-child td {{ border-bottom:0; }}
     .compact-table .url-cell {{ overflow-wrap:anywhere; max-width:220px; }}
     .empty-state {{ background:var(--surface); border:1px dashed var(--border); border-radius:8px; padding:14px; color:var(--muted); }}
+    .print-footer {{ display:none; }}
     @media print {{
       @page {{ size:A4; margin:14mm 13mm; }}
       nav,.btn-export,.no-print,.filter-bar,.summary-links {{ display:none!important; }}
+      .print-footer {{ display:block; position:fixed; left:13mm; right:13mm; bottom:6mm; color:#6B7280; font:700 9px/1.2 "Helvetica Neue", Arial, sans-serif; text-align:center; }}
       body {{ background:#fff; font-size:11.5px; }}
       .report-container {{ max-width:none; padding:0; }}
       .cover-page {{ margin:0; min-height:267mm; background:#124E78!important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
@@ -3029,7 +3318,7 @@ def render_executive_report(report: dict[str, object]) -> str:
       <div>
         <div class="cover-label">{html.escape(_("Rapport SEO · Google Search Console"))}</div>
         <span class="mode-badge">{html.escape(mode_label)}</span>
-        <h1>{html.escape(_("GSC SEO Opportunity Report"))}</h1>
+        <h1>{html.escape(_("Rapport d’opportunités SEO GSC"))}</h1>
         <p class="cover-subtitle">{html.escape(_("Basé sur les données Google Search Console exportées."))}</p>
         <div class="cover-meta">
           <div><span class="cover-meta-label">{html.escape(_("Domaine"))}</span><span class="cover-meta-value">{html.escape(str(report.get("site_name") or _("Non précisé")))}</span></div>
@@ -3039,7 +3328,7 @@ def render_executive_report(report: dict[str, object]) -> str:
         {estimate_box}
         <button onclick="exportPDF()" class="btn-export no-print">{html.escape(_("Exporter en PDF"))}</button>
       </div>
-      <div class="cover-footer">{html.escape(_("Current period only = opportunités actuelles. Before/After = comparaison entre deux exports."))}</div>
+      <div class="cover-footer">{html.escape(_("Rapport d'opportunités GSC"))} · {html.escape(str(report.get("generated_at") or ""))}</div>
     </section>
     <section class="source-box"><ul class="source-list">{source_notes}</ul></section>
     <nav aria-label="{html.escape(_("Navigation du rapport"))}">{nav}</nav>
@@ -3050,12 +3339,13 @@ def render_executive_report(report: dict[str, object]) -> str:
       <div class="executive-summary"><p>{html.escape(_(str(report.get("executive_summary", ""))))}</p></div>
       {render_summary_links(active_lang)}
     </section>
+    {render_quick_decision_section(report.get("quick_decisions", []), active_lang)}
     <section class="report-section" id="priorites"><div class="section-header"><h2>{html.escape(_("Les 3 priorités du mois"))}</h2></div>{priorities}</section>
     <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>{html.escape(_("Top 10 pages prioritaires"))}</h2><p class="section-intro">{html.escape(_("Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business."))}</p></div>{render_filter_bar("pages-prioritaires")}{priority_cards}</section>
     <section class="report-section" id="requetes"><div class="section-header"><h2>{html.escape(_("Top 20 requêtes à exploiter"))}</h2><p class="section-intro">{html.escape(_("Regroupées par intention d’action : résultat Google, FAQ, section, contenu, maillage ou faible valeur."))}</p></div>{queries}</section>
     {snippets}
     {cannibalization}
-    <section class="report-section" id="business"><div class="section-header"><h2>{html.escape(_("Business opportunities"))}</h2><p class="section-intro">{html.escape(_("Pages à forte valeur business : équipement, comparatifs, tests, affiliation, leads ou produits numériques."))}</p></div>{business}</section>
+    <section class="report-section" id="business"><div class="section-header"><h2>{html.escape(_("Opportunités business"))}</h2><p class="section-intro">{html.escape(_("Pages à forte valeur business : équipement, comparatifs, tests, affiliation, prospects ou produits numériques."))}</p></div>{business}</section>
     {render_action_plan_section(active_lang)}
     {render_methodology_section(str(report.get("report_mode") or "current_period_only"), active_lang)}
     {annexes}
@@ -3097,6 +3387,7 @@ def render_executive_report(report: dict[str, object]) -> str:
       }});
     }});
   </script>
+  <div class="print-footer">{html.escape(_("Rapport d’opportunités SEO GSC"))} · {html.escape(str(report.get("generated_at") or ""))}</div>
 </body>
 </html>"""
     return document
@@ -3111,6 +3402,7 @@ def render_report(report: dict[str, object]) -> str:
     title = str(report["title"])
     nav_items = [
         ("synthese", "Synthèse"),
+        ("decision-rapide", "Décision rapide"),
         ("priorites", "Priorités"),
         ("pages-prioritaires", "Pages"),
         ("requetes", "Requêtes"),
@@ -3121,6 +3413,7 @@ def render_report(report: dict[str, object]) -> str:
     ]
     nav = "".join(f"<a href='#{anchor}'>{html.escape(_(label))}</a>" for anchor, label in nav_items)
     kpis = "".join(render_kpi_card(kpi, active_lang) for kpi in report.get("kpis", []))  # type: ignore[arg-type]
+    estimate_box = render_estimate_box(report, active_lang)
     source_notes = "".join(f"<li>{html.escape(_(str(note)))}</li>" for note in report.get("source_notes", []))  # type: ignore[union-attr]
     traffic_chart = render_traffic_chart(report.get("graphique_data", []))  # type: ignore[arg-type]
     traffic_section = render_traffic_section(traffic_chart, active_lang) if traffic_chart else ""
@@ -3785,6 +4078,7 @@ def render_report(report: dict[str, object]) -> str:
       padding-top: 18px;
       color: var(--color-text-muted);
     }}
+    .print-footer {{ display: none; }}
     @media (max-width: 820px) {{
       .report-container {{ padding: 0 18px 42px; }}
       .cover-page {{ margin: 0 -18px; padding: 48px 28px; }}
@@ -3803,6 +4097,7 @@ def render_report(report: dict[str, object]) -> str:
       .filter-bar,
       .summary-links,
       .no-print {{ display: none !important; }}
+      .print-footer {{ display: block; position: fixed; left: 14mm; right: 14mm; bottom: 6mm; color: #6B7280; font: 700 9px/1.2 "Helvetica Neue", Arial, sans-serif; text-align: center; }}
       @page {{
         size: A4;
         margin: 16mm 14mm;
@@ -3882,9 +4177,12 @@ def render_report(report: dict[str, object]) -> str:
     <section class="report-section" id="synthese">
       <div class="section-header"><h2 class="section-title">{html.escape(_("Synthèse exécutive"))}</h2><p class="section-intro">{html.escape(_("Les indicateurs à retenir avant d’entrer dans le détail."))}</p></div>
       <section class="kpi-grid" aria-label="{html.escape(_("Indicateurs clés"))}">{kpis}</section>
+      {estimate_box}
       <div class="executive-summary"><p>{html.escape(_(str(report.get("executive_summary", ""))))}</p></div>
       {render_summary_links(active_lang)}
     </section>
+
+    {render_quick_decision_section(report.get("quick_decisions", []), active_lang)}
 
     <section class="report-section priorities-section" id="priorites">
       <div class="section-header"><h2 class="section-title">{html.escape(_("Les 3 priorités du mois"))}</h2><p class="section-intro">{html.escape(_("Un plan d’action volontairement court pour décider vite."))}</p></div>
@@ -3895,7 +4193,7 @@ def render_report(report: dict[str, object]) -> str:
       <div class="section-header"><div class="section-tag">{html.escape(_("Priorité 1"))}</div><h2 class="section-title">{html.escape(_("Top pages à traiter en premier"))}</h2><p class="section-intro">{html.escape(_("Les pages avec le meilleur rapport visibilité, effort et potentiel."))}</p></div>
       {render_filter_bar("pages-prioritaires")}
       {priority_cards}
-      <p class="reliability-note">{html.escape(_("Les clics récupérables estimés sont un ordre de grandeur, pas une promesse. À confirmer après mise en ligne et suivi dans Google Search Console."))}</p>
+      <p class="reliability-note">{html.escape(_("Le potentiel théorique détecté est un ordre de grandeur, pas une promesse. À confirmer après mise en ligne et suivi dans Google Search Console."))}</p>
     </section>
 
     <section class="report-section" id="requetes">
@@ -3949,9 +4247,40 @@ def render_report(report: dict[str, object]) -> str:
       }});
     }});
   </script>
+  <div class="print-footer">{html.escape(_("Rapport d’opportunités SEO GSC"))} · {html.escape(str(report.get("generated_at") or ""))}</div>
 </body>
 </html>"""
     return document
+
+
+def render_quick_decision_section(items: object, lang: str = "fr") -> str:
+    rows = list(items or [])[:5]  # type: ignore[arg-type]
+    if not rows:
+        return ""
+    _ = gsc_gettext(lang)
+    rendered_rows = []
+    for row in rows:
+        rendered_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('priority', '')))}</td>"
+            f"<td>{html.escape(_(str(row.get('action', ''))))}</td>"
+            f"<td>{html.escape(str(row.get('pages', '')))}</td>"
+            f"<td>{html.escape(_(str(row.get('impact', ''))))}</td>"
+            f"<td>{html.escape(_(client_display_value(row.get('effort', ''), lang)))}</td>"
+            f"<td>{html.escape(_(str(row.get('why', ''))))}</td>"
+            "</tr>"
+        )
+    return (
+        '<section class="report-section" id="decision-rapide">'
+        f'<div class="section-header"><h2 class="section-title">{html.escape(_("Décision rapide"))}</h2>'
+        f'<p class="section-intro">{html.escape(_("À lire en 30 secondes pour décider quoi lancer en premier."))}</p></div>'
+        "<table class='compact-table quick-decision-table'><thead><tr>"
+        f"<th>{html.escape(_('Priorité'))}</th><th>{html.escape(_('Action recommandée'))}</th><th>{html.escape(_('Pages concernées'))}</th><th>{html.escape(_('Impact attendu'))}</th><th>{html.escape(_('Effort'))}</th><th>{html.escape(_('Pourquoi maintenant'))}</th>"
+        "</tr></thead><tbody>"
+        f"{''.join(rendered_rows)}"
+        "</tbody></table>"
+        "</section>"
+    )
 
 
 def render_kpi_card(kpi: dict[str, object], lang: str = "fr") -> str:
@@ -3966,7 +4295,7 @@ def render_kpi_card(kpi: dict[str, object], lang: str = "fr") -> str:
         note = f"<div class='kpi-note'>{html.escape(_('À surveiller selon la position moyenne'))}</div>"
     elif "prioritaires" in label_lower:
         classes.append("kpi-card--accent")
-    elif "recuperables" in label_lower or "gain" in label_lower or value.startswith("+"):
+    elif "recuperables" in label_lower or "gain" in label_lower or "potentiel" in label_lower or value.startswith("+"):
         classes.append("kpi-card--positive")
         note = f"<div class='kpi-note'>{html.escape(_('estimation qualifiée'))}</div>"
     return (
@@ -3984,9 +4313,10 @@ def render_estimate_box(report: dict[str, object], lang: str = "fr") -> str:
     note = _(str(report.get("estimated_gain_note") or ""))
     if not value and not note:
         return ""
+    explanation = _("selon comparaison CTR à position équivalente")
     return (
         "<div class='estimate-box'>"
-        f"<strong>{html.escape(_('Gain de trafic estimé :'))} {html.escape(value)}</strong>"
+        f"<strong>{html.escape(_('Potentiel théorique détecté :'))} {html.escape(value)}, {html.escape(explanation)}.</strong>"
         f"<p>{html.escape(note)}</p>"
         "</div>"
     )
@@ -4024,6 +4354,8 @@ def render_client_page_card(page: dict[str, object], lang: str = "fr") -> str:
     _ = gsc_gettext(lang)
     position = parse_position_value(dict(page.get("metrics", {})).get("Position", ""))
     priority_class = page_priority_class(str(page.get("priority", "p3")))
+    url = str(page.get("url", ""))
+    url_label = compact_url_for_display(url)
     metrics = "".join(
         f"<div class='metric {metric_state_class(str(label))}'>"
         f"<span class='metric-label'>{html.escape(_(str(label)))}</span>"
@@ -4034,7 +4366,7 @@ def render_client_page_card(page: dict[str, object], lang: str = "fr") -> str:
     action_labels = "".join(f"<span class='type-tag'>{html.escape(_(str(label)))}</span>" for label in page.get("action_type_labels", []))  # type: ignore[arg-type]
     business = (
         f"<div class='insight'><span class='mini-label'>{html.escape(_('Valeur business'))}</span>"
-        f"<strong>{html.escape(_(str(page.get('business_value', ''))))} · {html.escape(_(str(page.get('monetization_possible', ''))))}</strong></div>"
+        f"<strong>{html.escape(_(client_display_value(page.get('business_value', ''), lang)))} · {html.escape(_(client_display_value(page.get('monetization_possible', ''), lang)))}</strong></div>"
     )
     recommendation = (
         f"<div class='page-constat'><span class='constat-label'>{html.escape(_('Action recommandée spécifique'))}</span>"
@@ -4047,7 +4379,7 @@ def render_client_page_card(page: dict[str, object], lang: str = "fr") -> str:
         <div class="page-card-header">
           <div class="page-info">
             <span class="page-slug">{html.escape(str(page.get("slug", "")))}</span>
-            <a class="page-url" href="{html.escape(str(page.get("url", "")))}">{html.escape(str(page.get("url", "")))} ↗</a>
+            <a class="page-url" href="{html.escape(url)}" title="{html.escape(url)}">{html.escape(url_label)} ↗</a>
           </div>
           <span class="priority-badge priority-badge--{priority_class}">{html.escape(_(priority_display_label(str(page.get("priority", "p3")), str(page.get("priority_label", "")))))}</span>
         </div>
@@ -4080,7 +4412,7 @@ def metric_state_class(label: str) -> str:
     label_normalized = strip_accents(label).lower()
     if "ctr" in label_normalized or "taux de clic" in label_normalized:
         return "metric--warning"
-    if "gain" in label_normalized:
+    if "gain" in label_normalized or "potentiel" in label_normalized:
         return "metric--positive"
     return ""
 
@@ -4163,6 +4495,8 @@ def render_executive_query_opportunities(rows: list[dict[str, object]], lang: st
     _ = gsc_gettext(lang)
     table_rows = []
     for row in rows[:20]:
+        target_url = str(row.get("target_url", "") or "")
+        target_label = compact_url_for_display(target_url) if target_url else _("à valider")
         table_rows.append(
             "<tr>"
             f"<td>{html.escape(_(str(row.get('recommendation', ''))))}</td>"
@@ -4171,7 +4505,7 @@ def render_executive_query_opportunities(rows: list[dict[str, object]], lang: st
             f"<td>{html.escape(str(row.get('impressions', '')))}</td>"
             f"<td>{html.escape(str(row.get('ctr', '')))}</td>"
             f"<td>{html.escape(str(row.get('position', '')))}</td>"
-            f"<td class='url-cell'>{html.escape(str(row.get('target_url', '') or _('à valider')))}</td>"
+            f"<td class='url-cell'><a href='{html.escape(target_url)}' title='{html.escape(target_url)}'>{html.escape(target_label)}</a></td>"
             "</tr>"
         )
     return (
@@ -4227,12 +4561,14 @@ def render_snippet_card(item: dict[str, object], lang: str = "fr") -> str:
     _ = gsc_gettext(lang)
     position = parse_position_value(item.get("position", ""))
     priority_class = page_priority_class(str(item.get("priority", "p3")))
+    url = str(item.get("url", ""))
+    url_label = compact_url_for_display(url)
     return f"""
       <article class="snippet-card" data-priority="{html.escape(priority_class)}">
         <div class="page-card-header">
           <div class="page-info">
             <span class="page-slug">{html.escape(str(item.get("slug", "")))}</span>
-            <a class="page-url" href="{html.escape(str(item.get("url", "")))}">{html.escape(str(item.get("url", "")))} ↗</a>
+            <a class="page-url" href="{html.escape(url)}" title="{html.escape(url)}">{html.escape(url_label)} ↗</a>
           </div>
           <span class="priority-badge priority-badge--medium">{html.escape(_("Résultat Google"))}</span>
         </div>
@@ -4279,18 +4615,19 @@ def render_breakthrough_section(pages: list[dict[str, object]], lang: str = "fr"
 
 def render_business_section(pages: list[dict[str, object]], lang: str = "fr") -> str:
     if not pages:
-        return render_empty_state("Aucune page high business value ne ressort clairement dans cet export.", lang)
+        return render_empty_state("Aucune page à forte valeur business ne ressort clairement dans cet export.", lang)
     _ = gsc_gettext(lang)
     rows = []
     for page in pages[:10]:
         action = ", ".join(_(str(label)) for label in page.get("action_type_labels", [])) if isinstance(page.get("action_type_labels"), list) else ""
+        page_url = str(page.get("url", ""))
         rows.append(
             "<tr>"
-            f"<td class='url-cell'><a href='{html.escape(str(page.get('url', '')))}'>{html.escape(str(page.get('slug', '')))}</a></td>"
-            f"<td>{html.escape(_(str(page.get('business_value', ''))))}</td>"
-            f"<td>{html.escape(_(str(page.get('monetization_possible', ''))))}</td>"
+            f"<td class='url-cell'><a href='{html.escape(page_url)}' title='{html.escape(page_url)}'>{html.escape(str(page.get('slug', '')))}</a></td>"
+            f"<td>{html.escape(_(client_display_value(page.get('business_value', ''), lang)))}</td>"
+            f"<td>{html.escape(_(client_display_value(page.get('monetization_possible', ''), lang)))}</td>"
             f"<td>{html.escape(str(page.get('opportunity_score', '')))}</td>"
-            f"<td>{html.escape(str(page.get('main_query', '')))}</td>"
+            f"<td>{html.escape(display_query_label(page.get('main_query', '')))}</td>"
             f"<td>{html.escape(action)}</td>"
             f"<td>{html.escape(_(str(page.get('recommendation', ''))))}</td>"
             "</tr>"
@@ -4314,7 +4651,10 @@ def render_cannibalization_groups_section(groups: list[dict[str, Any]], lang: st
         for group in visible_groups:
             urls = [str(url) for url in group.get("urls") or []][:8]
             shared = [str(query) for query in group.get("shared_queries") or []][:6]
-            url_items = "".join(f"<li>{html.escape(url)}</li>" for url in urls)
+            url_items = "".join(
+                f"<li><a href='{html.escape(url)}' title='{html.escape(url)}'>{html.escape(compact_url_for_display(url))}</a></li>"
+                for url in urls
+            )
             shared_label = " · ".join(shared) if shared else _("à valider avec l'export Requêtes")
             cards.append(
                 "<article class='appendix-card'>"
@@ -4384,7 +4724,8 @@ def render_traffic_section(traffic_chart: str, lang: str = "fr") -> str:
 def render_methodology_section(report_mode: str = "current_period_only", lang: str = "fr") -> str:
     _ = gsc_gettext(lang)
     items = [
-        "Les gains de trafic estimés sont des ordres de grandeur, pas des promesses.",
+        "Ce rapport est basé sur les exports Google Search Console fournis. Il identifie les opportunités SEO visibles dans GSC, mais ne remplace pas un audit technique crawl complet.",
+        "Le potentiel théorique détecté est un ordre de grandeur, pas une promesse de trafic.",
         "Les positions sont des moyennes Google Search Console.",
         "Les priorités sont calculées selon impressions, taux de clic, position et potentiel d’amélioration.",
         "Les signaux de pages en concurrence doivent être vérifiés manuellement.",
@@ -4393,7 +4734,7 @@ def render_methodology_section(report_mode: str = "current_period_only", lang: s
     if report_mode == "current_period_only":
         items.append("Aucun export précédent n’a été fourni: le rapport ne diagnostique pas une baisse de trafic.")
     else:
-        items.append("La comparaison Before/After dépend strictement des deux exports fournis et de leurs périodes.")
+        items.append("La comparaison entre deux périodes dépend strictement des deux exports fournis et de leurs périodes.")
     body = "".join(f"<li>{html.escape(_(item))}</li>" for item in items)
     return f"""
     <section class="report-section" id="methodologie">
@@ -4417,7 +4758,7 @@ def render_appendices(pages: list[dict[str, object]], queries: list[dict[str, ob
       <h3>{html.escape(_("Détails méthodologiques et limites"))}</h3>
       <ul class="actions">
         <li>{html.escape(_("Google Search Console agrège les positions et les taux de clic: ce ne sont pas des mesures page par page en temps réel."))}</li>
-        <li>{html.escape(_("Le rapport ne remplace pas une vérification SERP, une analyse de contenu ni un crawl technique complet."))}</li>
+        <li>{html.escape(_("Ce rapport est basé sur les exports Google Search Console fournis. Il identifie les opportunités SEO visibles dans GSC, mais ne remplace pas un audit technique crawl complet."))}</li>
         <li>{html.escape(_("Les estimations de clics récupérables donnent un ordre de grandeur sur la période exportée."))}</li>
       </ul>
     </section>
