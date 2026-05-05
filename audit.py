@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+import sys
 import time
 import xml.etree.ElementTree as ET
 import html as html_lib
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict, deque
 from collections import Counter
@@ -17,7 +19,7 @@ from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlparse, urlun
 import requests
 from bs4 import BeautifulSoup
 
-from audit_report_design import render_premium_audit_report
+from audit_report_design import render_premium_audit_report, validate_rendered_audit_html
 from audit_store import record_audit_report
 from config import (
     AUDIT_MODE_CONFIGS,
@@ -72,6 +74,7 @@ COMMERCIAL_PAGE_TYPES = {
     "local",
     "ecommerce",
 }
+
 B2B_TERMS = {
     "b2b",
     "brand",
@@ -287,7 +290,8 @@ def audit_domains(
             cancel_callback()
         print(f"\n[{index}/{total}] Audit de {item.domain} (score={item.score})")
         start_url = item.domain if item.domain.startswith("http") else f"https://{item.domain}"
-        crawl_metadata: dict[str, object] = {}
+        run_id = f"{clean_domain(item.domain)}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{index}"
+        crawl_metadata: dict[str, object] = {"run_id": run_id}
         pages = crawl_site(
             start_url,
             max_pages=resolved_max_pages,
@@ -344,7 +348,11 @@ def audit_domains(
                 gsc_paths=gsc_paths,
             )
 
+        report.crawl_metadata["run_id"] = run_id
+        report.summary["run_id"] = run_id
         report_path = output_path / f"{report.domain}.json"
+        if report_path.exists():
+            report_path.unlink()
         write_json_file(report_path, asdict(report))
         report.history_path = ""
         if history:
@@ -356,6 +364,8 @@ def audit_domains(
             effective_html_output = str(output_path / f"{report.domain}.html")
         if effective_html_output:
             html_path = resolve_audit_html_path(effective_html_output, output_path, report, single_report=len(selected) == 1)
+            if html_path.exists():
+                html_path.unlink()
             write_audit_html_report(report, html_path, lang=lang)
             report.html_path = str(html_path)
             write_json_file(report_path, asdict(report))
@@ -487,6 +497,17 @@ def write_audit_html_index(reports: list[AuditReport], output_path: Path) -> Pat
 
 def write_audit_html_report(report: AuditReport, output_path: Path, lang: str | None = None) -> Path:
     html = render_premium_audit_report(report, lang=lang or report.lang)
+    qa_context = {
+        "lang": lang or report.lang,
+        "score_global": report.technical_health_score or report.observed_health_score,
+        "summary": report.summary,
+        "pages_prioritaires": report.top_pages_to_rework,
+    }
+    warnings = validate_rendered_audit_html(html, qa_context)
+    if warnings:
+        print(f"[AUDIT QA] Warning avant export {output_path}:", file=sys.stderr)
+        for warning in warnings:
+            print(f"[AUDIT QA] - {warning}", file=sys.stderr)
     output_file = write_text_file(output_path, html)
     return output_file
 
@@ -3528,26 +3549,76 @@ def build_top_recovery_opportunities(pages: list[AuditPage]) -> list[dict[str, o
     return rows
 
 
+def normalized_report_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.casefold())
+    return "".join(char for char in normalized if not unicodedata.combining(char)).replace("œ", "oe").replace("æ", "ae")
+
+
+def report_page_kind(page: AuditPage) -> str:
+    text = normalized_report_text(f"{page.url} {page.title} {' '.join(page.h1)} {' '.join(page.h2)} {page.page_type}")
+    if page.page_type == "legal" or any(term in text for term in ("mentions legales", "legal", "privacy", "confidentialite")):
+        return "page_legale"
+    if page.page_type == "contact" or "contact" in text:
+        return "contact"
+    if page.page_type == "category" or "category" in text or "categorie" in text:
+        return "categorie"
+    if "tournoi" in text or re.search(r"\bp(25|100|250|500|1000|1500|2000)\b", text):
+        return "page_tournoi"
+    if any(term in text for term in ("test", "avis", "review")):
+        return "test_produit"
+    if any(term in text for term in ("comparatif", "meilleur", "meilleures", "comparison", "best")):
+        return "comparatif"
+    if any(term in text for term in ("paris", "lyon", "marseille", "toulouse", "bordeaux", "nantes", "lille", "rennes", "nice", "club")):
+        return "page_locale"
+    if any(term in text for term in ("choisir", "achat", "acheter", "raquette", "chaussure", "balles", "sac", "equipement")):
+        return "guide_achat"
+    if page.page_type in {"guide", "blog", "resource"} or any(term in text for term in ("technique", "conseils", "comment", "guide")):
+        return "article_technique"
+    return "incertain"
+
+
+def neutral_public_recommendation() -> str:
+    return "Clarifier l’intention principale de la page, renforcer les informations utiles et ajouter des liens internes vers les contenus associés."
+
+
+def public_page_recommendation(page: AuditPage) -> str:
+    kind = report_page_kind(page)
+    if kind == "guide_achat":
+        return "Structurer le guide autour des critères de choix, niveaux de pratique, erreurs fréquentes et liens vers les tests ou comparatifs associés."
+    if kind == "test_produit":
+        return "Renforcer le test avec conditions d'essai, avantages, limites, profil de joueur concerné et liens vers les alternatives proches."
+    if kind == "comparatif":
+        return "Clarifier les critères de comparaison, expliquer les meilleurs choix par usage et relier les produits ou guides complémentaires."
+    if kind == "page_locale":
+        return "Préciser la zone couverte, les informations pratiques, les points de confiance locaux et les liens vers les contenus géographiquement proches."
+    if kind == "page_tournoi":
+        return "Clarifier le niveau requis, les modalités d'inscription, le format de compétition et ajouter une FAQ pour les joueurs concernés."
+    if kind == "article_technique":
+        return "Ajouter des explications concrètes, exemples de jeu, erreurs à éviter et liens internes vers les articles ou guides associés."
+    if kind == "page_legale":
+        return "Vérifier que la page est complète, accessible depuis le footer et correctement exclue des priorités éditoriales ou business."
+    if kind == "contact":
+        return "Vérifier les coordonnées, les liens utiles, la clarté du formulaire et l'accès depuis les pages importantes."
+    if kind == "categorie":
+        return "Clarifier le rôle de la catégorie, ajouter une courte introduction utile et relier les contenus clés du même thème."
+    return neutral_public_recommendation()
+
+
 def generate_page_recommendation(page: AuditPage) -> str:
-    text = f"{page.url} {page.title} {' '.join(page.h1)} {' '.join(page.h2)}".casefold()
-    if "maprimeadapt" in text or "ma prime adapt" in text:
-        if "locataire" in text:
-            return "Ajouter un bloc sur les cas ou un locataire peut demander MaPrimeAdapt, les accords necessaires, les justificatifs a preparer et les limites selon le statut d'occupation."
-        return "Mettre a jour les conditions MaPrimeAdapt 2026, ajouter les justificatifs attendus, les etapes de demande et des liens vers les pages aides financieres et adaptation logement."
-    if any(term in text for term in ("douche", "salle de bain", "senior")):
-        return "Mettre a jour les montants 2026, clarifier le reste a charge, ajouter un exemple de financement et renforcer les liens vers MaPrimeAdapt, aides salle de bain et prevention des chutes."
+    text = normalized_report_text(f"{page.url} {page.title} {' '.join(page.h1)} {' '.join(page.h2)}")
+    if any(term in text for term in ("maprimeadapt", "ma prime adapt", "douche", "salle de bain", "senior")) and "padel" not in text:
+        return public_page_recommendation(page)
     if any(term in text for term in ("private label", "oem", "odm", "manufacturer", "supplier", "factory")):
         return "Renforcer les elements B2B : types de produits disponibles, options private label, MOQ, certifications, delais de production et CTA vers demande de devis."
-    if any(term in text for term in ("p100", "tournoi", "padel")) and page.page_type in {"guide", "blog", "resource", "other"}:
-        return "Clarifier le niveau requis, les points a gagner, les regles d'inscription et ajouter une FAQ sur les questions frequentes des joueurs debutants en tournoi."
-    if page.page_type == "financial_aid":
-        return "Ajouter les criteres d'eligibilite, les montants a jour, les documents a fournir et des liens vers les pages travaux ou services concernes."
-    if page.page_type == "home_adaptation":
-        return "Ajouter prix, exemples concrets, aides disponibles, delais de mise en oeuvre et liens vers les pages de financement et de prevention associees."
+    if page.page_type in {"financial_aid", "home_adaptation"}:
+        return public_page_recommendation(page)
     if page.page_type in {"product", "manufacturer"}:
         return "Ajouter specifications, preuves de confiance, conditions commerciales, delais, options et un appel a l'action clair vers la demande de devis."
     if page.page_type in {"comparison", "review"}:
-        return "Structurer la page avec criteres de choix, tableau comparatif, avantages limites, cas d'usage et liens vers les pages produit les plus pertinentes."
+        return public_page_recommendation(page)
+    sport_recommendation = public_page_recommendation(page)
+    if sport_recommendation != neutral_public_recommendation():
+        return sport_recommendation
     if page.outdated_date_signal:
         return page.recommended_date_action or "Mettre a jour les donnees visibles, verifier si l'annee doit rester dans le title/H1 et ajouter une mention de derniere mise a jour."
     if page.inbound_internal_links_count < 3 and page.business_value == "high":
@@ -3564,10 +3635,8 @@ def suggest_title(page: AuditPage) -> str:
     current = re.sub(r"\s+", " ", page.title or "").strip()
     topic = slug_to_readable(urlparse(page.url).path)
     text = f"{current} {topic} {' '.join(page.h1)}".casefold()
-    if "maprimeadapt" in text and "locataire" in text:
-        return "MaPrimeAdapt locataire : conditions et demarches 2026"
-    if "douche" in text and "senior" in text:
-        return "Douche italienne senior : prix 2026, aides et reste a charge"
+    if any(term in normalized_report_text(text) for term in ("maprimeadapt", "ma prime adapt", "douche", "senior")) and "padel" not in normalized_report_text(text):
+        return ""
     if any(term in text for term in ("private label", "teeth whitening")):
         return "Private Label Teeth Whitening Products for Brands"
     if "toothpaste" in text and "tax" in text:
@@ -3582,10 +3651,10 @@ def suggest_title(page: AuditPage) -> str:
 
 def finish_complete_title(value: str, limit: int = 60) -> str:
     cleaned = re.sub(r"\s+", " ", value).strip(" -|:,.")
-    if len(cleaned) <= limit and not re.search(r"\b(?:and|or|de|du|des|pour|with|after|before)$", cleaned, re.I):
+    if len(cleaned) <= limit and not re.search(r"\b(?:and|or|de|du|des|aux|et|avec|pour|with|after|before)$", cleaned, re.I):
         return cleaned
     trimmed = cleaned[:limit].rsplit(" ", 1)[0].strip(" -|:,.")
-    if re.search(r"\b(?:and|or|de|du|des|pour|with|after|before)$", trimmed, re.I):
+    if re.search(r"\b(?:and|or|de|du|des|aux|et|avec|pour|with|after|before)$", trimmed, re.I):
         trimmed = trimmed.rsplit(" ", 1)[0].strip(" -|:,.")
     return trimmed or cleaned[:limit].strip(" -|:,.")
 
@@ -3595,10 +3664,12 @@ def suggest_meta_description(page: AuditPage) -> str:
         return ""
     title = suggest_title(page) or page.title or slug_to_readable(urlparse(page.url).path)
     if page.page_type in {"financial_aid", "home_adaptation"}:
-        return "Retrouvez conditions, prix, aides possibles et demarches pour prioriser les travaux utiles et preparer une demande claire."
+        return ""
     if page.page_type in {"product", "manufacturer"}:
         return "Compare product options, certifications, MOQ, lead times and private label services before requesting a supplier quote."
-    return f"Analyse pratique de {finish_complete_title(title, 58)} avec points a verifier, priorites de correction et actions concretes."
+    if "padel" in normalized_report_text(f"{page.url} {title}"):
+        return f"Retrouvez les informations utiles sur {finish_complete_title(title, 58)}, avec des conseils concrets et des liens vers les contenus padel associés."
+    return ""
 
 
 def main_recovery_issue(page: AuditPage) -> str:

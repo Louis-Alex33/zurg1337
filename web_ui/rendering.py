@@ -1717,7 +1717,7 @@ def render_audit_report_page(path: Path, relative_path: Path, file_size: str, va
     content = f"""
     <section class="panel file-shell audit-report-shell audit-report-variant-{html.escape(active_variant)}">
       <div class="panel-actions audit-report-actions no-print report-toolbar">
-        <button class="button print-button" type="button" onclick="window.print()">{html.escape(print_label)}</button>
+        <button class="button print-button" type="button" onclick="printClientReport(false)">{html.escape(print_label)}</button>
         {language_switch}
         <a class="button secondary" href="{file_view_link(str(relative_path), switch_variant, active_lang)}">{switch_label}</a>
         <a class="button secondary" href="/">{html.escape(home_label)}</a>
@@ -2192,6 +2192,25 @@ def page_shell(title: str, content: str) -> str:
     {content}
   </main>
   <script>
+    function printClientReport(includeAnnexe) {{
+      if (typeof window.printClientReportFromReport === 'function') {{
+        window.printClientReportFromReport(includeAnnexe);
+        return;
+      }}
+      const report = document.querySelector('.premium-report') || document.querySelector('.audit-report-shell') || document.body;
+      const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+      if (!printWindow) {{
+        window.print();
+        return;
+      }}
+      const styles = Array.from(document.querySelectorAll('style')).map((node) => node.outerHTML).join('\\n');
+      printWindow.document.open();
+      printWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Pré-audit SEO public</title>' + styles + '</head><body>' + report.outerHTML + '</body></html>');
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 300);
+    }}
+
     function filterCsvTable(input) {{
       const wrapper = input.closest('.table-filter-row').nextElementSibling;
       if (!wrapper) return;

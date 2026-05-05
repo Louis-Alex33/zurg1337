@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
@@ -23,7 +24,8 @@ REPORT_TEXT = {
     "fr": {
         "seo_report": "RAPPORT SEO",
         "audit_done_on": "Audit réalisé le",
-        "seo_audit": "Audit SEO",
+        "seo_audit": "Pré-audit SEO public",
+        "url_only_disclaimer": "Analyse basée sur un crawl public URL-only, sans accès Google Search Console, Analytics ni backlinks.",
         "urgency_level": "Niveau d'urgence",
         "pages_analyzed": "pages analysées",
         "leader_section": "POUR LE DIRIGEANT",
@@ -164,6 +166,7 @@ REPORT_TEXT = {
         "seo_report": "SEO REPORT",
         "audit_done_on": "Audit completed on",
         "seo_audit": "SEO Audit",
+        "url_only_disclaimer": "Analysis based on a public URL-only crawl, without access to Google Search Console, Analytics or backlinks.",
         "urgency_level": "Urgency level",
         "pages_analyzed": "pages analyzed",
         "leader_section": "FOR THE DECISION MAKER",
@@ -481,6 +484,57 @@ ENGLISH_LANGUAGE_MARKERS = {
     "your",
 }
 
+BAD_TITLE_END_WORDS = {
+    "aux",
+    "et",
+    "avec",
+    "de",
+    "des",
+    "du",
+    "pour",
+    "sur",
+    "en",
+    "a",
+    "à",
+    "the",
+    "and",
+    "with",
+    "for",
+    "of",
+    "to",
+}
+
+FORBIDDEN_RECOMMENDATION_TERMS = (
+    "critères d'éligibilité",
+    "criteres d'eligibilite",
+    "montants à jour",
+    "montants a jour",
+    "documents à fournir",
+    "documents a fournir",
+    "aides possibles",
+    "aides disponibles",
+    "démarches",
+    "demarches",
+    "travaux",
+    "services concernés",
+    "services concernes",
+    "maprimeadapt",
+    "ma prime adapt",
+    "reste à charge",
+    "reste a charge",
+)
+
+BAD_META_PHRASES = (
+    "analyse pratique de",
+    "points à vérifier",
+    "points a verifier",
+    "priorités de correction",
+    "priorites de correction",
+)
+
+INTERNAL_PAGE_TYPE_CODES = {"financial_aid", "home_adaptation"}
+MANUAL_SEO_REWRITE_LABEL = "À réécrire manuellement : suggestion automatique non fiable."
+
 SEUIL_LENT = 3.0
 SEUIL_CRITIQUE = 4.0
 SEUIL_TITRE_LONG = 60
@@ -506,6 +560,118 @@ def context_lang(context: dict[str, Any]) -> str:
 
 def text_for(context: dict[str, Any], key: str) -> str:
     return report_copy(context_lang(context), key)
+
+
+def strip_accents_for_report(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.casefold())
+    return "".join(char for char in normalized if not unicodedata.combining(char)).replace("œ", "oe").replace("æ", "ae")
+
+
+def contains_forbidden_recommendation(value: str) -> bool:
+    normalized = strip_accents_for_report(value)
+    return any(strip_accents_for_report(term) in normalized for term in FORBIDDEN_RECOMMENDATION_TERMS)
+
+
+def public_page_kind(url: str, page_type: str = "", title: str = "") -> str:
+    text = strip_accents_for_report(f"{url} {page_type} {title}")
+    if "mention" in text or "legal" in text or "privacy" in text or "confidentialite" in text or page_type == "legal":
+        return "page_legale"
+    if "contact" in text or page_type == "contact":
+        return "contact"
+    if "category" in text or "categorie" in text or page_type == "category":
+        return "categorie"
+    if "tournoi" in text or re.search(r"\bp(25|100|250|500|1000|1500|2000)\b", text):
+        return "page_tournoi"
+    if any(term in text for term in ("test", "avis", "review")):
+        return "test_produit"
+    if any(term in text for term in ("comparatif", "meilleur", "meilleures", "comparison", "best")):
+        return "comparatif"
+    if any(term in text for term in ("paris", "lyon", "marseille", "toulouse", "bordeaux", "nantes", "lille", "rennes", "nice", "club")):
+        return "page_locale"
+    if any(term in text for term in ("choisir", "achat", "acheter", "raquette", "chaussure", "balles", "sac", "equipement")):
+        return "guide_achat"
+    if page_type in {"blog", "resource", "article"} or any(term in text for term in ("technique", "conseils", "comment", "guide")):
+        return "article_technique"
+    return "incertain"
+
+
+def public_page_type_label(url: str, page_type: str = "", title: str = "") -> str:
+    labels = {
+        "guide_achat": "guide d'achat",
+        "test_produit": "test produit",
+        "comparatif": "comparatif",
+        "page_locale": "page locale",
+        "page_tournoi": "page tournoi",
+        "article_technique": "article technique",
+        "page_legale": "page légale",
+        "contact": "contact",
+        "categorie": "catégorie",
+        "incertain": "page",
+    }
+    return labels[public_page_kind(url, page_type, title)]
+
+
+def neutral_page_recommendation() -> str:
+    return "Clarifier l’intention principale de la page, renforcer les informations utiles et ajouter des liens internes vers les contenus associés."
+
+
+def recommendation_for_public_page_type(url: str, page_type: str = "", title: str = "") -> str:
+    kind = public_page_kind(url, page_type, title)
+    if kind == "guide_achat":
+        return "Structurer le guide autour des critères de choix, niveaux de pratique, erreurs fréquentes et liens vers les tests ou comparatifs associés."
+    if kind == "test_produit":
+        return "Renforcer le test avec conditions d'essai, avantages, limites, profil de joueur concerné et liens vers les alternatives proches."
+    if kind == "comparatif":
+        return "Clarifier les critères de comparaison, expliquer les meilleurs choix par usage et relier les produits ou guides complémentaires."
+    if kind == "page_locale":
+        return "Préciser la zone couverte, les informations pratiques, les points de confiance locaux et les liens vers les contenus géographiquement proches."
+    if kind == "page_tournoi":
+        return "Clarifier le niveau requis, les modalités d'inscription, le format de compétition et ajouter une FAQ pour les joueurs concernés."
+    if kind == "article_technique":
+        return "Ajouter des explications concrètes, exemples de jeu, erreurs à éviter et liens internes vers les articles ou guides associés."
+    if kind == "page_legale":
+        return "Vérifier que la page est complète, accessible depuis le footer et correctement exclue des priorités éditoriales ou business."
+    if kind == "contact":
+        return "Vérifier les coordonnées, les liens utiles, la clarté du formulaire et l'accès depuis les pages importantes."
+    if kind == "categorie":
+        return "Clarifier le rôle de la catégorie, ajouter une courte introduction utile et relier les contenus clés du même thème."
+    return neutral_page_recommendation()
+
+
+def client_level(value: object, lang: str = "fr", *, priority_word: bool = False) -> str:
+    text = str(value or "").strip()
+    normalized = strip_accents_for_report(text)
+    is_en = sanitize_report_language(lang) == "en"
+    if is_en:
+        labels = {
+            "eleve": "high",
+            "haute": "high",
+            "fort": "high",
+            "forte": "high",
+            "moyen": "medium",
+            "moyenne": "medium",
+            "modere": "moderate",
+            "moderee": "moderate",
+            "faible": "low",
+            "low to medium": "low to medium",
+            "medium to high": "medium to high",
+        }
+        return labels.get(normalized, text)
+    labels = {
+        "high": "élevée" if priority_word else "élevé",
+        "eleve": "élevée" if priority_word else "élevé",
+        "haute": "élevée" if priority_word else "élevé",
+        "fort": "élevé",
+        "medium": "moyenne" if priority_word else "moyen",
+        "moderate": "modérée" if priority_word else "moyen",
+        "modere": "modérée" if priority_word else "moyen",
+        "moderee": "modérée" if priority_word else "moyen",
+        "low": "faible",
+        "faible": "faible",
+        "low to medium": "faible à moyen",
+        "medium to high": "moyen à élevé",
+    }
+    return labels.get(normalized, text)
 
 
 def default_offers_for_language(lang: str) -> list[dict[str, Any]]:
@@ -679,10 +845,13 @@ def prepare_audit_report_context(
     benchmark = normalize_benchmark(data.get("benchmark"))
     benchmark_disponible = get_bool(data.get("benchmark_disponible"), default=bool(benchmark)) and bool(benchmark)
     offres_source = data.get("offres") if "offres" in data else default_offers_for_language(active_lang)
+    raw_urgency = str(data.get("urgency_level") or summary.get("urgency_level") or infer_urgency(score, summary, business_signals, lang=active_lang))
+    urgency_level = normalize_urgency_level(raw_urgency, score, summary, business_signals, lang=active_lang)
     context = {
         "lang": active_lang,
         "report_type": str(data.get("report_type") or "standard"),
         "report_mode": str(data.get("report_mode") or "executive"),
+        "summary": summary,
         "tool_name": str(data.get("tool_name") or DEFAULT_TOOL_NAME),
         "tool_tagline": str(data.get("tool_tagline") or DEFAULT_TOOL_TAGLINE),
         "logo_url": logo_url,
@@ -699,7 +868,7 @@ def prepare_audit_report_context(
         "seo_opportunity_score": seo_opportunity_score,
         "recovery_opportunity_score": clamp_score(get_int(data, "recovery_opportunity_score", get_int(summary, "recovery_opportunity_score", 0))),
         "confidence_level": str(data.get("confidence_level") or ("low" if active_lang == "en" else "faible")),
-        "urgency_level": str(data.get("urgency_level") or summary.get("urgency_level") or infer_urgency(score, summary, business_signals, lang=active_lang)),
+        "urgency_level": urgency_level,
         "base_status": str(data.get("base_status") or infer_base_status(score, lang=active_lang)),
         "pages_analysees": pages_analysees,
         "pages_saines": get_int(data, "pages_saines", get_int(summary, "pages_ok", max(0, pages_analysees - pages_erreur))),
@@ -758,6 +927,7 @@ def prepare_audit_report_context(
 def render_report_body(context: dict[str, Any]) -> str:
     priority_pages = render_priority_pages(context)
     signals = render_secondary_signals(context)
+    final_section = "" if context.get("report_type") in {"standard", "crawl"} else render_final_section(context)
     recovery_sections = ""
     if str(context.get("report_type") or "") == "recovery":
         recovery_sections = (
@@ -783,10 +953,58 @@ def render_report_body(context: dict[str, Any]) -> str:
   {render_performance_section(context)}
   {render_seo_suggestions_section(context)}
   {signals}
-  {render_final_section(context)}
+  {final_section}
   {render_method_about(context)}
   {render_appendix(context)}
 </main>"""
+
+
+def validate_rendered_audit_html(html_doc: str, context: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    visible_text = rendered_audit_visible_text(html_doc)
+    normalized_visible = strip_accents_for_report(visible_text)
+    if re.search(r"(127\.0\.0\.1|localhost|/files\?path=)", html_doc, flags=re.I):
+        warnings.append("trace locale visible dans le HTML client")
+    if context_lang(context) == "fr":
+        english_levels = sorted({match.group(0).lower() for match in re.finditer(r"\b(high|medium|low)\b", visible_text, flags=re.I)})
+        if english_levels:
+            warnings.append(f"niveau anglais visible côté client: {', '.join(english_levels)}")
+    for code in INTERNAL_PAGE_TYPE_CODES:
+        if re.search(rf"\b{re.escape(code)}\b", visible_text):
+            warnings.append(f"code interne visible côté client: {code}")
+    for term in FORBIDDEN_RECOMMENDATION_TERMS:
+        if strip_accents_for_report(term) in normalized_visible:
+            warnings.append(f"recommandation hors niche détectée: {term}")
+            break
+    if "analyse pratique de" in normalized_visible or "analyse claire de" in normalized_visible:
+        warnings.append("meta générique de type 'Analyse pratique de' détectée")
+    for match in re.finditer(r"<span class=\"suggestion-texte-propose\">([^<]+)</span>", html_doc):
+        suggestion = html.unescape(match.group(1))
+        if title_looks_truncated(suggestion):
+            warnings.append(f"title suggéré probablement tronqué: {suggestion}")
+            break
+    if int(context.get("score_global") or 0) >= 80 and "Niveau d'urgence : élevé" in visible_text:
+        summary = as_dict(context.get("summary"))
+        blocking = sum(get_int(summary, key, 0) for key in ("noindex_pages", "canonical_to_other_url_pages", "canonical_cross_domain_pages", "robots_blocked_pages"))
+        if not blocking:
+            warnings.append("score >=80 avec priorité élevée sans justification critique visible")
+    for page in context.get("pages_prioritaires", []):
+        item = as_dict(page)
+        if public_page_kind(str(item.get("url") or ""), str(item.get("type") or ""), str(item.get("titre") or "")) == "page_legale":
+            if strip_accents_for_report(str(item.get("impact") or "")) in {"eleve", "high"}:
+                warnings.append("page légale classée comme opportunité business")
+                break
+    page_count = len(re.findall(r"class=\"[^\"]*\breport-page\b", html_doc))
+    if page_count > 25:
+        warnings.append(f"rapport principal potentiellement trop long: {page_count} sections pages")
+    return warnings
+
+
+def rendered_audit_visible_text(html_doc: str) -> str:
+    text = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ", html_doc, flags=re.I | re.S)
+    text = re.sub(r"<section class=\"report-page annexe\".*?</section>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return html.unescape(re.sub(r"\s+", " ", text))
 
 
 def render_cover(context: dict[str, Any]) -> str:
@@ -811,6 +1029,7 @@ def render_cover(context: dict[str, Any]) -> str:
         <p class="label">{escape(t("audit_done_on"))} {escape(context["audit_date"])}</p>
         <h1 class="cover-title">{escape("SEO Crawl & Recovery Opportunity Audit" if context.get("report_type") == "recovery" else t("seo_audit"))}</h1>
         <p class="cover-domain">{escape(context["domain"])}</p>
+        {render_url_only_disclaimer(context)}
       </div>
       <div class="cover-score">
         {render_score_gauge(int(context["score_global"]), score_class)}
@@ -829,6 +1048,12 @@ def render_cover(context: dict[str, Any]) -> str:
     </div>
     {render_page_footer(context)}
   </section>"""
+
+
+def render_url_only_disclaimer(context: dict[str, Any]) -> str:
+    if context.get("report_type") == "recovery":
+        return ""
+    return f'<p class="cover-disclaimer">{escape(text_for(context, "url_only_disclaimer"))}</p>'
 
 
 def render_recovery_cover_score(context: dict[str, Any]) -> str:
@@ -1761,6 +1986,7 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
         desc = str(page.get("description_google") or "")
         title_suggested = str(suggestion.get("titre_suggere") or "").strip()
         desc_suggested = str(suggestion.get("description_suggeree") or "").strip()
+        manual_rewrite = bool(suggestion.get("manual_rewrite"))
         title_block = ""
         if title_suggested:
             title_bad = len(title) > SEUIL_TITRE_LONG
@@ -1824,7 +2050,16 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
       </div>
       {render_suggestion_explanation(str(suggestion.get("explication_description") or ""))}
     </div>"""
-        if not title_block and not desc_block:
+        manual_block = ""
+        if manual_rewrite and not title_block and not desc_block:
+            manual_block = f"""
+    <div class="suggestion-bloc suggestion-bloc--manual">
+      <div class="suggestion-bloc-header">
+        <span class="suggestion-type">{escape(t("suggested"))}</span>
+      </div>
+      <p class="suggestion-texte-propose">{escape(MANUAL_SEO_REWRITE_LABEL)}</p>
+    </div>"""
+        if not title_block and not desc_block and not manual_block:
             continue
         cards.append(
             f"""
@@ -1832,6 +2067,7 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     <div class="suggestion-url">{escape(display_url_label(str(page.get("url") or ""), str(context["domain"]), empty_label="Home" if context_lang(context) == "en" else "Accueil"))}</div>
     {title_block}
     {desc_block}
+    {manual_block}
   </div>"""
         )
     if not cards:
@@ -2341,24 +2577,32 @@ def normalize_priority_pages(items: Any, pages_by_url: dict[str, dict[str, Any]]
         score = raw_score if raw_score >= 0 else 75
         word_count = get_int(item, "mots", get_int(item, "word_count", get_int(details, "word_count", 0)))
         priority_score = get_int(item, "priority_score", 0)
-        page_type = str(item.get("type") or item.get("page_type") or details.get("page_type") or "page")
+        raw_page_type = str(item.get("type") or item.get("page_type") or details.get("page_type") or "page")
+        title = str(item.get("titre") or slug_to_title(str(item.get("slug") or url)))
+        page_type = public_page_type_label(url, raw_page_type, title)
         translated_reasons = [translate_reason(reason, active_lang) for reason in reasons]
+        raw_action = str(item.get("action") or page_action_from_reasons(reasons, lang=active_lang))
+        raw_angle = str(item.get("angle") or page_angle(url, details, lang=active_lang))
+        safe_recommendation = recommendation_for_public_page_type(url, raw_page_type, title)
+        if contains_forbidden_recommendation(raw_action) or contains_forbidden_recommendation(raw_angle):
+            raw_action = safe_recommendation
+            raw_angle = safe_recommendation
         normalized.append(
             {
                 "slug": str(item.get("slug") or slug_from_url(url)),
-                "titre": str(item.get("titre") or slug_to_title(str(item.get("slug") or url))),
+                "titre": title,
                 "url": url,
                 "score": score,
-                "priorite": str(item.get("priorite") or priority_label(priority_score, score, lang=active_lang)),
+                "priorite": client_level(item.get("priorite") or priority_label(priority_score, score, lang=active_lang), active_lang, priority_word=True),
                 "type": page_type,
                 "mots": word_count,
                 "pourquoi": str(item.get("pourquoi") or ", ".join(translated_reasons[:3]) or ("Priority page from the crawl." if active_lang == "en" else "Page prioritaire du crawl.")),
                 "observation": str(item.get("observation") or build_page_observation(item, details, word_count, lang=active_lang)),
-                "action": str(item.get("action") or page_action_from_reasons(reasons, lang=active_lang)),
-                "angle": str(item.get("angle") or page_angle(url, details, lang=active_lang)),
-                "effort": str(item.get("effort") or page_effort(reasons, lang=active_lang)),
+                "action": raw_action,
+                "angle": raw_angle,
+                "effort": client_level(item.get("effort") or page_effort(reasons, lang=active_lang), active_lang),
                 "effort_temps": str(item.get("effort_temps") or get_effort_label(page_type, word_count, lang=active_lang)),
-                "impact": str(item.get("impact") or page_impact(priority_score, reasons, lang=active_lang)),
+                "impact": client_level(item.get("impact") or page_impact(priority_score, reasons, lang=active_lang), active_lang),
             }
         )
     return normalized
@@ -2395,23 +2639,29 @@ def normalize_crawled_urls(items: Any) -> list[dict[str, Any]]:
         load_time = optional_float(item.get("load_time"))
         redirections = get_int(item, "redirections", get_int(item, "redirect_count", 0))
         seo_suggestions = as_dict(item.get("seo_suggestions")) if item.get("seo_suggestions") else None
-        normalized.append(
-            {
-                "url": str(item.get("url") or ""),
-                "type": str(item.get("type") or item.get("page_type") or "-"),
-                "score": get_int(item, "score", get_int(item, "page_health_score", 0)),
-                "mots": get_int(item, "mots", get_int(item, "word_count", 0)),
-                "points": str(issues),
-                "load_time": load_time,
-                "redirections": redirections,
-                "images_total": get_int(item, "images_total", 0),
-                "images_without_alt": get_int(item, "images_without_alt", 0),
-                "liens_internes_sortants": [str(link) for link in outgoing_links if str(link).strip()],
-                "titre_google": title,
-                "description_google": description,
-                **({"seo_suggestions": seo_suggestions} if seo_suggestions else {}),
-            }
-        )
+        url = str(item.get("url") or "")
+        raw_page_type = str(item.get("type") or item.get("page_type") or "-")
+        normalized_item = {
+            "url": url,
+            "type": public_page_type_label(url, raw_page_type, title),
+            "score": get_int(item, "score", get_int(item, "page_health_score", 0)),
+            "mots": get_int(item, "mots", get_int(item, "word_count", 0)),
+            "points": str(issues),
+            "load_time": load_time,
+            "redirections": redirections,
+            "images_total": get_int(item, "images_total", 0),
+            "images_without_alt": get_int(item, "images_without_alt", 0),
+            "liens_internes_sortants": [str(link) for link in outgoing_links if str(link).strip()],
+            "titre_google": title,
+            "description_google": description,
+        }
+        if seo_suggestions:
+            safe_suggestion = sanitize_seo_suggestion(normalized_item, seo_suggestions)
+            if has_actionable_seo_suggestion(safe_suggestion):
+                normalized_item["seo_suggestions"] = safe_suggestion
+            elif needs_title_fix(normalized_item) or needs_desc_fix(normalized_item):
+                normalized_item["seo_suggestions"] = {"url": url, "manual_rewrite": True}
+        normalized.append(normalized_item)
     return normalized
 
 
@@ -2536,6 +2786,8 @@ def generate_seo_suggestions(pages: list[dict[str, Any]]) -> list[dict[str, Any]
         suggestion = sanitize_seo_suggestion(page, raw_suggestion)
         if has_actionable_seo_suggestion(suggestion):
             page["seo_suggestions"] = suggestion
+        elif needs_title_fix(page) or needs_desc_fix(page):
+            page["seo_suggestions"] = {"url": str(page.get("url") or ""), "manual_rewrite": True}
     return pages
 
 
@@ -2640,7 +2892,8 @@ def fit_seo_title(title: str, url: str) -> str:
     cleaned = re.sub(r"\s+", " ", title).strip(" -|")
     if not cleaned:
         cleaned = slug_to_title(url)
-    return trim_at_word(cleaned, SEUIL_TITRE_LONG)
+    fitted = trim_at_word(cleaned, SEUIL_TITRE_LONG)
+    return "" if title_looks_truncated(fitted) else fitted
 
 
 def infer_seo_language(*values: str) -> str:
@@ -2666,6 +2919,8 @@ def sanitize_seo_suggestion(page: dict[str, Any], suggestion: dict[str, Any]) ->
             title_suggested = fit_seo_title(title_current, url)
         else:
             title_suggested = trim_at_word(title_suggested, SEUIL_TITRE_LONG)
+        if title_looks_truncated(title_suggested):
+            title_suggested = ""
         if title_suggested and not same_normalized_text(title_current, title_suggested):
             cleaned["titre_suggere"] = title_suggested
             cleaned["titre_longueur"] = len(title_suggested)
@@ -2685,16 +2940,34 @@ def sanitize_seo_suggestion(page: dict[str, Any], suggestion: dict[str, Any]) ->
             or infer_seo_language(desc_suggested) != target_language
         ):
             desc_suggested = fit_meta_description(url, seed_title, language=target_language)
-        cleaned["description_suggeree"] = desc_suggested
-        cleaned["description_longueur"] = len(desc_suggested)
-        cleaned.setdefault(
-            "explication_description",
-            "Description reformulée pour garder un extrait clair et exploitable dans les résultats.",
-        )
+        if meta_description_is_unsafe(desc_suggested):
+            remove_description_suggestion(cleaned)
+        else:
+            cleaned["description_suggeree"] = desc_suggested
+            cleaned["description_longueur"] = len(desc_suggested)
+            cleaned.setdefault(
+                "explication_description",
+                "Description reformulée pour garder un extrait clair et exploitable dans les résultats.",
+            )
     else:
         remove_description_suggestion(cleaned)
 
     return cleaned
+
+
+def title_looks_truncated(value: str) -> bool:
+    cleaned = re.sub(r"\s+", " ", value).strip(" -|")
+    if not cleaned:
+        return False
+    if cleaned.endswith("- Ever"):
+        return True
+    last_word = re.sub(r"[^A-Za-zÀ-ÿ]+", "", cleaned.split()[-1]).casefold()
+    return last_word in BAD_TITLE_END_WORDS
+
+
+def meta_description_is_unsafe(value: str) -> bool:
+    normalized = strip_accents_for_report(value)
+    return contains_forbidden_recommendation(value) or any(strip_accents_for_report(phrase) in normalized for phrase in BAD_META_PHRASES)
 
 
 def has_actionable_seo_suggestion(suggestion: dict[str, Any]) -> bool:
@@ -2732,8 +3005,10 @@ def fit_meta_description(url: str, title: str, *, language: str | None = None) -
             description = f"Comparez les options {topic} et les critères à vérifier avant de choisir un partenaire B2B fiable."
         elif any(term in topic_lower for term in ("recycl", "durable", "packaging", "emballage")):
             description = f"Comprenez ce que {topic} implique pour les choix produit, les arguments de marque et la confiance client."
+        elif any(term in topic_lower for term in ("padel", "raquette", "tournoi", "balle", "chaussure", "sac", "jeu")):
+            description = f"Retrouvez les informations utiles sur {topic}, avec des conseils concrets et des liens vers les contenus padel associés."
         else:
-            description = f"Analyse claire de {topic} : points à vérifier, critères de choix et implications concrètes pour avancer."
+            description = f"Analyse claire de {topic} : critères de choix, repères concrets et informations utiles pour décider quoi corriger en premier."
     else:
         if any(term in topic_lower for term in ("manufacturer", "supplier", "wholesale", "oem", "odm", "private label")):
             description = f"Compare {topic} and learn what brands should check before choosing a private label or wholesale supplier."
@@ -2980,7 +3255,7 @@ def translate_finding(value: str, lang: str = "fr") -> str:
 
 def translate_level(value: str, lang: str = "fr") -> str:
     if sanitize_report_language(lang) != "en":
-        return value
+        return client_level(value, lang)
     normalized = value.strip().lower()
     levels = {
         "élevé": "high",
@@ -3137,7 +3412,7 @@ def get_effort_entry(page_type: str, mots: int, lang: str = "fr") -> tuple[int, 
 
 def normalize_effort_page_type(page_type: str) -> str:
     lowered = page_type.strip().lower()
-    article_markers = ("article", "blog", "post", "guide", "actualite", "actualité", "news")
+    article_markers = ("article", "blog", "post", "guide", "test", "comparatif", "actualite", "actualité", "news")
     if any(marker in lowered for marker in article_markers):
         return "article"
     return "page"
@@ -3346,11 +3621,25 @@ def infer_urgency(score: int, summary: dict[str, Any], signals: list[dict[str, A
     is_en = sanitize_report_language(lang) == "en"
     blocking = sum(get_int(summary, key, 0) for key in ("noindex_pages", "canonical_to_other_url_pages", "canonical_cross_domain_pages", "robots_blocked_pages"))
     high_signals = sum(1 for item in signals if str(item.get("severity") or "").upper() == "HIGH")
-    if score < 75 or blocking or high_signals >= 3:
+    if score < 65 or blocking or high_signals >= 3:
         return "high" if is_en else "élevé"
-    if score < 90 or signals:
+    if score < 80 or signals:
         return "medium" if is_en else "moyen"
     return "low" if is_en else "faible"
+
+
+def normalize_urgency_level(raw_value: str, score: int, summary: dict[str, Any], signals: list[dict[str, Any]], lang: str = "fr") -> str:
+    blocking = sum(get_int(summary, key, 0) for key in ("noindex_pages", "canonical_to_other_url_pages", "canonical_cross_domain_pages", "robots_blocked_pages"))
+    high_signals = sum(1 for item in signals if str(item.get("severity") or "").upper() == "HIGH")
+    critical_justification = bool(blocking or high_signals >= 3)
+    normalized = strip_accents_for_report(raw_value)
+    if score >= 80 and normalized in {"high", "eleve", "haute"} and not critical_justification:
+        raw_value = "medium"
+    elif score < 65:
+        raw_value = "high"
+    elif score < 80 and normalized in {"low", "faible"}:
+        raw_value = "medium"
+    return client_level(raw_value, lang)
 
 
 def infer_base_status(score: int, lang: str = "fr") -> str:
@@ -3398,17 +3687,16 @@ def page_impact(priority_score: int, reasons: list[str], lang: str = "fr") -> st
 
 def page_angle(url: str, details: dict[str, Any], lang: str = "fr") -> str:
     recommendation = str(details.get("recommended_action") or "").strip()
-    if recommendation:
-        return recommendation
     title = str(details.get("title") or "").strip() or slug_to_title(url)
     page_type = str(details.get("page_type") or "").lower()
-    if page_type in {"financial_aid", "home_adaptation"}:
-        return "Ajouter conditions, prix, aides disponibles, documents utiles et liens vers les pages travaux associees."
-    if page_type in {"product", "manufacturer"}:
-        return "Ajouter specifications, preuves de confiance, conditions commerciales et CTA vers la demande de devis."
+    if recommendation and not contains_forbidden_recommendation(recommendation):
+        return recommendation
+    public_recommendation = recommendation_for_public_page_type(url, page_type, title)
+    if public_recommendation != neutral_page_recommendation():
+        return public_recommendation
     if sanitize_report_language(lang) == "en":
         return f"Turn \"{title}\" into a concrete page brief with criteria, proof points, FAQs and internal links."
-    return f"Transformer \"{title}\" en brief concret avec criteres, preuves, FAQ et liens internes."
+    return neutral_page_recommendation()
 
 
 def build_page_observation(item: dict[str, Any], details: dict[str, Any], words: int, lang: str = "fr") -> str:
@@ -3644,6 +3932,28 @@ def escape(value: Any) -> str:
 def render_report_script() -> str:
     return """
 <script>
+  function printClientReport(includeAnnexe) {
+    const report = document.querySelector('.premium-report');
+    if (!report) {
+      window.print();
+      return;
+    }
+    if (includeAnnexe) document.body.classList.add('print-with-annexe');
+    const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+    if (!printWindow) {
+      window.print();
+      document.body.classList.remove('print-with-annexe');
+      return;
+    }
+    const styles = Array.from(document.querySelectorAll('style')).map((node) => node.outerHTML).join('\\n');
+    printWindow.document.open();
+    printWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Rapport SEO</title>' + styles + '</head><body class="report-document">' + report.outerHTML + '</body></html>');
+    printWindow.document.close();
+    document.body.classList.remove('print-with-annexe');
+    printWindow.focus();
+    setTimeout(() => printWindow.print(), 300);
+  }
+
   function toggleAnnexe() {
     const el = document.getElementById('annexe');
     if (!el) return;
@@ -3651,9 +3961,7 @@ def render_report_script() -> str:
   }
 
   function printWithAnnexe() {
-    document.body.classList.add('print-with-annexe');
-    window.print();
-    document.body.classList.remove('print-with-annexe');
+    printClientReport(true);
   }
 </script>"""
 
