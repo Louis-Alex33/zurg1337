@@ -538,8 +538,11 @@ SEUIL_LENT = 3.0
 SEUIL_CRITIQUE = 4.0
 
 # Seuils de longueur SEO — 65 car. reflète la largeur réelle du snippet Google (vs 60 trop strict).
+# TITLE_HARD_LIMIT = 70 : les titres entre 66 et 70 chars sont en "zone grise" — généralement affichés
+# correctement par Google, à surveiller mais pas traités comme des titres trop longs à corriger.
 # META_MIN_LEN à 70 capture les descriptions fonctionnellement vides (ex. "Article mis à jour en avril 2026").
 TITLE_MAX_LEN = 65
+TITLE_HARD_LIMIT = 70
 TITLE_MIN_LEN = 25
 META_MAX_LEN = 155
 META_MIN_LEN = 70
@@ -865,7 +868,18 @@ def speed_color_class(load_time: float | None) -> str:
 
 def needs_title_fix(page: dict[str, Any]) -> bool:
     title = str(page.get("titre_google") or "")
-    return not title or len(title) < TITLE_MIN_LEN or len(title) > TITLE_MAX_LEN
+    if not title or len(title) < TITLE_MIN_LEN:
+        return True
+    # Zone grise 66-70 : généralement affiché correctement par Google, pas de suggestion générée
+    if TITLE_MAX_LEN < len(title) <= TITLE_HARD_LIMIT:
+        return False
+    return len(title) > TITLE_HARD_LIMIT
+
+
+def title_in_grey_zone(page: dict[str, Any]) -> bool:
+    """Retourne True si le titre est entre TITLE_MAX_LEN et TITLE_HARD_LIMIT (66-70 chars)."""
+    title = str(page.get("titre_google") or "")
+    return bool(title) and TITLE_MAX_LEN < len(title) <= TITLE_HARD_LIMIT
 
 
 def needs_desc_fix(page: dict[str, Any]) -> bool:
@@ -1263,9 +1277,10 @@ def render_dirigeant_summary(context: dict[str, Any]) -> str:
 def render_executive_summary(context: dict[str, Any]) -> str:
     t = lambda key: text_for(context, key)
     metrics = [
+        # Option B : score unique = "Santé technique" (score_global) pour éviter la confusion
+        # avec "Score moyen" qui divergeait du score global (ex. 79/100 vs 54/100).
         (t("healthy_pages"), context["pages_saines"], t("healthy_pages_note"), ""),
         (t("useful_content"), context["contenus_utiles"], t("useful_content_note"), ""),
-        (t("average_score"), f"{context['score_moyen_page']}/100", t("average_score_note"), score_color_class(int(context["score_moyen_page"]))),
         (t("dates_to_check"), context["dates_a_verifier"], t("dates_to_check_note"), ""),
     ]
     return f"""
@@ -1505,10 +1520,10 @@ def render_priority_pages(context: dict[str, Any]) -> str:
             <p>{escape(str(page.get("action") or ("Define a targeted rework." if is_en else "Définir une reprise ciblée.")))}</p>
           </div>
         </section>
-        <section class="rewrite-angle">
+        {f'''<section class="rewrite-angle">
           <p class="label fiche-section-label">{escape(t("possible_angle"))}</p>
-            <p>{escape(str(page.get("angle") or ("Turn this URL into a concrete brief with criteria, proof points, FAQ and internal links." if is_en else "Transformer cette URL en brief concret avec criteres, preuves, FAQ et liens internes.")))}</p>
-        </section>
+            <p>{escape(str(page.get("angle")))}</p>
+        </section>''' if str(page.get("angle") or "").strip() else ""}
         <div class="fiche-meta-bas">
           <div class="fiche-effort-temps">
             <span class="fiche-meta-icon">⏱</span>
@@ -2045,10 +2060,9 @@ def build_page_performance_action(page: dict[str, Any], domain: str, lang: str =
     page_type = str(page.get("raw_type") or page.get("type") or "").lower()
 
     if redirects > 0:
-        # Phrase calibrée : la redirection n'explique pas seule un temps > 2× SEUIL_LENT.
-        # On l'affiche uniquement quand le temps est élevé, pour ne pas induire en erreur.
-        redirect_caveat_threshold = SEUIL_LENT * 2  # > 6s
-        show_caveat = load_time is not None and load_time > redirect_caveat_threshold
+        # Phrase calibrée : la redirection n'explique pas seule un temps > SEUIL_CRITIQUE (> 4s).
+        # En dessous, la suppression de redirection est une amélioration mineure mais légitime.
+        show_caveat = load_time is not None and load_time > SEUIL_CRITIQUE
         if is_en:
             redirect_label = f"{redirects} redirect" + ("s" if redirects > 1 else "")
             text_base = (
@@ -2157,6 +2171,11 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     cards = []
     manual_titles = 0
     manual_descs = 0
+    grey_zone_titles = 0
+    # Compter les titres en zone grise (66-70 chars) sur toutes les pages crawlées
+    for raw_p in context.get("urls_crawlees", []):
+        if title_in_grey_zone(as_dict(raw_p)):
+            grey_zone_titles += 1
     for raw_page in pages:
         page = as_dict(raw_page)
         suggestion = as_dict(page.get("seo_suggestions"))
@@ -2257,10 +2276,12 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
         if manual_descs:
             parts.append(f"{manual_descs} {'description' if is_en else 'description'}{'s' if manual_descs > 1 else ''}")
         parts_str = " et ".join(parts) if not is_en else " and ".join(parts)
+        total = manual_titles + manual_descs
         if is_en:
-            notice_text = f"{parts_str} require{'s' if (manual_titles + manual_descs) == 1 else ''} manual rewriting — not listed here as the automatic suggestion was not reliable enough."
+            notice_text = f"{parts_str} require{'s' if total == 1 else ''} manual rewriting — not listed here as the automatic suggestion was not reliable enough."
         else:
-            notice_text = f"{parts_str} nécessitent une réécriture manuelle — non listés ici car la suggestion automatique n'a pas été jugée suffisamment fiable."
+            verb = "nécessite" if total == 1 else "nécessitent"
+            notice_text = f"{parts_str} {verb} une réécriture manuelle — non listés ici car la suggestion automatique n'a pas été jugée suffisamment fiable."
         manual_notice = f'<p class="suggestions-manual-notice">{escape(notice_text)}</p>'
 
     if not cards and not manual_notice:
@@ -2280,6 +2301,13 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     {render_page_footer(context)}
   </section>"""
 
+    grey_zone_note = ""
+    if grey_zone_titles:
+        if is_en:
+            grey_zone_note = f'<p class="suggestions-grey-zone-note">{grey_zone_titles} title{"s" if grey_zone_titles != 1 else ""} between 66 and 70 characters — generally displayed correctly by Google, to watch but not a priority.</p>'
+        else:
+            grey_zone_note = f'<p class="suggestions-grey-zone-note">{grey_zone_titles} titre{"s" if grey_zone_titles != 1 else ""} entre 66 et 70 caractères — généralement affichés correctement par Google, à surveiller mais pas prioritaires.</p>'
+
     return f"""
   <section class="report-page section-suggestions">
     <div class="section-label">{escape(t("optimizations"))}</div>
@@ -2287,6 +2315,7 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     <p class="suggestions-intro">{escape(t("suggestions_intro"))}</p>
     {manual_notice}
     {''.join(cards)}
+    {grey_zone_note}
     {render_page_footer(context)}
   </section>"""
 
@@ -2299,12 +2328,12 @@ def render_secondary_signals(context: dict[str, Any]) -> str:
     signals = context["signaux"]
     t = lambda key: text_for(context, key)
     metrics = [
+        # "Score moyen" retiré (Option B) : score unique = "Santé technique" dans la couverture.
         (t("analyzed_pages"), context["pages_analysees"], t("crawl_volume"), False),
         (t("healthy_pages"), context["pages_saines"], t("healthy_pages_note"), False),
         (t("error_pages"), context["pages_erreur"], t("http_to_check"), True),
         (t("missing_descriptions"), context["descriptions_manquantes"], t("descriptions_absent"), True),
         (t("missing_titles"), context["titres_manquants"], t("html_titles_absent"), True),
-        (t("average_score"), f"{context['score_moyen_page']}/100", t("average_score_note"), False),
         (t("noindex_pages"), context["pages_noindex"], t("pages_excluded"), False),
         (t("canonicals_to_check"), context["canonicals"], t("canonicals_elsewhere"), True),
         (t("weakly_linked_pages"), context["pages_peu_reliees"], t("internal_linking_to_improve"), True),
@@ -2810,6 +2839,10 @@ def normalize_priority_pages(items: Any, pages_by_url: dict[str, dict[str, Any]]
         if contains_forbidden_recommendation(raw_action) or contains_forbidden_recommendation(raw_angle):
             raw_action = safe_recommendation
             raw_angle = safe_recommendation
+        # Option B : si l'angle est une répétition de l'action, le masquer.
+        # ACTION = quoi faire (verbe d'action concret), ANGLE = comment l'aborder (formulation éditoriale).
+        if same_normalized_text(raw_action, raw_angle):
+            raw_angle = ""
         normalized.append(
             {
                 "slug": str(item.get("slug") or slug_from_url(url)),
@@ -3119,19 +3152,27 @@ def _smart_truncate(text: str, max_len: int) -> str | None:
     (fragment trop court < TITLE_MIN_LEN, ou dernier mot grammatical vide).
     Retourne le texte inchangé si déjà sous la limite.
     """
+    _ORPHAN_PUNCT = frozenset(".,;:-—?!«»")
+
     cleaned = re.sub(r"\s+", " ", text).strip()
     if len(cleaned) <= max_len:
         return cleaned
-    candidate = cleaned[:max_len].rsplit(" ", 1)[0].strip(" -|,.;:")
+    candidate = cleaned[:max_len].rsplit(" ", 1)[0].strip()
+    # Supprimer la ponctuation orpheline de fin (y compris ?, !, :, ...)
+    while candidate and candidate[-1] in _ORPHAN_PUNCT:
+        candidate = candidate[:-1].strip()
+    candidate = candidate.strip(" -|")
     if not candidate or len(candidate) < TITLE_MIN_LEN:
         return None
-    last_word = re.sub(r"[^A-Za-zÀ-ÿ'-]+", "", candidate.split()[-1]).casefold()
-    if last_word in _SMART_TRUNCATE_BAD_ENDINGS:
-        # Remonter d'un mot supplémentaire
-        words = candidate.split()
-        while words and re.sub(r"[^A-Za-zÀ-ÿ'-]+", "", words[-1]).casefold() in _SMART_TRUNCATE_BAD_ENDINGS:
-            words.pop()
-        candidate = " ".join(words).strip(" -|,.;:")
+    # Remonter tant que le dernier mot est grammatical
+    words = candidate.split()
+    while words and re.sub(r"[^A-Za-zÀ-ÿ'-]+", "", words[-1]).casefold() in _SMART_TRUNCATE_BAD_ENDINGS:
+        words.pop()
+    # Supprimer la ponctuation orpheline après avoir retiré le mot grammatical
+    candidate = " ".join(words).strip()
+    while candidate and candidate[-1] in _ORPHAN_PUNCT:
+        candidate = candidate[:-1].strip()
+    candidate = candidate.strip(" -|")
     if not candidate or len(candidate) < TITLE_MIN_LEN:
         return None
     return candidate
@@ -3218,8 +3259,21 @@ def title_looks_truncated(value: str) -> bool:
 
 
 def meta_description_is_unsafe(value: str) -> bool:
+    if not value.strip():
+        return True
     normalized = strip_accents_for_report(value)
-    return contains_forbidden_recommendation(value) or any(strip_accents_for_report(phrase) in normalized for phrase in BAD_META_PHRASES)
+    if contains_forbidden_recommendation(value):
+        return True
+    if any(strip_accents_for_report(phrase) in normalized for phrase in BAD_META_PHRASES):
+        return True
+    # Rejeter si la suggestion contient >50% de tokens du pool générique interdit
+    if _description_is_generic(value):
+        return True
+    # Rejeter si la suggestion se termine sur un mot grammatical (troncature non propre)
+    last_word = re.sub(r"[^A-Za-zÀ-ÿ'-]+", "", value.rstrip(".!? ").split()[-1]).casefold() if value.strip() else ""
+    if last_word in _SMART_TRUNCATE_BAD_ENDINGS:
+        return True
+    return False
 
 
 def has_actionable_seo_suggestion(suggestion: dict[str, Any]) -> bool:
@@ -3245,6 +3299,24 @@ def remove_description_suggestion(suggestion: dict[str, Any]) -> None:
     suggestion.pop("explication_description", None)
 
 
+# Tokens fixes du template générique interdit — si >50% des tokens d'une suggestion proviennent
+# de ce pool, la suggestion est non fiable et doit être rejetée.
+_GENERIC_DESC_POOL = frozenset({
+    "découvrez", "decouvrez", "critères", "criteres", "essentiels", "points", "repère",
+    "repere", "concrets", "informations", "utiles", "prendre", "bonne", "décision", "decision",
+    "review", "specific", "criteria", "practical", "checks", "details", "matter", "making",
+})
+
+
+def _description_is_generic(text: str) -> bool:
+    """Retourne True si la suggestion contient >50% de tokens issus du pool générique."""
+    tokens = re.findall(r"[a-zàâçéèêëîïôûùüÿœæ']+", strip_accents_for_report(text.lower()))
+    if not tokens:
+        return True
+    generic_count = sum(1 for t in tokens if t in _GENERIC_DESC_POOL)
+    return generic_count / len(tokens) > 0.50
+
+
 def fit_meta_description(url: str, title: str, *, language: str | None = None) -> str:
     topic = slug_to_title(url)
     if topic.lower() in {"page sans titre", "accueil"}:
@@ -3257,16 +3329,29 @@ def fit_meta_description(url: str, title: str, *, language: str | None = None) -
             description = f"Comparez les options {topic} et les critères à vérifier avant de choisir un partenaire B2B fiable."
         elif any(term in topic_lower for term in ("recycl", "durable", "packaging", "emballage")):
             description = f"Comprenez ce que {topic} implique pour les choix produit, les arguments de marque et la confiance client."
+        elif any(term in topic_lower for term in ("padel", "tennis", "sport", "tournoi", "classement", "club", "compétition", "competition")):
+            description = f"Tout ce qu'il faut savoir sur {topic} : règles, classements, niveaux et conseils pour progresser."
+        elif any(term in topic_lower for term in ("guide", "conseil", "comment", "choisir", "comprendre", "savoir")):
+            description = f"Ce guide sur {topic} couvre les points essentiels pour bien comprendre le sujet et agir efficacement."
         else:
-            description = f"Découvrez {topic} : critères essentiels, points de repère concrets et informations utiles pour prendre la bonne décision."
+            # Pas de template générique : retourner vide pour forcer le marquage "non fiable"
+            return ""
     else:
         if any(term in topic_lower for term in ("manufacturer", "supplier", "wholesale", "oem", "odm", "private label")):
             description = f"Compare {topic} and learn what brands should check before choosing a private label or wholesale supplier."
         elif any(term in topic_lower for term in ("recycl", "sustainable", "packaging", "tube")):
             description = f"Learn what {topic} means for product packaging, sustainability claims, brand choices and customer trust."
+        elif any(term in topic_lower for term in ("padel", "tennis", "sport", "tournament", "ranking", "club")):
+            description = f"Everything you need to know about {topic}: rules, rankings, levels and tips to improve your game."
+        elif any(term in topic_lower for term in ("guide", "tips", "how", "choose", "understand")):
+            description = f"This guide on {topic} covers the key points to understand the topic and take effective action."
         else:
-            description = f"Review {topic} with specific criteria, practical checks and the details that matter before making a decision."
-    return complete_meta_description(description, language)
+            return ""
+    result = complete_meta_description(description, language)
+    # Rejeter si le résultat ressemble encore trop au pool générique
+    if _description_is_generic(result):
+        return ""
+    return result
 
 
 def complete_meta_description(description: str, language: str) -> str:
@@ -3493,7 +3578,9 @@ def translate_finding(value: str, lang: str = "fr") -> str:
         ("URLs détectées sont bloquées par robots.txt", "detected URLs are blocked by robots.txt"),
         ("pages méritent d'être enrichies pour mieux répondre au sujet", "pages deserve enrichment to better answer the topic"),
         ("groupes de pages reprennent le même titre dans Google", "page groups reuse the same Google title"),
+        ("groupe de pages reprend le même titre dans Google", "page group reuses the same Google title"),
         ("groupes de pages reprennent une description très proche sous Google", "page groups reuse a very similar Google description"),
+        ("groupe de pages reprend une description très proche sous Google", "page group reuses a very similar Google description"),
         ("pages affichent une date qui peut donner une impression de contenu ancien", "pages show a date that can create an outdated-content impression"),
         ("pages importantes semblent trop éloignées de l'accueil", "important pages seem too far from the homepage"),
         ("pages paraissent difficiles à retrouver depuis le reste du site", "pages seem hard to find from the rest of the site"),
@@ -3550,7 +3637,48 @@ def build_dirigeant_texts(
     priority_pages = pages_prioritaires[:3]
     page_count = len(priority_pages) or min(3, max(1, contenus_utiles))
     min_hours, max_hours = estimate_total_effort(priority_pages)
-    if priority_pages:
+
+    # Recommandation dynamique alignée sur le signal principal (cohérence avec RISQUE et SIGNAL).
+    signal_lower = signal_principal.lower()
+    if "performance" in signal_lower or "dégradée" in signal_lower or "load" in signal_lower or "3s" in signal_lower:
+        if is_en:
+            recommendation = (
+                f"Investigate server performance first (technical audit estimated 2–4h), "
+                f"then rework {page_count} editorial {'page' if page_count == 1 else 'pages'} ({min_hours}–{max_hours}h). "
+                "First results expected within 30 to 60 days."
+            )
+        else:
+            recommendation = (
+                "Investiguer la performance serveur en priorité (audit technique estimé à 2–4h), "
+                f"puis reprendre {page_count} {'page' if page_count == 1 else 'pages'} éditoriales prioritaires ({min_hours}–{max_hours}h). "
+                "Premiers résultats sous 30 à 60 jours."
+            )
+    elif "erreur" in signal_lower or "error" in signal_lower or "4xx" in signal_lower or "5xx" in signal_lower:
+        if is_en:
+            recommendation = (
+                f"Fix error pages first ({page_count} {'page' if page_count == 1 else 'pages'} identified, estimated effort {min_hours}–{max_hours}h), "
+                "then rework the priority pages. Corrections show results within 15 to 30 days."
+            )
+        else:
+            recommendation = (
+                f"Corriger les pages en erreur en priorité ({page_count} {'page identifiée' if page_count == 1 else 'pages identifiées'}, "
+                f"effort estimé {min_hours}–{max_hours}h), puis reprendre les pages prioritaires. "
+                "Les corrections montrent des résultats sous 15 à 30 jours."
+            )
+    elif "titre" in signal_lower or "description" in signal_lower or "snippet" in signal_lower:
+        if is_en:
+            recommendation = (
+                f"Rework titles and descriptions ({page_count} {'page' if page_count == 1 else 'pages'} identified — "
+                f"estimated {min_hours}–{max_hours}h for {page_count} {'page' if page_count == 1 else 'pages'}). "
+                "Click-through rate improvements typically appear within 30 days."
+            )
+        else:
+            recommendation = (
+                f"Reprendre les titres et descriptions ({page_count} {'page identifiée' if page_count == 1 else 'pages identifiées'} — "
+                f"effort estimé {min_hours}–{max_hours}h pour {page_count} {'page' if page_count == 1 else 'pages'}). "
+                "Les améliorations de taux de clic apparaissent généralement sous 30 jours."
+            )
+    elif priority_pages:
         page_word = "page" if page_count == 1 else "pages"
         if is_en:
             recommendation = (
@@ -3572,7 +3700,7 @@ def build_dirigeant_texts(
         )
 
     # Le risque pointe toujours le même thème que le signal principal.
-    signal_lower = signal_principal.lower()
+    # signal_lower déjà initialisé ci-dessus.
     if "performance" in signal_lower or "dégradée" in signal_lower or "load" in signal_lower or "3s" in signal_lower:
         risk = (
             "Beyond 3 seconds, a significant share of visitors leave before seeing the content. "
@@ -3629,13 +3757,13 @@ def build_dirigeant_texts(
     if is_en:
         return {
             "resume_dirigeant": f"{opening} The main friction point today: {simple_signal}. This can be handled step by step, without rebuilding the whole site.",
-            "ou_vous_en_etes": f"{pages_analysees} pages analyzed on {domain}, including {contenus_utiles} usable content pieces. The average page score is {score_moyen_page}/100.",
+            "ou_vous_en_etes": f"{pages_analysees} pages analyzed on {domain}, including {contenus_utiles} usable content pieces. Technical health score: {score}/100.",
             "risque_attente": risk,
             "recommandation_courte": recommendation,
         }
     return {
         "resume_dirigeant": f"{opening} Le principal frein aujourd'hui : {simple_signal}. Ce point peut être traité par étapes, sans refaire tout le site.",
-        "ou_vous_en_etes": f"{pages_analysees} pages analysées sur {domain}, dont {contenus_utiles} contenus exploitables. Le score moyen des pages est de {score_moyen_page}/100.",
+        "ou_vous_en_etes": f"{pages_analysees} pages analysées sur {domain}, dont {contenus_utiles} contenus exploitables. Score de santé technique : {score}/100.",
         "risque_attente": risk,
         "recommandation_courte": recommendation,
     }

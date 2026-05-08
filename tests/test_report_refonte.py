@@ -83,6 +83,45 @@ class SmartTruncateTests(unittest.TestCase):
         assert result is not None
         self.assertNotIn("  ", result)
 
+    def test_cas_padel_raquette_ne_termine_pas_sur_notre(self) -> None:
+        # Régression : le titre ne doit pas se terminer sur "? Notre" ni sur "Notre"
+        text = "Combien de temps garder votre raquette de Padel ? Notre guide ultime"
+        result = _smart_truncate(text, 60)
+        self.assertIsNotNone(result, "Doit retourner quelque chose, pas None")
+        assert result is not None
+        last_word = result.split()[-1].rstrip(",.;:?!").lower()
+        from audit_report_design import _SMART_TRUNCATE_BAD_ENDINGS
+        self.assertNotIn(last_word, _SMART_TRUNCATE_BAD_ENDINGS,
+                         f"Résultat '{result}' se termine sur un mot grammatical '{last_word}'")
+        # Ne doit pas se terminer par une ponctuation orpheline
+        self.assertNotIn(result[-1], "?!:,;-—",
+                         f"Résultat '{result}' se termine par une ponctuation orpheline")
+
+    def test_cas_p100_padel_titre_court_max60(self) -> None:
+        # Titre de 68 chars → à max=60, si la coupe n'est pas propre, retourner None ou un fragment propre
+        text = "P100 Padel : niveau, points, cuts… tout ce qu’il faut savoir en 2026"
+        result = _smart_truncate(text, 60)
+        if result is not None:
+            last_word = result.split()[-1].rstrip(",.;:?!").lower()
+            from audit_report_design import _SMART_TRUNCATE_BAD_ENDINGS
+            self.assertNotIn(last_word, _SMART_TRUNCATE_BAD_ENDINGS,
+                             f"Résultat '{result}' se termine sur un mot grammatical '{last_word}'")
+            self.assertLessEqual(len(result), 60)
+
+    def test_cas_p1500_titre_complet_sous_65(self) -> None:
+        # Titre de 62 chars < 65 → doit retourner le titre complet inchangé
+        text = "Tournoi de Padel P1500 : Fonctionnement, Points et Inscription"
+        result = _smart_truncate(text, 65)
+        self.assertEqual(result, text, "Le titre complet (62 chars) doit être retourné inchangé pour max=65")
+
+    def test_pas_de_ponctuation_orpheline_en_fin(self) -> None:
+        # Un titre avec '?' au milieu ne doit pas se terminer par '?' après troncature
+        text = "Pourquoi le padel attire-t-il autant ? Les raisons de ce succès fulgurant"
+        result = _smart_truncate(text, 40)
+        if result is not None:
+            self.assertNotIn(result[-1], "?!:,;-—",
+                             f"Résultat '{result}' se termine par une ponctuation orpheline")
+
 
 class ConstantesSeuilsTests(unittest.TestCase):
     def test_title_max_len_vaut_65(self) -> None:

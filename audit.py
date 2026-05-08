@@ -3350,13 +3350,17 @@ def build_critical_findings(summary: dict[str, int]) -> list[str]:
             f"{summary['thin_content_pages']} pages méritent d'être enrichies pour mieux répondre au sujet"
         )
     if summary["duplicate_title_groups"]:
-        findings.append(
-            f"{summary['duplicate_title_groups']} groupes de pages reprennent le même titre dans Google"
-        )
+        n = summary["duplicate_title_groups"]
+        if n == 1:
+            findings.append("1 groupe de pages reprend le même titre dans Google")
+        else:
+            findings.append(f"{n} groupes de pages reprennent le même titre dans Google")
     if summary["duplicate_meta_description_groups"]:
-        findings.append(
-            f"{summary['duplicate_meta_description_groups']} groupes de pages reprennent une description très proche sous Google"
-        )
+        n = summary["duplicate_meta_description_groups"]
+        if n == 1:
+            findings.append("1 groupe de pages reprend une description très proche sous Google")
+        else:
+            findings.append(f"{n} groupes de pages reprennent une description très proche sous Google")
     if summary["dated_content_signals"]:
         findings.append(
             f"{summary['dated_content_signals']} pages affichent une date qui peut donner une impression de contenu ancien"

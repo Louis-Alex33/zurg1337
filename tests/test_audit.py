@@ -80,9 +80,11 @@ class AuditHeuristicsTests(unittest.TestCase):
 
         self.assertNotIn("titre_suggere", suggestion)
         self.assertNotIn("titre_longueur", suggestion)
-        self.assertIn("description_suggeree", suggestion)
-        self.assertIn("specific criteria", suggestion["description_suggeree"])
-        self.assertNotIn("Retrouvez", suggestion["description_suggeree"])
+        # Le template générique "specific criteria" a été supprimé.
+        # Les pages sans signal métier identifiable ne génèrent plus de suggestion automatique.
+        if "description_suggeree" in suggestion:
+            self.assertNotIn("specific criteria", suggestion["description_suggeree"])
+            self.assertNotIn("Retrouvez", suggestion["description_suggeree"])
 
     def test_fit_seo_title_does_not_pad_valid_title_with_generic_suffix(self) -> None:
         title = "Guide to the Hottest Summer Style Trends in 2025"
@@ -106,17 +108,26 @@ class AuditHeuristicsTests(unittest.TestCase):
         )
 
         self.assertNotIn("titre_suggere", suggestion)
-        self.assertIn("description_suggeree", suggestion)
-        self.assertIn("specific criteria", suggestion["description_suggeree"])
-        self.assertNotIn("Retrouvez", suggestion["description_suggeree"])
+        # Le template générique "specific criteria" est supprimé — description peut être absente
+        # pour les pages sans signal métier identifiable (réécriture manuelle requise).
+        if "description_suggeree" in suggestion:
+            self.assertNotIn("specific criteria", suggestion["description_suggeree"])
+            self.assertNotIn("Retrouvez", suggestion["description_suggeree"])
 
-    def test_fit_meta_description_keeps_french_for_french_pages(self) -> None:
+    def test_fit_meta_description_no_generic_template_for_french_pages(self) -> None:
+        # Le template générique "Découvrez X : critères essentiels..." est supprimé.
+        # Pour les pages sans signal métier reconnu, fit_meta_description retourne "".
         description = fit_meta_description(
             "https://example.com/douche-senior-bordeaux-prix-aides",
             "Douche senior Bordeaux : prix 2026, aides MaPrimeAdapt",
         )
-
-        self.assertIn("Découvrez", description)
+        # Ne doit jamais contenir le template générique supprimé
+        self.assertNotIn("critères essentiels", description)
+        self.assertNotIn("points de repère concrets", description)
+        self.assertNotIn("prendre la bonne décision", description)
+        # Peut être vide (signale réécriture manuelle) ou contenir un template métier spécifique
+        if description:
+            self.assertGreaterEqual(len(description), 70)
 
     def test_overlap_and_orphan_labels_are_prudent(self) -> None:
         home = AuditPage(
@@ -614,7 +625,7 @@ class AuditHeuristicsTests(unittest.TestCase):
             "Pages en erreur",
             "Descriptions absentes ou trop courtes",
             "Titres absents ou hors plage",
-            "Score moyen",
+            # "Score moyen" retiré (Option B : score unique = Santé technique)
             "Pages noindex",
             "Canonicals à vérifier",
             "Pages peu reliées",
