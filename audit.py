@@ -48,6 +48,50 @@ from gsc import (
 from models import AuditPage, AuditReport, QualifiedDomain
 from utils import CLIError, clean_domain, contains_year_reference, fetch_limited_html, make_cached_session, make_session, normalize_url
 
+# Patterns qui signalent une date dans un contexte ÉDITORIAL explicite.
+# Une année seule dans un nom de produit ("Asics Gel 2025") ou un événement
+# ("Tournoi P1000 2024") ne matche pas ces patterns → zéro faux positif.
+_FR_MONTHS = (
+    r"janvier|f[ée]vrier|mars|avril|mai|juin|juillet|ao[uû]t|septembre|"
+    r"octobre|novembre|d[ée]cembre"
+)
+_EN_MONTHS = (
+    r"january|february|march|april|may|june|july|august|september|"
+    r"october|november|december"
+)
+_ALL_MONTHS = f"{_FR_MONTHS}|{_EN_MONTHS}"
+
+_EDITORIAL_DATE_PATTERNS = [
+    # "mis à jour en avril 2026", "mise a jour oct 2024", "publié le 12 mars 2024", "last updated April 2025"
+    r"(?:mise?\s+[aà]\s+jour|publi(?:é|ee?)|édit(?:é|ee?)|màj|last\s+updated?|updated?|revu|écrit|post(?:é|ee?))\s+"
+    r"(?:en|le|in|on|en\s+date\s+du)?\s*"
+    r"(?:\d{1,2}\s+)?"
+    rf"(?:{_ALL_MONTHS})?\s*"
+    r"(20\d{2})",
+    # Mois + année isolés ("avril 2026", "September 2023") — typiquement éditorial
+    rf"(?:{_ALL_MONTHS})\s+(20\d{{2}})",
+    # Copyright footer : "© 2023" ou "(c) 2023" ou "(C) 2023"
+    r"(?:©|\(c\))\s*(20\d{2})",
+    # Marqueurs visuels courants ("✍️ 2025", "🔄 12 mars 2025")
+    r"(?:✍️|📝|🔄)\s*[^.]{0,40}(20\d{2})",
+]
+
+EDITORIAL_DATE_RE = re.compile("|".join(_EDITORIAL_DATE_PATTERNS), re.IGNORECASE)
+
+# URLs dont les années sont structurellement des noms de modèles produits.
+# À étendre au fil des clients — destiné à devenir configurable via YAML.
+_DATE_EXCLUDED_URL_PATTERNS = [
+    r"/test-",            # /test-chaussures-*, /test-raquette-*, etc.
+    r"/chaussures-",      # hubs et fiches chaussures
+    r"/raquette-",        # hubs et fiches raquettes
+    r"/padel-bag",        # sacs padel
+    r"/accessoires-",     # accessoires produits
+]
+
+DATE_DETECTION_EXCLUDED_RE = re.compile(
+    "|".join(_DATE_EXCLUDED_URL_PATTERNS), re.IGNORECASE
+)
+
 DATED_PATTERNS = [
     re.compile(r"\b20(?:1[8-9]|2[0-9])\b"),
     re.compile(
@@ -1846,6 +1890,27 @@ def extract_text_content(soup: BeautifulSoup) -> str:
     return " ".join(parts)
 
 
+def find_editorial_dates(text: str) -> list[str]:
+    """Retourne les années mentionnées dans un contexte éditorial uniquement."""
+    if not text:
+        return []
+    matches = EDITORIAL_DATE_RE.findall(text)
+    years: list[str] = []
+    for m in matches:
+        if isinstance(m, tuple):
+            years.extend(y for y in m if y)
+        elif m:
+            years.append(m)
+    return years
+
+
+def should_check_dates(url: str) -> bool:
+    """Retourne False pour les URLs produits/hubs où les années sont des noms de modèles."""
+    if not url:
+        return True
+    return not DATE_DETECTION_EXCLUDED_RE.search(url)
+
+
 def is_outdated_date_reference(value: str, reference_date: datetime | None = None) -> bool:
     year_match = re.search(r"\b(20\d{2})\b", value)
     if year_match is None:
@@ -1864,25 +1929,35 @@ def find_dated_references(
     structured_data: str = "",
     reference_date: datetime | None = None,
 ) -> list[str]:
+    if not should_check_dates(url):
+        return []
     found: list[str] = []
     active_reference_date = reference_date or datetime.now()
-    excerpts = [title, url, meta_description, h1, " ".join(headings or []), text[:2000], structured_data[:2000]]
-    labels = [
-        "Date visible dans le titre",
-        "Date visible dans l'URL",
-        "Date visible dans la meta description",
-        "Date visible dans le H1",
-        "Date visible dans les intertitres",
-        "Date visible dans le contenu",
-        "Date visible dans les donnees structurees",
+    reference_year = active_reference_date.year
+    # Champs textuels : détection éditoriale stricte uniquement
+    text_excerpts = [
+        ("Date visible dans le titre", title),
+        ("Date visible dans la meta description", meta_description),
+        ("Date visible dans le H1", h1),
+        ("Date visible dans les intertitres", " ".join(headings or [])),
+        ("Date visible dans le contenu", text[:2000]),
+        ("Date visible dans les donnees structurees", structured_data[:2000]),
     ]
-    for index, excerpt in enumerate(excerpts):
-        for pattern in DATED_PATTERNS:
-            for match in pattern.finditer(excerpt):
-                value = match.group(0)
-                if not is_outdated_date_reference(value, reference_date=active_reference_date):
-                    continue
-                label = f"{labels[index]}: {value}"
+    for label_prefix, excerpt in text_excerpts:
+        for match in EDITORIAL_DATE_RE.finditer(excerpt or ""):
+            # Extraire l'année depuis les groupes capturants
+            year_str = next((g for g in match.groups() if g), None)
+            if not year_str or int(year_str) >= reference_year:
+                continue
+            label = f"{label_prefix}: {match.group(0).strip()}"
+            if label not in found:
+                found.append(label)
+    # URL : date dans le chemin (/2024/article/) est un signal fort sans contexte éditorial
+    for pattern in DATED_PATTERNS:
+        for match in pattern.finditer(url or ""):
+            value = match.group(0)
+            if is_outdated_date_reference(value, reference_date=active_reference_date):
+                label = f"Date visible dans l'URL: {value}"
                 if label not in found:
                     found.append(label)
     return found
@@ -1899,21 +1974,23 @@ def detect_date_signals(
     structured_data: str,
     reference_date: datetime | None = None,
 ) -> list[dict[str, str | int | bool]]:
+    if not should_check_dates(url):
+        return []
     reference_year = (reference_date or datetime.now()).year
-    sources = {
-        "url": url,
-        "title": title,
-        "meta": meta_description,
-        "h1": h1,
+    # Champs textuels : détection éditoriale stricte
+    text_sources: dict[str, str] = {
+        "title": title or "",
+        "meta": meta_description or "",
+        "h1": h1 or "",
         "headings": " ".join(headings),
-        "content": content[:4000],
-        "structured_data": structured_data[:4000],
+        "content": (content or "")[:4000],
+        "structured_data": (structured_data or "")[:4000],
     }
     signals: list[dict[str, str | int | bool]] = []
     seen: set[tuple[str, int]] = set()
-    for location, value in sources.items():
-        for year_match in re.finditer(r"\b(20\d{2})\b", value or ""):
-            year = int(year_match.group(1))
+    for location, value in text_sources.items():
+        for year_str in find_editorial_dates(value):
+            year = int(year_str)
             key = (location, year)
             if key in seen:
                 continue
@@ -1922,9 +1999,24 @@ def detect_date_signals(
                 {
                     "location": location,
                     "year": year,
-                    "value": year_match.group(0),
+                    "value": year_str,
                     "outdated": year < reference_year,
                     "severity": date_location_severity(location, year < reference_year),
+                }
+            )
+    # URL : date dans le chemin est un signal fort sans contexte éditorial
+    for year_match in re.finditer(r"\b(20\d{2})\b", url or ""):
+        year = int(year_match.group(1))
+        key = ("url", year)
+        if key not in seen:
+            seen.add(key)
+            signals.append(
+                {
+                    "location": "url",
+                    "year": year,
+                    "value": year_match.group(0),
+                    "outdated": year < reference_year,
+                    "severity": date_location_severity("url", year < reference_year),
                 }
             )
     return signals
