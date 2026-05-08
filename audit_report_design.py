@@ -111,10 +111,10 @@ REPORT_TEXT = {
         "crawl_volume": "volume couvert par le crawl",
         "error_pages": "Pages en erreur",
         "http_to_check": "réponses HTTP à vérifier",
-        "missing_descriptions": "Descriptions manquantes",
-        "descriptions_absent": "balises description absentes",
-        "missing_titles": "Titres manquants",
-        "html_titles_absent": "titres HTML absents",
+        "missing_descriptions": "Descriptions absentes ou trop courtes",
+        "descriptions_absent": "absentes ou < 70 caractères (fonctionnellement vides)",
+        "missing_titles": "Titres absents ou hors plage",
+        "html_titles_absent": "absents, < 25 ou > 65 caractères",
         "noindex_pages": "Pages noindex",
         "pages_excluded": "pages écartées de l'indexation",
         "canonicals_to_check": "Canonicals à vérifier",
@@ -252,10 +252,10 @@ REPORT_TEXT = {
         "crawl_volume": "crawl coverage",
         "error_pages": "Error pages",
         "http_to_check": "HTTP responses to check",
-        "missing_descriptions": "Missing descriptions",
-        "descriptions_absent": "missing description tags",
-        "missing_titles": "Missing titles",
-        "html_titles_absent": "missing HTML titles",
+        "missing_descriptions": "Absent or too-short descriptions",
+        "descriptions_absent": "absent or < 70 chars (functionally empty)",
+        "missing_titles": "Absent or out-of-range titles",
+        "html_titles_absent": "absent, < 25 or > 65 chars",
         "noindex_pages": "Noindex pages",
         "pages_excluded": "pages excluded from indexing",
         "canonicals_to_check": "Canonicals to check",
@@ -533,13 +533,31 @@ BAD_META_PHRASES = (
 )
 
 INTERNAL_PAGE_TYPE_CODES = {"financial_aid", "home_adaptation"}
-MANUAL_SEO_REWRITE_LABEL = "À réécrire manuellement : suggestion automatique non fiable."
 
 SEUIL_LENT = 3.0
 SEUIL_CRITIQUE = 4.0
-SEUIL_TITRE_LONG = 60
-SEUIL_DESC_COURTE = 70
-SEUIL_DESC_LONGUE = 160
+
+# Seuils de longueur SEO — 65 car. reflète la largeur réelle du snippet Google (vs 60 trop strict).
+# META_MIN_LEN à 70 capture les descriptions fonctionnellement vides (ex. "Article mis à jour en avril 2026").
+TITLE_MAX_LEN = 65
+TITLE_MIN_LEN = 25
+META_MAX_LEN = 155
+META_MIN_LEN = 70
+
+# Alias de compatibilité (ne plus utiliser dans le nouveau code)
+SEUIL_TITRE_LONG = TITLE_MAX_LEN
+SEUIL_DESC_COURTE = META_MIN_LEN
+SEUIL_DESC_LONGUE = META_MAX_LEN
+
+# Mots grammaticaux sur lesquels il est inacceptable de couper un titre suggéré.
+# Couper sur un déterminant ou une préposition produit un fragment pire que l'original.
+_SMART_TRUNCATE_BAD_ENDINGS = frozenset({
+    "le", "la", "les", "l", "un", "une", "des", "du", "de", "d", "mon", "votre", "notre",
+    "et", "ou", "mais", "donc", "or", "ni", "car",
+    "à", "a", "de", "en", "pour", "vers", "par", "sur", "dans", "avec", "sans", "sous",
+    "est", "sont", "a", "ont", "être", "avoir",
+    "the", "a", "an", "of", "in", "for", "to", "by", "on", "at", "from", "and", "or", "but",
+})
 
 
 def sanitize_report_language(lang: str | None) -> str:
@@ -572,7 +590,32 @@ def contains_forbidden_recommendation(value: str) -> bool:
     return any(strip_accents_for_report(term) in normalized for term in FORBIDDEN_RECOMMENDATION_TERMS)
 
 
+# Heuristiques génériques de détection de page locale.
+# Contient uniquement des indicateurs structurels ou des mots géographiques neutres.
+# Ne pas y mettre de noms de villes ou termes métier spécifiques.
+_LOCAL_PAGE_SIGNALS = frozenset({
+    # Indicateurs URL structurels
+    "ville", "city", "region", "area", "location", "local", "nearby", "near",
+    "quartier", "commune", "departement", "province", "state",
+    # Mots géographiques génériques (éviter les noms propres hardcodés)
+    "adresse", "address", "carte", "map",
+})
+
+# Indicateurs de guide d'achat — génériques, sans termes métier
+_BUYING_GUIDE_SIGNALS = frozenset({
+    "choisir", "acheter", "achat", "guide", "meilleur", "meilleures", "top", "best",
+    "comparatif", "comparison", "selection", "recommande", "conseil",
+    "buy", "choose", "pick", "review",
+})
+
+
 def public_page_kind(url: str, page_type: str = "", title: str = "") -> str:
+    """Classifie une page par catégorie éditoriale générique.
+
+    Heuristiques intentionnellement génériques : aucun terme métier, aucun nom propre hardcodé.
+    Les villes et termes de niche sont détectés via la présence de mots-clés structurels
+    (ex. présence dans l'URL de patterns geo), pas via une liste fermée.
+    """
     text = strip_accents_for_report(f"{url} {page_type} {title}")
     if "mention" in text or "legal" in text or "privacy" in text or "confidentialite" in text or page_type == "legal":
         return "page_legale"
@@ -580,17 +623,20 @@ def public_page_kind(url: str, page_type: str = "", title: str = "") -> str:
         return "contact"
     if "category" in text or "categorie" in text or page_type == "category":
         return "categorie"
-    if "tournoi" in text or re.search(r"\bp(25|100|250|500|1000|1500|2000)\b", text):
-        return "page_tournoi"
-    if any(term in text for term in ("test", "avis", "review")):
+    # Événements : tournois, festivals, conférences, etc.
+    if any(term in text for term in ("tournoi", "tournament", "evenement", "event", "festival", "conference", "competition")):
+        return "page_evenement"
+    if any(term in text for term in ("test-", "avis", "review", "essai", "hands-on")):
         return "test_produit"
-    if any(term in text for term in ("comparatif", "meilleur", "meilleures", "comparison", "best")):
+    if any(term in text for term in ("comparatif", "comparison", "versus", " vs ")):
         return "comparatif"
-    if any(term in text for term in ("paris", "lyon", "marseille", "toulouse", "bordeaux", "nantes", "lille", "rennes", "nice", "club")):
+    # Page locale : détectée par des signaux structurels dans l'URL ou le titre
+    url_norm = strip_accents_for_report(url)
+    if any(term in url_norm for term in _LOCAL_PAGE_SIGNALS) or re.search(r"/[a-z]+-[a-z]{2,}(?:/|$)", url_norm):
         return "page_locale"
-    if any(term in text for term in ("choisir", "achat", "acheter", "raquette", "chaussure", "balles", "sac", "equipement")):
+    if any(term in text for term in _BUYING_GUIDE_SIGNALS):
         return "guide_achat"
-    if page_type in {"blog", "resource", "article"} or any(term in text for term in ("technique", "conseils", "comment", "guide")):
+    if page_type in {"blog", "resource", "article"} or any(term in text for term in ("technique", "conseils", "comment", "how-to", "howto")):
         return "article_technique"
     return "incertain"
 
@@ -601,41 +647,127 @@ def public_page_type_label(url: str, page_type: str = "", title: str = "") -> st
         "test_produit": "test produit",
         "comparatif": "comparatif",
         "page_locale": "page locale",
-        "page_tournoi": "page tournoi",
+        "page_evenement": "page événement",
         "article_technique": "article technique",
         "page_legale": "page légale",
         "contact": "contact",
         "categorie": "catégorie",
         "incertain": "page",
     }
-    return labels[public_page_kind(url, page_type, title)]
+    return labels.get(public_page_kind(url, page_type, title), "page")
+
+
+# Variantes d’angles éditoriaux par catégorie de page.
+# Modifiable sans toucher à la logique : ajouter/modifier des entrées ici.
+# Chaque liste doit contenir au moins 3 variantes distinctes.
+ANGLE_VARIANTS_BY_CATEGORY: dict[str, list[str]] = {
+    "guide_achat": [
+        "Structurer le guide autour des critères de choix, des profils d’usage et des erreurs fréquentes — relier vers les tests ou comparatifs associés.",
+        "Ajouter un tableau comparatif des options principales, avec les critères décisifs pour chaque profil d’acheteur.",
+        "Ouvrir par la question que se pose réellement l’acheteur, répondre en 3 critères concrets, conclure avec une recommandation claire.",
+        "Enrichir avec un angle ‘pièges à éviter’ et des liens internes vers les fiches produits ou tests mentionnés.",
+        "Reformuler le titre pour intégrer le critère principal de choix, ajouter une FAQ en bas de page.",
+    ],
+    "test_produit": [
+        "Renforcer le test avec les conditions d’essai réelles, les avantages mesurés, les limites constatées et le profil d’utilisateur concerné.",
+        "Ajouter un encadré ‘pour qui c’est fait / pour qui ce n’est pas fait’ et des liens vers les alternatives proches.",
+        "Structurer autour d’un verdict clair dès le début, détailler les points forts et faibles, conclure par une note et une comparaison.",
+        "Intégrer des éléments de preuve : photos, contexte d’utilisation, durée du test — différencier ce contenu des fiches fabricant.",
+    ],
+    "comparatif": [
+        "Clarifier les critères de comparaison, expliquer les meilleurs choix par usage et relier les produits ou guides complémentaires.",
+        "Introduire un tableau comparatif visuel avec les critères pondérés — clôturer par une recommandation selon le profil.",
+        "Réécrire l’angle autour d’un cas d’usage précis : ‘quel choix pour [usage X] ?’ — éviter le comparatif générique sans conclusion.",
+        "Ajouter un bloc ‘notre verdict’ avec un choix principal et une alternative, pour éviter l’indécision du lecteur.",
+    ],
+    "page_locale": [
+        "Préciser la zone géographique couverte, ajouter des informations pratiques locales et des liens vers les contenus géographiquement proches.",
+        "Enrichir avec des signaux de confiance locaux : adresse, horaires, témoignages ou références de la zone.",
+        "Structurer autour des besoins spécifiques à la localisation : accès, disponibilité, contacts locaux.",
+        "Relier cette page aux pages de services ou produits qui s’appliquent spécifiquement à cette zone.",
+    ],
+    "page_evenement": [
+        "Clarifier les informations pratiques (date, lieu, format), les conditions de participation et ajouter une FAQ pour les inscrits.",
+        "Ajouter un appel à l’action visible dès le premier écran, avec les informations clés pour s’inscrire ou suivre l’événement.",
+        "Structurer en trois parties : ce qu’est l’événement, qui peut participer, comment s’inscrire — relier aux événements similaires.",
+    ],
+    "article_technique": [
+        "Ajouter des explications concrètes, des exemples pratiques, des erreurs à éviter et des liens internes vers les articles ou guides associés.",
+        "Restructurer autour d’une question précise que se pose le lecteur cible — répondre progressivement, du basique à l’avancé.",
+        "Enrichir avec un cas d’usage réel, un schéma ou exemple commenté, et une conclusion actionnelle.",
+        "Ajouter un résumé en tête d’article, vérifier que le titre H1 correspond à l’intention réelle de la page.",
+    ],
+    "categorie": [
+        "Clarifier le rôle de la catégorie, ajouter une courte introduction utile et relier les contenus clés du même thème.",
+        "Ajouter une introduction de 2-3 phrases qui explique ce que couvre cette catégorie et pourquoi elle est utile au lecteur.",
+        "Vérifier que les contenus listés sont triés par pertinence et que les plus importants apparaissent en premier.",
+    ],
+    "page_legale": [
+        "Vérifier que la page est complète, accessible depuis le footer et correctement exclue des priorités éditoriales ou business.",
+        "S’assurer que cette page n’est pas sur le chemin de navigation principal et qu’elle est correctement traitée en canonique.",
+    ],
+    "contact": [
+        "Vérifier les coordonnées, les liens utiles, la clarté du formulaire et l’accès depuis les pages importantes.",
+        "S’assurer que la page de contact est accessible depuis le menu principal et depuis les pages à forte intention.",
+    ],
+    "incertain": [
+        "Clarifier l’intention principale de la page, renforcer les informations utiles et ajouter des liens internes vers les contenus associés.",
+        "Identifier si cette page répond à une question précise ou joue un rôle de hub — adapter la structure en conséquence.",
+        "Vérifier l’alignement entre le titre, le H1 et le contenu réel de la page avant toute réécriture.",
+        "Définir un brief éditorial : qui est la cible, quelle question se pose-t-elle, quelle réponse apporte cette page.",
+        "Ajouter des liens internes entrants depuis les pages fortes du site et sortants vers les ressources complémentaires.",
+    ],
+}
+
+# Index utilisé pour éviter la répétition d’angles consécutifs dans le rapport.
+_angle_variant_counter: dict[str, int] = {}
 
 
 def neutral_page_recommendation() -> str:
     return "Clarifier l’intention principale de la page, renforcer les informations utiles et ajouter des liens internes vers les contenus associés."
 
 
-def recommendation_for_public_page_type(url: str, page_type: str = "", title: str = "") -> str:
+def recommendation_for_public_page_type(
+    url: str,
+    page_type: str = "",
+    title: str = "",
+    *,
+    details: dict[str, Any] | None = None,
+    reset_counters: bool = False,
+) -> str:
+    """Retourne un angle éditorial différencié selon la catégorie et les signaux de la page.
+
+    La variante est choisie en rotation pour éviter les répétitions consécutives.
+    ‘details’ peut contenir word_count, nb_liens_internes, meta_description pour orienter le choix.
+    """
+    if reset_counters:
+        _angle_variant_counter.clear()
     kind = public_page_kind(url, page_type, title)
-    if kind == "guide_achat":
-        return "Structurer le guide autour des critères de choix, niveaux de pratique, erreurs fréquentes et liens vers les tests ou comparatifs associés."
-    if kind == "test_produit":
-        return "Renforcer le test avec conditions d'essai, avantages, limites, profil de joueur concerné et liens vers les alternatives proches."
-    if kind == "comparatif":
-        return "Clarifier les critères de comparaison, expliquer les meilleurs choix par usage et relier les produits ou guides complémentaires."
-    if kind == "page_locale":
-        return "Préciser la zone couverte, les informations pratiques, les points de confiance locaux et les liens vers les contenus géographiquement proches."
-    if kind == "page_tournoi":
-        return "Clarifier le niveau requis, les modalités d'inscription, le format de compétition et ajouter une FAQ pour les joueurs concernés."
-    if kind == "article_technique":
-        return "Ajouter des explications concrètes, exemples de jeu, erreurs à éviter et liens internes vers les articles ou guides associés."
-    if kind == "page_legale":
-        return "Vérifier que la page est complète, accessible depuis le footer et correctement exclue des priorités éditoriales ou business."
-    if kind == "contact":
-        return "Vérifier les coordonnées, les liens utiles, la clarté du formulaire et l'accès depuis les pages importantes."
-    if kind == "categorie":
-        return "Clarifier le rôle de la catégorie, ajouter une courte introduction utile et relier les contenus clés du même thème."
-    return neutral_page_recommendation()
+    variants = ANGLE_VARIANTS_BY_CATEGORY.get(kind)
+    if not variants:
+        return neutral_page_recommendation()
+    d = details or {}
+    word_count = int(d.get("word_count") or d.get("mots") or 0)
+    nb_links = int(d.get("nb_liens_internes") or 0)
+    meta_len = len(str(d.get("meta_description") or d.get("description_google") or ""))
+
+    # Sélection par signal dominant : le signal le plus distinctif choisit la variante.
+    if word_count < 200 and len(variants) > 2:
+        preferred_idx = 2  # angle court/enrichissement
+    elif nb_links == 0 and len(variants) > 1:
+        preferred_idx = 1  # angle maillage
+    elif meta_len < 50 and len(variants) > 0:
+        preferred_idx = 0  # angle titre/meta
+    else:
+        # Rotation pour éviter la répétition
+        current = _angle_variant_counter.get(kind, 0)
+        preferred_idx = current % len(variants)
+        _angle_variant_counter[kind] = current + 1
+
+    # Ne jamais dépasser le nombre de variantes disponibles
+    preferred_idx = preferred_idx % len(variants)
+    _angle_variant_counter[kind] = (_angle_variant_counter.get(kind, preferred_idx) + 1) % len(variants)
+    return variants[preferred_idx]
 
 
 def client_level(value: object, lang: str = "fr", *, priority_word: bool = False) -> str:
@@ -733,14 +865,14 @@ def speed_color_class(load_time: float | None) -> str:
 
 def needs_title_fix(page: dict[str, Any]) -> bool:
     title = str(page.get("titre_google") or "")
-    return not title or len(title) > SEUIL_TITRE_LONG
+    return not title or len(title) < TITLE_MIN_LEN or len(title) > TITLE_MAX_LEN
 
 
 def needs_desc_fix(page: dict[str, Any]) -> bool:
     desc = str(page.get("description_google") or "")
     if not desc:
         return True
-    return len(desc) < SEUIL_DESC_COURTE or len(desc) > SEUIL_DESC_LONGUE
+    return len(desc) < META_MIN_LEN or len(desc) > META_MAX_LEN
 
 
 def analyste_name_is_valid(value: str) -> bool:
@@ -874,8 +1006,10 @@ def prepare_audit_report_context(
         "pages_saines": get_int(data, "pages_saines", get_int(summary, "pages_ok", max(0, pages_analysees - pages_erreur))),
         "contenus_utiles": get_int(data, "contenus_utiles", get_int(summary, "content_like_pages", 0)),
         "pages_erreur": pages_erreur,
-        "descriptions_manquantes": get_int(data, "descriptions_manquantes", get_int(summary, "missing_meta_descriptions", 0)),
-        "titres_manquants": get_int(data, "titres_manquants", get_int(summary, "missing_titles", 0)),
+        # Compteurs consolidés : absents OU trop courts (fonctionnellement vides).
+        # "missing_meta_descriptions" seul manquait les descriptions de 36 car. tipo "Article mis à jour en avril 2026".
+        "descriptions_manquantes": get_int(data, "descriptions_manquantes", get_int(summary, "meta_descriptions_problematic", get_int(summary, "missing_meta_descriptions", 0))),
+        "titres_manquants": get_int(data, "titres_manquants", get_int(summary, "titles_problematic", get_int(summary, "missing_titles", 0))),
         "score_moyen_page": get_int(data, "score_moyen_page", get_int(summary, "avg_page_health_score", 0)),
         "pages_noindex": get_int(data, "pages_noindex", get_int(summary, "noindex_pages", 0)),
         "canonicals": get_int(data, "canonicals", get_int(summary, "canonical_to_other_url_pages", 0)),
@@ -976,7 +1110,7 @@ def validate_rendered_audit_html(html_doc: str, context: dict[str, Any]) -> list
         if strip_accents_for_report(term) in normalized_visible:
             warnings.append(f"recommandation hors niche détectée: {term}")
             break
-    if "analyse pratique de" in normalized_visible or "analyse claire de" in normalized_visible:
+    if "analyse pratique de" in normalized_visible:
         warnings.append("meta générique de type 'Analyse pratique de' détectée")
     for match in re.finditer(r"<span class=\"suggestion-texte-propose\">([^<]+)</span>", html_doc):
         suggestion = html.unescape(match.group(1))
@@ -1251,9 +1385,35 @@ def render_action_plan(context: dict[str, Any]) -> str:
   </section>"""
 
 
+def _matrix_qualifies_for_display(matrix: dict[str, list[dict[str, Any]]]) -> bool:
+    """La matrice s'affiche uniquement si ≥ 3 actions distinctes réparties dans ≥ 2 quadrants."""
+    quadrant_keys = ("quick_wins", "projets_structurants", "optimisations_simples", "backlog")
+    non_empty_quadrants = sum(1 for k in quadrant_keys if matrix.get(k))
+    total_actions = sum(len(matrix.get(k, [])) for k in quadrant_keys)
+    return non_empty_quadrants >= 2 and total_actions >= 3
+
+
 def render_matrix(matrix: dict[str, list[dict[str, Any]]]) -> str:
     lang = sanitize_report_language(str(matrix.get("_lang") if isinstance(matrix, dict) else "fr"))
     t = lambda key: report_copy(lang, key)
+    is_en = lang == "en"
+
+    # Si la matrice ne réunit pas assez d'actions variées, afficher une liste priorisée.
+    if not _matrix_qualifies_for_display(matrix):
+        all_actions: list[dict[str, Any]] = []
+        for k in ("quick_wins", "projets_structurants", "optimisations_simples", "backlog"):
+            all_actions.extend(matrix.get(k, []))
+        if not all_actions:
+            return f"<p class='empty-state'>{escape(t('matrix_empty'))}</p>"
+        heading = "Recommended actions by decreasing impact" if is_en else "Actions recommandées par ordre d'impact décroissant"
+        items_html = "".join(
+            f"<li><strong>{escape(str(a.get('titre') or ''))}</strong>"
+            f" — {escape(t('impact'))} {escape(str(a.get('impact') or '-'))}"
+            f", {escape(t('effort'))} {escape(str(a.get('effort') or '-'))}</li>"
+            for a in all_actions[:6]
+        )
+        return f"<p class='matrix-fallback-heading'>{heading}</p><ol class='matrix-fallback-list'>{items_html}</ol>"
+
     labels = [
         ("quick_wins", t("quick_wins"), t("high_impact_low_effort")),
         ("projets_structurants", t("major_projects"), t("high_impact_high_effort")),
@@ -1268,8 +1428,8 @@ def render_matrix(matrix: dict[str, list[dict[str, Any]]]) -> str:
         rows = "".join(
             f"""
             <article class="matrix-action">
-              <span class="priority-badge priority-{priority_color_class(str(action.get("priorite") or ""))}">{escape(str(action.get("priorite") or ("priority" if lang == "en" else "priorité")))}</span>
-              <strong>{escape(str(action.get("titre") or ("Action to frame" if lang == "en" else "Action à cadrer")))}</strong>
+              <span class="priority-badge priority-{priority_color_class(str(action.get("priorite") or ""))}">{escape(str(action.get("priorite") or ("priority" if is_en else "priorité")))}</span>
+              <strong>{escape(str(action.get("titre") or ("Action to frame" if is_en else "Action à cadrer")))}</strong>
               <p><span>{escape(t("impact"))} {escape(str(action.get("impact") or "-"))}</span><span>{escape(t("effort"))} {escape(str(action.get("effort") or "-"))}</span></p>
             </article>"""
             for action in actions
@@ -1284,10 +1444,7 @@ def render_matrix(matrix: dict[str, list[dict[str, Any]]]) -> str:
         )
     if not cards:
         return f"<p class='empty-state'>{escape(t('matrix_empty'))}</p>"
-    note = ""
-    if len(cards) < 2:
-        note = f"<p class='matrice-note'>{t('matrix_note')}</p>"
-    return f"<div class='matrix-grid'>{''.join(cards)}</div>{note}"
+    return f"<div class='matrix-grid'>{''.join(cards)}</div>"
 
 
 def render_priority_pages(context: dict[str, Any]) -> str:
@@ -1885,28 +2042,46 @@ def build_page_performance_action(page: dict[str, Any], domain: str, lang: str =
     load_label = format_seconds(load_time)
     redirects = get_int(page, "redirections", 0)
     images_total = get_int(page, "images_total", 0)
-    page_type = str(page.get("type") or "").lower()
+    page_type = str(page.get("raw_type") or page.get("type") or "").lower()
 
     if redirects > 0:
+        # Phrase calibrée : la redirection n'explique pas seule un temps > 2× SEUIL_LENT.
+        # On l'affiche uniquement quand le temps est élevé, pour ne pas induire en erreur.
+        redirect_caveat_threshold = SEUIL_LENT * 2  # > 6s
+        show_caveat = load_time is not None and load_time > redirect_caveat_threshold
         if is_en:
             redirect_label = f"{redirects} redirect" + ("s" if redirects > 1 else "")
+            text_base = (
+                f"On {label}, the crawl observes {load_label} with {redirect_label}. "
+                "Update internal links, the menu, the sitemap and canonicals so they point directly to the final URL for this page."
+            )
+            if show_caveat:
+                text_base += (
+                    " Note: a redirect typically adds a few hundred milliseconds and does not alone explain a load time of "
+                    f"{load_label}. Probable causes include hosting, page weight, or third-party scripts — "
+                    "a server-side Core Web Vitals audit would confirm the root cause."
+                )
             return {
                 "icon": "↪",
                 "title": f"{label}: remove the measured redirect",
-                "text": (
-                    f"On {label}, the crawl observes {load_label} with {redirect_label}. "
-                    "Update internal links, the menu, the sitemap and canonicals so they point directly to the final URL for this page."
-                ),
+                "text": text_base,
                 "effort": "Effort: low to medium — Impact: immediate on this URL",
             }
         redirect_label = f"{redirects} redirection" + ("s" if redirects > 1 else "")
+        text_base = (
+            f"Sur {label}, le crawl observe {load_label} avec {redirect_label}. "
+            "Mettre à jour les liens internes, le menu, le sitemap et les canonicals pour pointer directement vers l'URL finale de cette page."
+        )
+        if show_caveat:
+            text_base += (
+                f" Note : la redirection ajoute typiquement quelques centaines de millisecondes au temps de chargement, "
+                f"mais n'explique pas seule un temps de {load_label}. Les causes probables incluent l'hébergement, "
+                "le poids des pages, ou des scripts tiers — un audit Core Web Vitals serveur permettrait de trancher."
+            )
         return {
             "icon": "↪",
             "title": f"{label} : supprimer la redirection mesurée",
-            "text": (
-                f"Sur {label}, le crawl observe {load_label} avec {redirect_label}. "
-                "Mettre à jour les liens internes, le menu, le sitemap et les canonicals pour pointer directement vers l'URL finale de cette page."
-            ),
+            "text": text_base,
             "effort": "Effort : faible à moyen — Impact : immédiat sur cette URL",
         }
 
@@ -1978,7 +2153,10 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     if not pages:
         return ""
     t = lambda key: text_for(context, key)
+    is_en = context_lang(context) == "en"
     cards = []
+    manual_titles = 0
+    manual_descs = 0
     for raw_page in pages:
         page = as_dict(raw_page)
         suggestion = as_dict(page.get("seo_suggestions"))
@@ -1987,10 +2165,19 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
         title_suggested = str(suggestion.get("titre_suggere") or "").strip()
         desc_suggested = str(suggestion.get("description_suggeree") or "").strip()
         manual_rewrite = bool(suggestion.get("manual_rewrite"))
+
+        # Compter les pages dont la suggestion n'est pas fiable (sans afficher de ligne)
+        if manual_rewrite and not title_suggested and not desc_suggested:
+            if needs_title_fix(page):
+                manual_titles += 1
+            if needs_desc_fix(page):
+                manual_descs += 1
+            continue
+
         title_block = ""
         if title_suggested:
-            title_bad = len(title) > SEUIL_TITRE_LONG
-            title_note = f" — {t('too_long')} (max 60)" if title_bad else ""
+            title_bad = len(title) > TITLE_MAX_LEN
+            title_note = f" — {t('too_long')} (max {TITLE_MAX_LEN})" if title_bad else ""
             title_status = (
                 f'<span class="suggestion-longueur--bad">{escape(t("missing_masc"))}</span>'
                 if not title
@@ -2021,7 +2208,7 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     </div>"""
         desc_block = ""
         if desc_suggested:
-            desc_bad = not desc or len(desc) < SEUIL_DESC_COURTE or len(desc) > SEUIL_DESC_LONGUE
+            desc_bad = not desc or len(desc) < META_MIN_LEN or len(desc) > META_MAX_LEN
             desc_status = (
                 f'<span class="suggestion-longueur--bad">{escape(t("missing_fem"))}</span>'
                 if not desc
@@ -2050,33 +2237,55 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
       </div>
       {render_suggestion_explanation(str(suggestion.get("explication_description") or ""))}
     </div>"""
-        manual_block = ""
-        if manual_rewrite and not title_block and not desc_block:
-            manual_block = f"""
-    <div class="suggestion-bloc suggestion-bloc--manual">
-      <div class="suggestion-bloc-header">
-        <span class="suggestion-type">{escape(t("suggested"))}</span>
-      </div>
-      <p class="suggestion-texte-propose">{escape(MANUAL_SEO_REWRITE_LABEL)}</p>
-    </div>"""
-        if not title_block and not desc_block and not manual_block:
+        if not title_block and not desc_block:
             continue
         cards.append(
             f"""
   <div class="suggestion-card">
-    <div class="suggestion-url">{escape(display_url_label(str(page.get("url") or ""), str(context["domain"]), empty_label="Home" if context_lang(context) == "en" else "Accueil"))}</div>
+    <div class="suggestion-url">{escape(display_url_label(str(page.get("url") or ""), str(context["domain"]), empty_label="Home" if is_en else "Accueil"))}</div>
     {title_block}
     {desc_block}
-    {manual_block}
   </div>"""
         )
-    if not cards:
+
+    # Bannière neutre pour les suggestions non fiables
+    manual_notice = ""
+    if manual_titles or manual_descs:
+        parts = []
+        if manual_titles:
+            parts.append(f"{manual_titles} {'title' if is_en else 'titre'}{'s' if manual_titles > 1 else ''}")
+        if manual_descs:
+            parts.append(f"{manual_descs} {'description' if is_en else 'description'}{'s' if manual_descs > 1 else ''}")
+        parts_str = " et ".join(parts) if not is_en else " and ".join(parts)
+        if is_en:
+            notice_text = f"{parts_str} require{'s' if (manual_titles + manual_descs) == 1 else ''} manual rewriting — not listed here as the automatic suggestion was not reliable enough."
+        else:
+            notice_text = f"{parts_str} nécessitent une réécriture manuelle — non listés ici car la suggestion automatique n'a pas été jugée suffisamment fiable."
+        manual_notice = f'<p class="suggestions-manual-notice">{escape(notice_text)}</p>'
+
+    if not cards and not manual_notice:
         return ""
+
+    if not cards:
+        # Aucune suggestion fiable : masquer la section, afficher message court
+        if is_en:
+            msg = f"No reliable automatic suggestion could be generated. A manual review is needed ({manual_titles} title{'s' if manual_titles != 1 else ''}, {manual_descs} description{'s' if manual_descs != 1 else ''})."
+        else:
+            msg = f"Aucune suggestion automatique fiable n'a pu être générée. Une revue manuelle est nécessaire ({manual_titles} titre{'s' if manual_titles != 1 else ''}, {manual_descs} description{'s' if manual_descs != 1 else ''})."
+        return f"""
+  <section class="report-page section-suggestions">
+    <div class="section-label">{escape(t("optimizations"))}</div>
+    <h2>{escape(t("titles_desc_to_fix"))}</h2>
+    <p class="suggestions-intro suggestions-intro--fallback">{escape(msg)}</p>
+    {render_page_footer(context)}
+  </section>"""
+
     return f"""
   <section class="report-page section-suggestions">
     <div class="section-label">{escape(t("optimizations"))}</div>
     <h2>{escape(t("titles_desc_to_fix"))}</h2>
     <p class="suggestions-intro">{escape(t("suggestions_intro"))}</p>
+    {manual_notice}
     {''.join(cards)}
     {render_page_footer(context)}
   </section>"""
@@ -2563,6 +2772,9 @@ def normalize_priority_pages(items: Any, pages_by_url: dict[str, dict[str, Any]]
     active_lang = sanitize_report_language(lang)
     normalized = []
     seen_urls: set[str] = set()
+    seen_angles: set[str] = set()  # éviter la répétition d'angles consécutifs
+    # Réinitialiser le compteur de rotation pour ce rapport
+    recommendation_for_public_page_type("", reset_counters=True)
     for raw in items if isinstance(items, list) else []:
         item = as_dict(raw)
         url = str(item.get("url") or "")
@@ -2582,8 +2794,19 @@ def normalize_priority_pages(items: Any, pages_by_url: dict[str, dict[str, Any]]
         page_type = public_page_type_label(url, raw_page_type, title)
         translated_reasons = [translate_reason(reason, active_lang) for reason in reasons]
         raw_action = str(item.get("action") or page_action_from_reasons(reasons, lang=active_lang))
-        raw_angle = str(item.get("angle") or page_angle(url, details, lang=active_lang))
-        safe_recommendation = recommendation_for_public_page_type(url, raw_page_type, title)
+        # Passer les détails de la page pour différencier les angles par signaux
+        page_details_for_angle = {**details, "word_count": word_count}
+        raw_angle = str(item.get("angle") or page_angle(url, page_details_for_angle, lang=active_lang))
+        # Si l'angle est une répétition exacte d'une page précédente, forcer la rotation
+        if raw_angle in seen_angles:
+            kind = public_page_kind(url, raw_page_type, title)
+            variants = ANGLE_VARIANTS_BY_CATEGORY.get(kind, [])
+            for variant in variants:
+                if variant not in seen_angles:
+                    raw_angle = variant
+                    break
+        seen_angles.add(raw_angle)
+        safe_recommendation = recommendation_for_public_page_type(url, raw_page_type, title, details=page_details_for_angle)
         if contains_forbidden_recommendation(raw_action) or contains_forbidden_recommendation(raw_angle):
             raw_action = safe_recommendation
             raw_angle = safe_recommendation
@@ -2644,6 +2867,7 @@ def normalize_crawled_urls(items: Any) -> list[dict[str, Any]]:
         normalized_item = {
             "url": url,
             "type": public_page_type_label(url, raw_page_type, title),
+            "raw_type": raw_page_type,
             "score": get_int(item, "score", get_int(item, "page_health_score", 0)),
             "mots": get_int(item, "mots", get_int(item, "word_count", 0)),
             "points": str(issues),
@@ -2888,12 +3112,39 @@ def build_local_seo_suggestion(page: dict[str, Any]) -> dict[str, Any]:
     return suggestion
 
 
+def _smart_truncate(text: str, max_len: int) -> str | None:
+    """Tronque au dernier mot complet grammaticalement acceptable.
+
+    Retourne None si aucune troncature acceptable n'est trouvable
+    (fragment trop court < TITLE_MIN_LEN, ou dernier mot grammatical vide).
+    Retourne le texte inchangé si déjà sous la limite.
+    """
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if len(cleaned) <= max_len:
+        return cleaned
+    candidate = cleaned[:max_len].rsplit(" ", 1)[0].strip(" -|,.;:")
+    if not candidate or len(candidate) < TITLE_MIN_LEN:
+        return None
+    last_word = re.sub(r"[^A-Za-zÀ-ÿ'-]+", "", candidate.split()[-1]).casefold()
+    if last_word in _SMART_TRUNCATE_BAD_ENDINGS:
+        # Remonter d'un mot supplémentaire
+        words = candidate.split()
+        while words and re.sub(r"[^A-Za-zÀ-ÿ'-]+", "", words[-1]).casefold() in _SMART_TRUNCATE_BAD_ENDINGS:
+            words.pop()
+        candidate = " ".join(words).strip(" -|,.;:")
+    if not candidate or len(candidate) < TITLE_MIN_LEN:
+        return None
+    return candidate
+
+
 def fit_seo_title(title: str, url: str) -> str:
     cleaned = re.sub(r"\s+", " ", title).strip(" -|")
     if not cleaned:
         cleaned = slug_to_title(url)
-    fitted = trim_at_word(cleaned, SEUIL_TITRE_LONG)
-    return "" if title_looks_truncated(fitted) else fitted
+    fitted = _smart_truncate(cleaned, TITLE_MAX_LEN)
+    if fitted is None or title_looks_truncated(fitted):
+        return ""
+    return fitted
 
 
 def infer_seo_language(*values: str) -> str:
@@ -2918,7 +3169,8 @@ def sanitize_seo_suggestion(page: dict[str, Any], suggestion: dict[str, Any]) ->
         if not title_suggested:
             title_suggested = fit_seo_title(title_current, url)
         else:
-            title_suggested = trim_at_word(title_suggested, SEUIL_TITRE_LONG)
+            smart = _smart_truncate(title_suggested, TITLE_MAX_LEN)
+            title_suggested = smart if smart is not None else ""
         if title_looks_truncated(title_suggested):
             title_suggested = ""
         if title_suggested and not same_normalized_text(title_current, title_suggested):
@@ -2936,7 +3188,7 @@ def sanitize_seo_suggestion(page: dict[str, Any], suggestion: dict[str, Any]) ->
         seed_title = str(cleaned.get("titre_suggere") or title_current or slug_to_title(url))
         if (
             not desc_suggested
-            or not (SEUIL_DESC_COURTE <= len(desc_suggested) <= SEUIL_DESC_LONGUE)
+            or not (META_MIN_LEN <= len(desc_suggested) <= META_MAX_LEN)
             or infer_seo_language(desc_suggested) != target_language
         ):
             desc_suggested = fit_meta_description(url, seed_title, language=target_language)
@@ -3005,10 +3257,8 @@ def fit_meta_description(url: str, title: str, *, language: str | None = None) -
             description = f"Comparez les options {topic} et les critères à vérifier avant de choisir un partenaire B2B fiable."
         elif any(term in topic_lower for term in ("recycl", "durable", "packaging", "emballage")):
             description = f"Comprenez ce que {topic} implique pour les choix produit, les arguments de marque et la confiance client."
-        elif any(term in topic_lower for term in ("padel", "raquette", "tournoi", "balle", "chaussure", "sac", "jeu")):
-            description = f"Retrouvez les informations utiles sur {topic}, avec des conseils concrets et des liens vers les contenus padel associés."
         else:
-            description = f"Analyse claire de {topic} : critères de choix, repères concrets et informations utiles pour décider quoi corriger en premier."
+            description = f"Découvrez {topic} : critères essentiels, points de repère concrets et informations utiles pour prendre la bonne décision."
     else:
         if any(term in topic_lower for term in ("manufacturer", "supplier", "wholesale", "oem", "odm", "private label")):
             description = f"Compare {topic} and learn what brands should check before choosing a private label or wholesale supplier."
@@ -3020,7 +3270,9 @@ def fit_meta_description(url: str, title: str, *, language: str | None = None) -
 
 
 def complete_meta_description(description: str, language: str) -> str:
-    if 140 <= len(description) <= 155:
+    target_min = 140
+    target_max = META_MAX_LEN
+    if target_min <= len(description) <= target_max:
         return finish_sentence(description)
     extras = (
         (
@@ -3037,9 +3289,9 @@ def complete_meta_description(description: str, language: str) -> str:
     )
     for extra in extras:
         candidate = f"{description} {extra}"
-        if 140 <= len(candidate) <= 155:
+        if target_min <= len(candidate) <= target_max:
             return finish_sentence(candidate)
-    return finish_sentence(trim_at_word(description, 155))
+    return finish_sentence(trim_at_word(description, target_max))
 
 
 def finish_sentence(value: str) -> str:
@@ -3319,7 +3571,41 @@ def build_dirigeant_texts(
             "Effort estimé : 2 à 4h pour cadrer les premières priorités."
         )
 
-    if dates_a_verifier:
+    # Le risque pointe toujours le même thème que le signal principal.
+    signal_lower = signal_principal.lower()
+    if "performance" in signal_lower or "dégradée" in signal_lower or "load" in signal_lower or "3s" in signal_lower:
+        risk = (
+            "Beyond 3 seconds, a significant share of visitors leave before seeing the content. "
+            "This is currently the most measurable barrier on your site."
+            if is_en
+            else "Au-delà de 3s, une part significative des visiteurs quitte avant d'avoir vu le contenu. "
+            "C'est aujourd'hui le frein le plus mesurable sur votre site."
+        )
+    elif "erreur" in signal_lower or "error" in signal_lower or "4xx" in signal_lower:
+        risk = (
+            "Pages in error lose any chance of ranking and create a poor experience for visitors who land on them."
+            if is_en
+            else "Les pages en erreur perdent toute chance d'être positionnées et créent une mauvaise expérience pour les visiteurs qui y atterrissent."
+        )
+    elif "maillage" in signal_lower or "lien" in signal_lower or "orphan" in signal_lower or "internal link" in signal_lower:
+        risk = (
+            "Pages with no internal links lose ranking potential. The longer they stay isolated, the harder it is for them to surface."
+            if is_en
+            else "Les pages sans liens internes perdent du potentiel de positionnement. Plus elles restent isolées, plus il est difficile pour elles de remonter."
+        )
+    elif "titre" in signal_lower or "description" in signal_lower or "snippet" in signal_lower:
+        risk = (
+            "Missing or out-of-range titles and descriptions reduce click-through rate directly in search results."
+            if is_en
+            else "Les titres et descriptions absents ou hors plage réduisent directement le taux de clic dans les résultats de recherche."
+        )
+    elif "doublon" in signal_lower or "duplicate" in signal_lower:
+        risk = (
+            "Duplicate snippets split authority between pages that compete for the same queries."
+            if is_en
+            else "Les doublons de snippets divisent l'autorité entre des pages qui se concurrencent sur les mêmes requêtes."
+        )
+    elif dates_a_verifier:
         risk = (
             "Pages that look outdated can reduce visitor trust. The longer you wait, the more that impression can settle in."
             if is_en
@@ -3451,7 +3737,52 @@ def build_attention_points(summary: dict[str, Any], signals: list[dict[str, Any]
 
 
 def build_primary_signal(summary: dict[str, Any], signals: list[dict[str, Any]], lang: str = "fr") -> str:
+    """Signal principal selon une hiérarchie fixe : perf > erreurs HTTP > maillage > titres/metas > duplication > fraîcheur.
+
+    Un site avec 98 % de pages lentes ne doit pas afficher 'Descriptions répétées (1)' en signal principal.
+    """
     is_en = sanitize_report_language(lang) == "en"
+    n_pages = max(1, get_int(summary, "pages_crawled", get_int(summary, "pages_analyzed", 1)))
+    slow_pages = get_int(summary, "slow_pages", 0)
+    pct_slow = round(slow_pages / n_pages * 100)
+
+    # 1. Performance — signal le plus impactant côté UX
+    if pct_slow >= 50:
+        avg_note = ""
+        if is_en:
+            return f"Degraded performance — {pct_slow}% of pages take more than 3s to load"
+        return f"Performance dégradée — {pct_slow}% des pages mettent plus de 3s à charger"
+
+    # 2. Erreurs HTTP / pages cassées
+    http_errors = get_int(summary, "pages_with_errors", 0)
+    if http_errors > 0:
+        return (f"{http_errors} page{'s' if http_errors > 1 else ''} in error (HTTP 4xx/5xx)" if is_en
+                else f"{http_errors} page{'s' if http_errors > 1 else ''} en erreur (HTTP 4xx/5xx)")
+
+    # 3. Maillage interne — pages orphelines ou peu reliées
+    orphans = get_int(summary, "probable_orphan_pages", 0) + get_int(summary, "weak_internal_linking_pages", 0)
+    n_priority = max(1, get_int(summary, "content_like_pages", n_pages))
+    if orphans > 0 and orphans / n_priority >= 0.30:
+        return ("Pages with no or few internal links" if is_en
+                else "Pages peu ou pas reliées en interne")
+
+    # 4. Titres et descriptions problématiques
+    bad_titles = get_int(summary, "titles_problematic", get_int(summary, "missing_titles", 0))
+    bad_metas = get_int(summary, "meta_descriptions_problematic", get_int(summary, "missing_meta_descriptions", 0))
+    n_content = max(1, get_int(summary, "content_like_pages", n_pages))
+    pct_title_issues = round((bad_titles + bad_metas) / (2 * n_content) * 100)
+    if pct_title_issues >= 40:
+        return ("Titles and descriptions to fix (absent or out of range)" if is_en
+                else "Titres et descriptions à corriger (absents ou hors plage)")
+
+    # 5. Duplication de contenu
+    dup_titles = get_int(summary, "duplicate_title_groups", 0)
+    dup_metas = get_int(summary, "duplicate_meta_description_groups", 0)
+    if dup_titles + dup_metas >= 5:
+        return (f"Duplicate snippets: {dup_titles} title groups, {dup_metas} description groups" if is_en
+                else f"Doublons de snippets : {dup_titles} groupes de titres, {dup_metas} groupes de descriptions")
+
+    # 6. Fraîcheur — uniquement si rien d'autre ne se déclenche
     if signals:
         first = signals[0]
         count = get_int(first, "count", 0)
@@ -3691,7 +4022,7 @@ def page_angle(url: str, details: dict[str, Any], lang: str = "fr") -> str:
     page_type = str(details.get("page_type") or "").lower()
     if recommendation and not contains_forbidden_recommendation(recommendation):
         return recommendation
-    public_recommendation = recommendation_for_public_page_type(url, page_type, title)
+    public_recommendation = recommendation_for_public_page_type(url, page_type, title, details=details)
     if public_recommendation != neutral_page_recommendation():
         return public_recommendation
     if sanitize_report_language(lang) == "en":

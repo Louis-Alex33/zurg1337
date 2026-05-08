@@ -116,7 +116,7 @@ class AuditHeuristicsTests(unittest.TestCase):
             "Douche senior Bordeaux : prix 2026, aides MaPrimeAdapt",
         )
 
-        self.assertIn("Analyse claire", description)
+        self.assertIn("Découvrez", description)
 
     def test_overlap_and_orphan_labels_are_prudent(self) -> None:
         home = AuditPage(
@@ -612,8 +612,8 @@ class AuditHeuristicsTests(unittest.TestCase):
             "Pages analysées",
             "Pages saines",
             "Pages en erreur",
-            "Descriptions manquantes",
-            "Titres manquants",
+            "Descriptions absentes ou trop courtes",
+            "Titres absents ou hors plage",
             "Score moyen",
             "Pages noindex",
             "Canonicals à vérifier",
@@ -638,7 +638,8 @@ class AuditHeuristicsTests(unittest.TestCase):
         self.assertIn("Imprimer avec annexe", page)
         self.assertIn("printWithAnnexe", page)
         self.assertIn("<th>URL</th><th>Type</th><th>Score</th><th>Mots</th><th>Points relevés</th>", page)
-        self.assertIn("Les autres quadrants ne présentent pas d'action prioritaire", page)
+        self.assertIn("Actions recommandées par ordre d'impact décroissant", page)
+        self.assertIn("Relire les dates", page)
         self.assertLess(page.find("Prochaines étapes"), page.find("Annexe technique"))
 
     def test_premium_report_v4_commercial_sections_are_rendered_in_order(self) -> None:
@@ -784,6 +785,13 @@ class AuditHeuristicsTests(unittest.TestCase):
                         "meta_description": "",
                         "images_total": 18,
                         "internal_links_out": [],
+                        "seo_suggestions": {
+                            "url": f"https://example.com/{long_slug}",
+                            "titre_suggere": "Cutest Planners For 2026",
+                            "titre_longueur": 24,
+                            "description_suggeree": "Discover the cutest planners to keep your life organized in 2026 — practical picks for every style.",
+                            "longueur_description": 98,
+                        },
                     },
                     {
                         "url": "https://example.com/blog/medium-page",

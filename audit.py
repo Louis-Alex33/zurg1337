@@ -2442,30 +2442,62 @@ def compute_observed_health_score(
 
 
 def compute_technical_health_score(pages: list[AuditPage], content_pages: list[AuditPage]) -> int:
+    """Score de santé technique sur 100 — peut descendre sous 60 sur un site mal portant.
+
+    Pondérations choisies :
+    - Performance crawl : jusqu'à -25. Un site où 80 %+ des pages dépassent 3 s est
+      fondamentalement indisponible pour les utilisateurs mobiles ; c'est le signal le
+      plus impactant côté UX/Core Web Vitals.
+    - Redirections : jusqu'à -10. Une redirection ajoute 100-300 ms mais ne justifie pas
+      un site lent à elle seule ; la pénalité reste modérée.
+    - Titres problématiques : jusqu'à -15. Absents ou hors plage = snippet Google dégradé.
+    - Metas problématiques : jusqu'à -15. Absentes ou trop courtes = descriptions générées
+      aléatoirement par Google.
+    - Erreurs HTTP et crawl : jusqu'à -35 chacun (inchangé, ce sont des bloquants durs).
+    """
     total = len(content_pages) or len(pages)
     if total == 0:
         return 0
     score = 100
+    n_pages = max(1, len(pages))
+    n_content = max(1, total)
+
     http_errors = sum(1 for page in pages if page.status_code and page.status_code >= 400)
     crawl_errors = sum(1 for page in pages if page.crawl_error)
     noindex_pages = sum(1 for page in content_pages if page.is_noindex)
     canonical_to_other = sum(1 for page in content_pages if page.canonical_status in {"different_url", "cross_domain"})
-    missing_titles = sum(1 for page in content_pages if not page.title)
-    missing_metas = sum(1 for page in content_pages if not page.meta_description)
+    # Titres problématiques : absents, trop courts (< 25 car.) ou trop longs (> 65 car.)
+    bad_titles = sum(
+        1 for page in content_pages
+        if not page.title or len(page.title) < 25 or len(page.title) > 65
+    )
+    # Metas problématiques : absentes ou fonctionnellement vides (< 70 car.)
+    bad_metas = sum(
+        1 for page in content_pages
+        if not page.meta_description or len(page.meta_description) < 70
+    )
     redirected = sum(1 for page in pages if page.redirect_count)
     redirect_chains = sum(1 for page in pages if page.redirect_count > 1)
     slow_pages = sum(1 for page in pages if page.load_time > 3)
     robots_blocked = sum(1 for page in pages if not page.robots_allowed)
 
-    score -= min(35, round(crawl_errors / max(1, len(pages)) * 60))
-    score -= min(35, round(http_errors / max(1, len(pages)) * 60))
-    score -= min(28, round(noindex_pages / total * 45))
-    score -= min(24, round(canonical_to_other / total * 40))
-    score -= min(12, round(missing_titles / total * 20))
-    score -= min(10, round(missing_metas / total * 16))
-    score -= min(8, round(redirected / max(1, len(pages)) * 12))
-    score -= min(10, redirect_chains * 3)
-    score -= min(8, round(slow_pages / max(1, len(pages)) * 12))
+    # Erreurs bloquantes (inchangé)
+    score -= min(35, round(crawl_errors / n_pages * 60))
+    score -= min(35, round(http_errors / n_pages * 60))
+    score -= min(28, round(noindex_pages / n_content * 45))
+    score -= min(24, round(canonical_to_other / n_content * 40))
+
+    # Performance : -25 max. Montée linéaire : 80 %+ de pages lentes = pénalité pleine.
+    score -= min(25, round(slow_pages / n_pages * 32))
+
+    # Redirections : -10 max (100-300 ms par redirection, impact réel mais limité).
+    score -= min(10, round(redirected / n_pages * 14))
+    score -= min(8, redirect_chains * 2)
+
+    # Titres et metas : -15 max chacun.
+    score -= min(15, round(bad_titles / n_content * 22))
+    score -= min(15, round(bad_metas / n_content * 22))
+
     score -= min(18, robots_blocked * 5)
     return max(0, min(100, score))
 
@@ -2663,14 +2695,24 @@ def build_report(
         "pages_with_errors": len([page for page in pages if page.crawl_error or (page.status_code and page.status_code >= 400)]),
         "missing_titles": sum(1 for page in content_pages if not page.title),
         "duplicate_title_groups": len(duplicate_titles),
-        "titles_too_short": sum(1 for page in content_pages if page.title and len(page.title) < 20),
-        "titles_too_long": sum(1 for page in content_pages if len(page.title) > 65),
+        "titles_too_short": sum(1 for page in content_pages if page.title and len(page.title) < 25),
+        "titles_too_long": sum(1 for page in content_pages if page.title and len(page.title) > 65),
+        # Compteur consolidé : titres absents ou hors plage utile (< 25 ou > 65)
+        "titles_problematic": sum(
+            1 for page in content_pages
+            if not page.title or len(page.title) < 25 or len(page.title) > 65
+        ),
         "missing_meta_descriptions": sum(1 for page in content_pages if not page.meta_description),
         "duplicate_meta_description_groups": len(duplicate_metas),
         "meta_descriptions_too_short": sum(
             1 for page in content_pages if page.meta_description and len(page.meta_description) < 70
         ),
-        "meta_descriptions_too_long": sum(1 for page in content_pages if len(page.meta_description) > 160),
+        "meta_descriptions_too_long": sum(1 for page in content_pages if page.meta_description and len(page.meta_description) > 155),
+        # Compteur consolidé : descriptions absentes ou fonctionnellement vides (< 70 car.)
+        "meta_descriptions_problematic": sum(
+            1 for page in content_pages
+            if not page.meta_description or len(page.meta_description) < 70
+        ),
         "missing_h1": sum(1 for page in content_pages if meaningful_h1_count(page) == 0),
         "multiple_h1": sum(1 for page in content_pages if meaningful_h1_count(page) > 2),
         "thin_content_pages": sum(1 for page in content_pages if page.word_count < 350),
