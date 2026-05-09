@@ -24,30 +24,37 @@ from models import GSCPageAnalysis, GSCPageData, GSCQueryData
 from scoring import gsc_score_ctr, gsc_score_decline, gsc_score_impressions, gsc_score_position, is_dead_gsc_page
 from url_variants import detect_url_variants, merge_variant_pair_metrics, canonical_url_from_pair
 from utils import CLIError, coerce_float, coerce_int
+from gsc_rules import (
+    EXPECTED_CTR_BY_POSITION,
+    TOURNAMENT_LEVEL_RE,
+    strip_accents,
+    format_number,
+    format_percent,
+    display_slug,
+    keyword_phrase_from_url,
+    compact_url_for_display,
+    expected_ctr_for_position,
+    is_snippet_opportunity,
+    compute_target_metric,
+    detect_tournament_level,
+    tournament_recommendation,
+    clean_query_for_snippet,
+    title_case_snippet,
+    trim_to_length,
+    sanitize_snippet_text,
+    has_specific_snippet_angle,
+    priority_for_page,
+    diagnostic_for_page,
+    generate_page_recommendation,
+    build_target_metric,
+    generate_snippet_recommendation,
+    resolve_target_label,
+    is_resolvable_target,
+    cap_top_priority_per_cluster,
+    slug_prefix,
+)
 
 PAGINATION_RE = re.compile(r"/page/\d+/?$")
-EXPECTED_CTR_BY_POSITION = {
-    1: 0.30,
-    2: 0.18,
-    3: 0.12,
-    4: 0.08,
-    5: 0.06,
-    6: 0.05,
-    7: 0.04,
-    8: 0.03,
-    9: 0.025,
-    10: 0.02,
-    11: 0.015,
-    12: 0.013,
-    13: 0.011,
-    14: 0.010,
-    15: 0.009,
-    16: 0.008,
-    17: 0.007,
-    18: 0.006,
-    19: 0.005,
-    20: 0.004,
-}
 GSC_CSV_KIND_ALIASES = {
     "pages": ("pages", "page", "top pages", "url"),
     "queries": ("requetes", "requete", "queries", "query", "top queries", "mots cles", "keywords"),
@@ -107,7 +114,6 @@ CLIENT_VALUE_LABELS_FR = {
     "snippet": "Résultat Google",
     "none": "aucun",
 }
-TOURNAMENT_LEVEL_RE = re.compile(r"(?<![a-z0-9])p(25|100|250|500|1000|1500|2000)(?![a-z0-9])", re.I)
 LOCAL_PROTOTYPE_RE = re.compile(r"(127\.0\.0\.1|localhost|/files\?path=|file://|/Users/|/private/|C:\\)", re.I)
 TRAFFIC_PROMISE_RE = re.compile(r"\b(gain|trafic)\s+garanti\b|trafic\s+assuré|trafic\s+assure", re.I)
 VISIBLE_ENGLISH_BADGE_RE = re.compile(r"\b(high|medium|low|lead)\b", re.I)
@@ -921,11 +927,6 @@ def normalize_header(header: str) -> str:
     return mapping.get(value, value)
 
 
-def strip_accents(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value)
-    return normalized.encode("ascii", "ignore").decode("ascii")
-
-
 def parse_pages_csv(filepath: str | None) -> list[GSCPageData]:
     if not filepath:
         return []
@@ -1561,126 +1562,6 @@ def specific_recommendation_for_page(analysis: GSCPageAnalysis) -> str:
     )
 
 
-def _dominant_signal(analysis: GSCPageAnalysis | None) -> str:
-    """Identifie le signal dominant pour orienter la recommandation."""
-    if analysis is None:
-        return "generic"
-    position_bucket = max(1, min(20, round(analysis.position)))
-    expected = EXPECTED_CTR_BY_POSITION.get(position_bucket, 0.015)
-    if analysis.cannibalization_group_id:
-        return "cannibalization"
-    if analysis.position <= 10 and analysis.ctr < expected * 0.5:
-        return "low_ctr"
-    if 10 < analysis.position <= 20 and analysis.impressions >= 100:
-        return "low_position"
-    if analysis.business_value == "high" and analysis.ctr < 0.01:
-        return "business_underused"
-    return "generic"
-
-
-def generate_page_recommendation(
-    page: str,
-    main_queries: list[str] | None,
-    page_type: str,
-    business_value: str,
-    analysis: GSCPageAnalysis | None = None,
-) -> str:
-    query = (main_queries or [keyword_phrase_from_url(page)])[0] or keyword_phrase_from_url(page)
-    lower = strip_accents(f"{page} {query} {page_type}").lower()
-    level = detect_tournament_level(page, query)
-
-    # — Contenu spécifique au domaine padel (prioritaire) —
-    if "tournoi" in lower and level:
-        return tournament_recommendation(level, page, query)
-    if "tournoi" in lower:
-        return "Structurer la page tournoi autour du niveau attendu, du format, de l'inscription et des repères utiles, sans afficher de niveau précis tant qu'il n'est pas fiable."
-    if "tenir-raquette-padel" in lower:
-        return "Ajouter des visuels de prise, une section sur la prise continentale, les erreurs fréquentes et des liens vers coups de base, service et raquette débutant."
-    if "pressurisateur" in lower:
-        return "Renforcer l'intention achat : critères de choix, modèles recommandés, limites réelles, puis liens vers balles padel et comparaisons Decathlon/Amazon si pertinentes."
-    if "chaussures-padel" in lower and "test-chaussures" not in lower and "test-chassures" not in lower:
-        return "Structurer la page autour des critères d'achat : semelle, maintien, amorti, surface et morphologie, puis lier vers les tests chaussures Kuikma, Asics, Nox et Joma."
-    if "raquette-padel" in lower and "/test-" not in lower and "test-raquette" not in lower:
-        return "Recentrer la page sur l'aide au choix : tableau par niveau, forme, mousse, poids et budget, puis liens vers les tests et comparatifs raquettes."
-    if "/test-" in lower or "test-" in lower:
-        return "Ajouter un verdict en haut de page, les profils de joueurs concernés, les limites du produit et des liens vers la page catégorie ou le comparatif correspondant."
-    if "sac-padel" in lower or "balles-padel" in lower:
-        return "Transformer la page en aide au choix avec critères d'achat, cas d'usage, erreurs fréquentes et liens vers les tests ou produits associés."
-
-    # — Recommandation conditionnelle sur signal dominant —
-    action_type = analysis.action_type if analysis is not None else ""
-    signal = _dominant_signal(analysis)
-
-    if action_type == "cannibalization" or signal == "cannibalization":
-        canon = analysis.cannibalization_recommendation if analysis is not None else ""
-        return canon or f"Clarifier le rôle de cette URL dans le cluster « {query} » et différencier l'intention principale vs les pages sœurs avant toute optimisation."
-
-    if signal == "low_ctr":
-        return (
-            f"Le CTR est anormalement bas pour la position actuelle sur « {query} » : "
-            f"réécrire le title autour du bénéfice concret, renforcer la meta avec un angle distinctif et vérifier si un featured snippet ou un PAA domine la SERP."
-        )
-
-    if signal == "low_position":
-        return (
-            f"La page est visible mais positionnée trop bas pour capter du trafic sur « {query} » : "
-            f"enrichir le contenu avec une FAQ, approfondir les sous-intentions, ajouter du maillage interne entrant depuis les pages du même cluster."
-        )
-
-    if signal == "business_underused":
-        return (
-            f"La page cible « {query} » mais convertit peu : ajouter un bloc décisionnel (verdict, critères, limites), "
-            f"des liens vers les pages commerciales proches et un appel à l'action clair pour transformer la visibilité en clics qualifiés."
-        )
-
-    if action_type == "snippet":
-        return f"Réécrire le title autour de « {query} », puis faire porter la meta sur le bénéfice exact de la page et les éléments consultables dès l'arrivée."
-    if action_type == "internal linking":
-        return f"Créer des liens internes vers cette page depuis les contenus du même cluster avec des ancres proches de « {query} », puis renforcer les sections qui répondent aux sous-intentions visibles."
-    if business_value == "high":
-        return "Ajouter critères de décision, limites, comparaisons et liens de monétisation utiles afin de transformer la visibilité Google en clics business qualifiés."
-    return "Garder en suivi GSC et prioriser seulement si les impressions ou la position progressent."
-
-
-def detect_tournament_level(*values: object) -> str:
-    for value in values:
-        text = strip_accents(str(value or "")).lower()
-        match = TOURNAMENT_LEVEL_RE.search(text)
-        if match:
-            return f"P{match.group(1)}"
-    return ""
-
-
-_TOURNAMENT_LEVEL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
-    "P25":   ("débutants absolus, premier tournoi officiel", "le format open, les règles de base et l'attitude attendue en match"),
-    "P100":  ("joueurs débutants ou en progression", "le niveau attendu, les points FFT et le déroulé d'une journée de compétition"),
-    "P250":  ("joueurs réguliers de niveau intermédiaire", "les points à gagner, le classement, les conditions d'inscription et les coupes possibles"),
-    "P500":  ("joueurs intermédiaires confirmés", "les points distribués, le format, les conditions de qualification et les pièges fréquents"),
-    "P1000": ("joueurs de niveau avancé", "le nombre de points, les critères de sélection et ce qui distingue un P1000 d'un P500"),
-    "P1500": ("joueurs expérimentés visant la compétition régionale", "le niveau requis, les points, le classement national et les conditions de participation"),
-    "P2000": ("joueurs experts et compétiteurs confirmés", "les points distribués, le format tableau, les critères de niveau et les spécificités de la SERP"),
-}
-
-
-def tournament_recommendation(level: str, page: str, query: str) -> str:
-    topic = strip_accents(f"{page} {query}").lower()
-    desc, focus = _TOURNAMENT_LEVEL_DESCRIPTIONS.get(level, ("joueurs de ce niveau", "le format et les conditions d'inscription"))
-    if "points" in topic or "classement" in topic:
-        return (
-            f"Clarifier pour le niveau {level} (destiné aux {desc}) : {focus}. "
-            f"Ajouter un tableau de points, les cas fréquents qui déclenchent la recherche et une FAQ courte."
-        )
-    if "inscription" in topic or "format" in topic:
-        return (
-            f"Structurer la page {level} pour les {desc} : détailler {focus}, "
-            f"puis ajouter les informations à vérifier avant de s'inscrire et un lien vers le guide global des tournois."
-        )
-    return (
-        f"Recentrer la page {level} sur l'intention principale des {desc} : réponse directe sur {focus}, "
-        f"FAQ courte et liens internes vers les pages des niveaux adjacents."
-    )
-
-
 def vary_repeated_recommendations(results: list[GSCPageAnalysis], max_same: int = 3) -> None:
     seen: dict[str, int] = defaultdict(int)
     for item in sorted(results, key=lambda row: (-row.opportunity_score, -row.impressions, row.url)):
@@ -1736,17 +1617,6 @@ def categorize_page(analysis: GSCPageAnalysis) -> str:
     if analysis.score >= 20:
         return "A SURVEILLER"
     return "OK"
-
-
-def priority_for_page(analysis: GSCPageAnalysis) -> str:
-    if is_dead_gsc_page(analysis):
-        return "DEAD"
-    score = analysis.opportunity_score or int(round(analysis.score))
-    if score >= 60:
-        return "HIGH"
-    if score >= 40:
-        return "MEDIUM"
-    return "LOW"
 
 
 def suggest_actions(analysis: GSCPageAnalysis) -> list[str]:
@@ -2215,6 +2085,7 @@ def build_report(
         "business_opportunities": filter_business_opportunities(
             build_business_opportunities(merged_results), priority_page_urls
         )[:10],
+        # bug 2B-6 : plan d'action dérivé du même priority_pages (top 10 post-garde-fou + post-cap cluster)
         "action_plan_30_days": build_action_plan_30_days(priority_pages, snippet_pages, cannibalization_groups or []),
         "appendix_pages": [page_to_appendix_row(item) for item in results],
         "appendix_queries": [query_to_appendix_row(query, results) for query in queries],
@@ -2592,6 +2463,8 @@ def build_priority_page_cards(results: list[GSCPageAnalysis]) -> list[dict[str, 
         reverse=True,
     )
     candidates = filter_top10_candidates(ordered)
+    # bug 2B-3 : cap par cluster avant sélection du top 10
+    candidates = cap_top_priority_per_cluster(candidates)
     seen_slugs: set[str] = set()
     cards: list[dict[str, object]] = []
     for item in candidates:
@@ -2937,36 +2810,6 @@ def build_url_variant_report_data(
     return rows
 
 
-def has_specific_snippet_angle(title: str, query: str) -> bool:
-    normalized_title = strip_accents(title).lower()
-    normalized_query = strip_accents(clean_query_for_snippet(query)).lower()
-    if not normalized_title or normalized_title == normalized_query:
-        return False
-    return any(
-        marker in normalized_title
-        for marker in (
-            "critere",
-            "avis",
-            "choix",
-            "methode",
-            "erreur",
-            "regle",
-            "niveau",
-            "inscription",
-            "comparatif",
-            "profil",
-            "style",
-            "reussir",
-            "controle",
-            "points",
-        )
-    )
-
-
-def expected_ctr_for_position(position: float) -> float:
-    return EXPECTED_CTR_BY_POSITION.get(max(1, min(20, round(position))), 0.004)
-
-
 def should_consider_new_content(query: GSCQueryData, results: list[GSCPageAnalysis]) -> bool:
     if query.impressions < 20 or query.position <= 8:
         return False
@@ -3090,14 +2933,6 @@ def is_declining_page(item: GSCPageAnalysis) -> bool:
     )
 
 
-def is_snippet_opportunity(item: GSCPageAnalysis) -> bool:
-    return (
-        item.impressions >= 100
-        and bool(item.estimated_recoverable_clicks)
-        and any("ctr" in action.lower() or "title" in action.lower() or "méta" in action.lower() for action in item.actions)
-    )
-
-
 def is_pdf_snippet_opportunity(item: GSCPageAnalysis) -> bool:
     return is_snippet_opportunity(item) and item.position <= 30
 
@@ -3122,74 +2957,6 @@ def detect_serp_anomaly(position: float, ctr: float) -> str | None:
     if ctr < expected * 0.3:
         return "serp_features_suspected"
     return None
-
-
-def compute_target_metric(position: float, ctr_actual: float, impressions: int) -> dict[str, object]:
-    """Calcule la fourchette CTR cible et les gains estimés bas/haut.
-
-    Garantit toujours une fourchette non dégénérée : ctr_high >= 1.3 × ctr_low.
-    """
-    from ctr_benchmarks import CTR_BY_POSITION_MEDIAN, CTR_BY_POSITION_P75
-    pos_rounded = max(1, min(20, round(position)))
-
-    # Borne basse : médiane de la position actuelle
-    ctr_low_target = CTR_BY_POSITION_MEDIAN.get(pos_rounded, 0.005)
-
-    # Borne haute : P75 de la position cible
-    if pos_rounded <= 5:
-        target_pos = max(1, pos_rounded - 1)
-    else:
-        target_pos = max(3, pos_rounded - 2)
-    ctr_high_target = CTR_BY_POSITION_P75.get(target_pos, ctr_low_target * 1.4)
-
-    # Garantie de fourchette non dégénérée
-    if ctr_high_target < ctr_low_target * 1.3:
-        ctr_high_target = ctr_low_target * 1.5
-
-    # La borne basse ne peut pas être inférieure au CTR actuel (gain bas jamais négatif)
-    ctr_low_target = max(ctr_low_target, ctr_actual * 1.1)
-
-    gain_low = max(0, round(impressions * (ctr_low_target - ctr_actual)))
-    gain_high = max(gain_low + 1, round(impressions * (ctr_high_target - ctr_actual)))
-
-    return {
-        "ctr_low_target": ctr_low_target,
-        "ctr_high_target": ctr_high_target,
-        "gain_low": gain_low,
-        "gain_high": gain_high,
-        "target_pos": target_pos,
-        "pos_rounded": pos_rounded,
-    }
-
-
-def build_target_metric(item: GSCPageAnalysis) -> str:
-    """Formate la cible chiffrée CTR + gain estimé pour une page prioritaire."""
-    if item.impressions < 10:
-        return ""
-    result = compute_target_metric(item.position, item.ctr, item.impressions)
-    gain_low = int(result["gain_low"])
-    gain_high = int(result["gain_high"])
-    ctr_low_target = float(result["ctr_low_target"])
-    ctr_high_target = float(result["ctr_high_target"])
-    pos_rounded = int(result["pos_rounded"])
-    target_pos = int(result["target_pos"])
-
-    if gain_high <= 0:
-        return ""
-    ctr_current_pct = format_percent(item.ctr)
-    ctr_low_pct = format_percent(ctr_low_target)
-    ctr_high_pct = format_percent(ctr_high_target)
-    if gain_low == 0:
-        return (
-            f"CTR actuel {ctr_current_pct} → cible {ctr_low_pct}–{ctr_high_pct} "
-            f"(médiane pos. {pos_rounded} / P75 pos. {target_pos}). "
-            f"Gain estimé : jusqu'à +{format_number(gain_high)} clics/mois sous 6-8 semaines."
-        )
-    return (
-        f"CTR actuel {ctr_current_pct} → cible {ctr_low_pct}–{ctr_high_pct} "
-        f"(médiane pos. {pos_rounded} / P75 pos. {target_pos}). "
-        f"Gain estimé : +{format_number(gain_low)} à +{format_number(gain_high)} clics/mois sous 6-8 semaines."
-    )
 
 
 def page_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
@@ -3306,20 +3073,6 @@ def effort_for_page(item: GSCPageAnalysis) -> str:
     return "Moyen"
 
 
-def diagnostic_for_page(item: GSCPageAnalysis) -> str:
-    if is_dead_gsc_page(item):
-        return "La page ne capte presque pas de trafic et doit être arbitrée plutôt qu’optimisée à l’aveugle."
-    if is_snippet_opportunity(item):
-        return "La page reçoit beaucoup d’impressions mais son taux de clic reste faible par rapport à sa visibilité."
-    if 4 <= item.position <= 10:
-        return "La page est déjà proche des premières positions et peut progresser avec un renforcement ciblé."
-    if 10 < item.position <= 20:
-        return "La page est visible mais manque probablement de profondeur ou de soutien interne pour passer un cap."
-    if item.possible_overlap_queries:
-        return "Plusieurs URLs semblent répondre à des requêtes proches, à vérifier avant optimisation."
-    return "La page présente un signal utile mais moins urgent que les priorités principales."
-
-
 def impact_for_page(item: GSCPageAnalysis) -> str:
     if item.estimated_recoverable_clicks:
         return f"jusqu’à {format_number(item.estimated_recoverable_clicks)} clics non captés"
@@ -3342,15 +3095,6 @@ def precise_actions_for_page(item: GSCPageAnalysis) -> list[str]:
     if item.click_delta is not None and item.click_delta < -10:
         actions.append("contrôler la fraîcheur du contenu et les changements visibles dans les résultats Google")
     return (list(dict.fromkeys(actions)) or ["garder la page en suivi et réévaluer lors du prochain export GSC"])[:5]
-
-
-def keyword_phrase_from_url(url: str) -> str:
-    slug = display_slug(url).strip("/")
-    if not slug:
-        return "la requête principale"
-    last_segment = slug.split("/")[-1]
-    words = [word for word in re.split(r"[-_]+", last_segment) if word and not word.isdigit()]
-    return " ".join(words[:6]) or "la requête principale"
 
 
 def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
@@ -3378,112 +3122,6 @@ def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
         "position": item.position,
         "metrics": f"{format_number(item.impressions)} impressions · taux de clic {format_percent(item.ctr)} · position {item.position:.1f}",
     }
-
-
-def generate_snippet_recommendation(
-    page: str,
-    main_query: str,
-    page_type: str = "",
-    business_value: str = "",
-    gsc_data: dict[str, Any] | None = None,
-    intent: str = "",
-) -> dict[str, str]:
-    query = clean_query_for_snippet(main_query or keyword_phrase_from_url(page))
-    lower = strip_accents(f"{page} {query} {page_type} {business_value} {intent}").lower()
-    level = detect_tournament_level(page, query)
-    if level:
-        desc, focus = _TOURNAMENT_LEVEL_DESCRIPTIONS.get(
-            level, ("joueurs de ce niveau", "le format, le niveau requis et les conditions d'inscription")
-        )
-        # Choisir un angle différent selon les requêtes secondaires disponibles
-        gsc = gsc_data or {}
-        secondary = [str(q) for q in gsc.get("secondary_queries", [])[:5]]
-        secondary_text = strip_accents(" ".join(secondary)).lower()
-        if "points" in secondary_text or "classement" in secondary_text:
-            title = f"Tournoi {level} : points, classement et niveau requis"
-            meta = (f"Retrouvez les points distribués en {level}, le classement FFT associé et les repères de niveau "
-                    f"pour les {desc}. Inclut les conditions d'inscription et les variantes fréquentes.")
-        elif "inscription" in secondary_text or "format" in secondary_text:
-            title = f"Tournoi {level} : format, inscription et repères pratiques"
-            meta = (f"Tout ce que les {desc} doivent savoir avant de s'inscrire en {level} : "
-                    f"{focus}. Format tableau, délais et FAQ courte.")
-        else:
-            title = f"Tournoi {level} padel : niveau, points et repères clés"
-            meta = (f"Recentré sur l'intention principale des {desc} : réponse directe sur {focus}, "
-                    f"FAQ courte et liens vers les niveaux adjacents.")
-    elif "par 4" in lower or "par-4" in lower:
-        title = "Par 4 au padel : réussir le smash qui sort du terrain"
-        meta = "Placement, hauteur de balle, timing et erreurs fréquentes : les repères pour tenter un par 4 plus proprement en match."
-    elif "tenir" in lower and "raquette" in lower:
-        title = "Comment tenir sa raquette de padel sans se crisper"
-        meta = "Placement de la main, prise continentale, erreurs fréquentes : les bases pour mieux tenir votre raquette et gagner en contrôle."
-    elif "agustin" in lower or "tapia" in lower:
-        title = "Agustín Tapia : profil, palmarès et style de jeu"
-        meta = "Découvrez le parcours d'Agustín Tapia, son style sur le circuit pro, ses forces en match et les repères clés pour suivre sa carrière."
-    elif "pressurisateur" in lower:
-        title = "Meilleur pressurisateur de balles de padel : comparatif"
-        meta = "Comparez les pressurisateurs utiles pour prolonger la durée de vie des balles, avec critères d'achat, limites et conseils pratiques."
-    elif "chaussure" in lower:
-        title = "Chaussures de padel : modèles, critères et erreurs à éviter"
-        meta = "Semelle, maintien, confort, surface de jeu : les critères à vérifier avant de choisir une paire de chaussures de padel."
-    elif any(term in lower for term in ("meilleur", "comparatif", "avis", "test", "raquette", "chaussure", "balle", "sac")):
-        title = title_case_snippet(f"{query} : critères, avis et choix utiles")
-        meta = f"Comparez les options autour de {query}, avec les critères de choix, les limites à connaître et les profils pour lesquels elles conviennent."
-    elif lower.startswith("comment") or "comment " in lower:
-        title = title_case_snippet(f"{query} : méthode simple et erreurs à éviter")
-        meta = f"Retrouvez les gestes, repères et erreurs fréquentes pour {query.replace('comment ', '')}, avec une approche concrète à appliquer sur le terrain."
-    elif "tournoi" in lower:
-        title = title_case_snippet(f"{query} : règles, niveau et inscription")
-        meta = f"Faites le point sur {query} : format, niveau attendu, inscription, points et repères utiles avant de vous engager."
-    else:
-        return {"title": "", "meta": "", "reason": ""}
-    title = sanitize_snippet_text(trim_to_length(title, 60))
-    meta = sanitize_snippet_text(trim_to_length(meta, 160))
-    if not has_specific_snippet_angle(title, query):
-        return {"title": "", "meta": "", "reason": ""}
-    if len(meta) < 120:
-        meta = sanitize_snippet_text(f"{meta} Une synthèse pratique pour décider quoi faire ensuite.")
-    return {
-        "title": title,
-        "meta": meta,
-        "reason": f"Faire correspondre le résultat Google à l'intention « {query} » avec un angle précis et vérifiable.",
-    }
-
-
-def clean_query_for_snippet(query: str) -> str:
-    cleaned = re.sub(r"\s+", " ", query.replace("-", " ")).strip(" /")
-    return cleaned or "la requête principale"
-
-
-def title_case_snippet(value: str) -> str:
-    return value[:1].upper() + value[1:]
-
-
-def trim_to_length(value: str, max_length: int) -> str:
-    if len(value) <= max_length:
-        return value
-    shortened = value[: max_length + 1].rsplit(" ", 1)[0].rstrip(" :,-")
-    return shortened or value[:max_length].rstrip()
-
-
-def sanitize_snippet_text(value: str) -> str:
-    cleaned = value
-    replacements = {
-        "conseils et points clés": "repères pratiques",
-        "conseils et points cles": "repères pratiques",
-        "guide clair": "réponse précise",
-        "points clés": "repères utiles",
-        "points cles": "repères utiles",
-        "points à vérifier": "critères utiles",
-        "points a verifier": "critères utiles",
-        "Découvrez les informations essentielles": "Retrouvez les informations utiles",
-        "conseils pour avancer plus simplement": "repères pour décider quoi faire ensuite",
-        "promesse plus concrète": "angle plus précis",
-        "promesse plus concrete": "angle plus précis",
-    }
-    for bad, good in replacements.items():
-        cleaned = re.sub(re.escape(bad), good, cleaned, flags=re.I)
-    return cleaned
 
 
 def snippet_problem_for_page(item: GSCPageAnalysis) -> str:
@@ -3555,12 +3193,6 @@ def explain_reason(item: GSCPageAnalysis) -> str:
     return " ".join(reasons) or "Signal faible: garder en observation plutôt que traiter en urgence."
 
 
-def display_slug(url: str) -> str:
-    parsed = urlparse(url)
-    path = parsed.path.rstrip("/") or "/"
-    return path if path != "/" else parsed.netloc or url
-
-
 def display_page_label(url: str) -> str:
     parsed = urlparse(url)
     segment = (parsed.path.rstrip("/").split("/")[-1] or parsed.netloc or url).strip()
@@ -3585,29 +3217,6 @@ def display_query_label(value: object) -> str:
     label = str(value or "")
     label = re.sub(r"\bchassures\b", "chaussures", label, flags=re.I)
     return re.sub(r"\s+", " ", label).strip()
-
-
-def compact_url_for_display(url: str, max_length: int = 76) -> str:
-    parsed = urlparse(str(url or ""))
-    if not parsed.netloc:
-        text = str(url or "")
-    else:
-        text = f"{parsed.netloc.replace('www.', '')}{parsed.path or '/'}"
-    text = unquote(text)
-    if len(text) <= max_length:
-        return text
-    keep = max(12, max_length - 1)
-    return text[:keep].rstrip("/") + "…"
-
-
-def format_number(value: int | float) -> str:
-    return f"{int(round(value)):,}".replace(",", " ")
-
-
-def format_percent(value: float) -> str:
-    percent = float(value) * 100
-    decimals = 2 if 0 < percent < 1 else 1
-    return f"{percent:.{decimals}f} %".replace(".", ",")
 
 
 def write_html(
@@ -5116,11 +4725,21 @@ def render_query_sections(sections: list[dict[str, object]], has_queries: bool, 
 def render_executive_query_opportunities(rows: list[dict[str, object]], lang: str = "fr") -> str:
     if not rows:
         return render_empty_state("Export Requêtes non fourni ou aucune requête exploitable détectée.", lang)
+    import logging
     _ = gsc_gettext(lang)
     table_rows = []
+    filtered_count = 0
+    filtered_samples: list[str] = []
     for row in rows[:20]:
         target_url = str(row.get("target_url", "") or "")
-        target_label = compact_url_for_display(target_url) if target_url else _("à valider")
+        # bug 2B-4 : filtrer les lignes dont l'URL cible n'est pas résolvable
+        if not is_resolvable_target(target_url):
+            filtered_count += 1
+            top_q = str(row.get("top_queries") or row.get("query") or "")
+            if len(filtered_samples) < 3:
+                filtered_samples.append(top_q)
+            continue
+        target_label = resolve_target_label(target_url)
         top_queries = str(row.get("top_queries") or row.get("query") or "")
         queries_count = row.get("queries_count", 1)
         table_rows.append(
@@ -5134,6 +4753,13 @@ def render_executive_query_opportunities(rows: list[dict[str, object]], lang: st
             f"<td>{html.escape(str(row.get('ctr', '')))}</td>"
             f"<td>{html.escape(str(row.get('position', '')))}</td>"
             "</tr>"
+        )
+    if filtered_count:
+        logging.info(
+            "render_executive_query_opportunities: %d ligne(s) filtrée(s) (URL cible non résolvable). "
+            "Exemples de requêtes : %s",
+            filtered_count,
+            ", ".join(filtered_samples) or "—",
         )
     return (
         "<table class='compact-table'><thead><tr>"

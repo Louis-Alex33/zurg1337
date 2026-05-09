@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plan d’action SEO basé sur Google Search Console</title>
+  <style>
+    :root {
+      --color-bg: #FAFAF8;
+      --color-surface: #FFFFFF;
+      --color-border: #E8E5DE;
+      --color-border-light: #F0EDE6;
+      --color-text-primary: #1A1A18;
+      --color-text-secondary: #6B6B68;
+      --color-text-muted: #9B9B98;
+      --color-accent: #1E40AF;
+      --color-accent-light: #EFF3FF;
+      --color-accent-mid: #BFCBF5;
+      --color-high: #991B1B;
+      --color-high-bg: #FEF2F2;
+      --color-high-border: #FECACA;
+      --color-medium: #92400E;
+      --color-medium-bg: #FFFBEB;
+      --color-medium-border: #FDE68A;
+      --color-low: #065F46;
+      --color-low-bg: #F0FDF4;
+      --color-low-border: #A7F3D0;
+      --color-positive: #059669;
+      --color-positive-bg: #ECFDF5;
+      --color-warning: #D97706;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--color-bg);
+      color: var(--color-text-primary);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .report-container {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 32px 64px;
+    }
+    a { color: var(--color-accent); overflow-wrap: anywhere; word-break: break-word; }
+    h1, h2, h3, h4, p { margin-top: 0; }
+    h1, h2, h3, h4, .label, .badge, .stat-label, .section-title,
+    .cover-label, .cover-meta-label, .cover-meta-value, .btn-export,
+    .kpi-label, .kpi-value, .section-tag, .page-slug, .priority-badge,
+    .metric-label, .metric-value, .constat-label, .actions-label,
+    .effort-tag, .type-tag, .priority-number, .position-bar-label,
+    .position-bar-value, .mini-label, .data-label, .query-card h3,
+    .appendix-card h3 {
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+    p, li, .page-description, .constat, .page-constat { font-family: Georgia, serif; }
+    h1 { font-size: 32px; font-weight: 700; line-height: 1.2; }
+    h2 { font-size: 22px; font-weight: 600; line-height: 1.3; margin-bottom: 4px; }
+    h3 { font-size: 16px; font-weight: 600; }
+    h4 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-secondary);
+    }
+    .btn-export {
+      border: 0;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.16);
+      color: #FFFFFF;
+      cursor: pointer;
+      font-weight: 700;
+      padding: 11px 16px;
+      white-space: nowrap;
+      align-self: flex-start;
+      border: 1px solid rgba(255,255,255,0.25);
+    }
+    .report-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 10px 32px;
+      background: rgba(250, 250, 248, 0.96);
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .report-toolbar-button {
+      appearance: none;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text-primary);
+      border-radius: 8px;
+      padding: 8px 11px;
+      font: 700 12px/1 "Helvetica Neue", Arial, sans-serif;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .language-toggle.is-active { background: var(--color-accent); border-color: var(--color-accent); color: #FFFFFF; }
+    .language-toggle-group { display: inline-flex; gap: 6px; }
+    .cover-page {
+      background: var(--color-accent);
+      color: #FFFFFF;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 64px 48px;
+      margin: 0 -32px;
+      page-break-after: always;
+      break-after: page;
+    }
+    .cover-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      opacity: 0.7;
+      margin-bottom: 24px;
+    }
+    .cover-title {
+      font-size: 52px;
+      font-weight: 700;
+      line-height: 1.1;
+      color: #FFFFFF;
+      margin: 0 0 16px;
+    }
+    .cover-subtitle {
+      font-size: 18px;
+      opacity: 0.8;
+      font-family: Georgia, serif;
+      max-width: 480px;
+      margin: 0 0 48px;
+    }
+    .cover-meta {
+      display: flex;
+      gap: 40px;
+      border-top: 1px solid rgba(255,255,255,0.2);
+      padding-top: 32px;
+      flex-wrap: wrap;
+    }
+    .cover-meta-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 140px;
+    }
+    .cover-meta-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      opacity: 0.6;
+    }
+    .cover-meta-value {
+      font-size: 15px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .cover-footer {
+      font-size: 12px;
+      opacity: 0.5;
+      border-top: 1px solid rgba(255,255,255,0.15);
+      padding-top: 16px;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin: 24px 0;
+    }
+    .kpi-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      min-height: 98px;
+    }
+    .kpi-card--warning { background: var(--color-medium-bg); border-color: var(--color-medium-border); }
+    .kpi-card--positive { background: var(--color-positive-bg); border-color: #6EE7B7; }
+    .kpi-card--accent { background: var(--color-accent-light); border-color: var(--color-accent-mid); }
+    .kpi-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-secondary);
+      margin-bottom: 6px;
+    }
+    .kpi-value {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--color-text-primary);
+      line-height: 1.1;
+    }
+    .kpi-note { font-size: 11px; color: var(--color-text-muted); margin-top: 3px; }
+    .executive-summary {
+      background: var(--color-accent-light);
+      border-left: 3px solid var(--color-accent);
+      padding: 16px 20px;
+      border-radius: 0 8px 8px 0;
+      margin-top: 8px;
+    }
+    .executive-summary p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--color-text-primary);
+    }
+    .report-panel, .report-section, .source-box {
+      margin-top: 56px;
+      padding-top: 32px;
+      border-top: 2px solid var(--color-accent);
+    }
+    .report-section + .report-section,
+    .report-panel + .report-section,
+    .report-section + .report-panel {
+      margin-top: 64px;
+    }
+    .source-box {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-left: 3px solid var(--color-accent);
+      padding: 16px 20px;
+      border-radius: 0 8px 8px 0;
+    }
+    .source-list { margin: 0; padding-left: 18px; color: var(--color-text-secondary); }
+    nav {
+      position: sticky;
+      top: 52px;
+      z-index: 10;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      background: rgba(250, 250, 248, 0.96);
+      border-top: 1px solid var(--color-border);
+      border-bottom: 1px solid var(--color-border);
+      padding: 12px 0;
+      margin: 24px 0 0;
+    }
+    nav a {
+      color: var(--color-text-primary);
+      text-decoration: none;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-weight: 600;
+    }
+    .section-header { margin-bottom: 24px; }
+    .section-tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-accent);
+      background: var(--color-accent-light);
+      padding: 3px 10px;
+      border-radius: 20px;
+      margin-bottom: 8px;
+    }
+    .section-title { margin: 0 0 8px; color: var(--color-text-primary); }
+    .section-intro {
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      margin: 0 0 24px;
+      max-width: 600px;
+    }
+    .cards-grid, .priority-list, .data-card-list {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .page-card, .snippet-card, .query-card, .appendix-card, .origin-card, .chart-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+      position: relative;
+      overflow: hidden;
+      min-width: 0;
+    }
+    .page-card::before, .snippet-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 4px;
+    }
+    .page-card--high::before { background: var(--color-high); }
+    .page-card--medium::before { background: var(--color-warning); }
+    .page-card--low::before, .page-card--dead::before { background: var(--color-low); }
+    .snippet-card::before { background: var(--color-accent); }
+    .page-card-header, .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .page-slug {
+      font-family: "Helvetica Neue", monospace;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--color-text-primary);
+      display: block;
+      overflow-wrap: anywhere;
+    }
+    .page-url, .url-full {
+      font-size: 11px;
+      color: var(--color-accent);
+      text-decoration: none;
+      display: block;
+      margin-top: 2px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .priority-badge, .badge {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      padding: 4px 12px;
+      border-radius: 20px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .priority-badge--high, .badge-p1 {
+      background: var(--color-high-bg);
+      color: var(--color-high);
+      border: 1px solid var(--color-high-border);
+    }
+    .priority-badge--medium, .badge-p2 {
+      background: var(--color-medium-bg);
+      color: var(--color-medium);
+      border: 1px solid var(--color-medium-border);
+    }
+    .priority-badge--low, .priority-badge--dead, .badge-p3, .badge-dead {
+      background: var(--color-low-bg);
+      color: var(--color-low);
+      border: 1px solid var(--color-low-border);
+    }
+    .page-metrics, .metric-row {
+      display: flex;
+      gap: 0;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border-light);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .metric {
+      flex: 1;
+      padding: 12px 16px;
+      border-right: 1px solid var(--color-border-light);
+      text-align: center;
+      min-width: 0;
+      background: transparent;
+    }
+    .metric:last-child { border-right: none; }
+    .metric--warning { background: var(--color-medium-bg); }
+    .metric--positive { background: var(--color-positive-bg); }
+    .metric-label, .metric span {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-muted);
+      display: block;
+      margin-bottom: 4px;
+    }
+    .metric-value, .metric strong {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--color-text-primary);
+      display: block;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+    .metric--warning .metric-value, .metric--warning strong { color: var(--color-warning); }
+    .metric--positive .metric-value, .metric--positive strong { color: var(--color-positive); }
+    .position-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: -8px 0 18px;
+    }
+    .position-bar-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-muted);
+      min-width: 120px;
+    }
+    .position-bar-track {
+      flex: 1;
+      height: 6px;
+      background: var(--color-border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .position-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--color-positive);
+      transition: width 600ms ease;
+    }
+    .position-bar-value {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      min-width: 28px;
+      text-align: right;
+    }
+    .page-constat {
+      font-size: 13px;
+      color: var(--color-text-secondary);
+      line-height: 1.6;
+      font-style: italic;
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--color-border-light);
+    }
+    .constat-label, .mini-label {
+      font-style: normal;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-muted);
+      display: block;
+      margin-bottom: 4px;
+    }
+    .actions-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-secondary);
+      margin-bottom: 10px;
+    }
+    .actions, .actions-list {
+      margin: 0;
+      padding-left: 20px;
+      list-style: none;
+    }
+    .actions li, .actions-list li {
+      position: relative;
+      padding-left: 16px;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: var(--color-text-primary);
+      line-height: 1.5;
+    }
+    .actions li::before, .actions-list li::before {
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: var(--color-accent);
+      font-style: normal;
+      font-family: sans-serif;
+    }
+    .insight-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--color-border-light);
+    }
+    .insight {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .insight strong {
+      font-size: 13px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip, .type-tag {
+      font-size: 11px;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      background: var(--color-accent-light);
+      color: var(--color-accent);
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 500;
+    }
+    .filter-bar, .summary-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0 16px;
+    }
+    .filter-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .filter-label {
+      color: var(--color-text-muted);
+      font: 700 10px/1 "Helvetica Neue", Arial, sans-serif;
+      text-transform: uppercase;
+      margin-right: 2px;
+    }
+    .filter-btn, .summary-link {
+      appearance: none;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text-primary);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font: 700 12px/1 "Helvetica Neue", Arial, sans-serif;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .filter-btn.is-active {
+      background: var(--color-accent);
+      border-color: var(--color-accent);
+      color: #fff;
+    }
+    .is-filtered-out { display: none !important; }
+    .why { font-style: italic; margin: 0; color: var(--color-text-secondary); }
+    .query-note {
+      color: var(--color-medium);
+      background: var(--color-medium-bg);
+      border: 1px solid var(--color-medium-border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      margin: 0;
+    }
+    .priorities-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .priority-item {
+      display: flex;
+      gap: 28px;
+      padding: 28px 0;
+      border-bottom: 1px solid var(--color-border-light);
+      align-items: flex-start;
+    }
+    .priority-item:last-child { border-bottom: none; }
+    .priority-number {
+      font-size: 48px;
+      font-weight: 800;
+      color: var(--color-accent-mid);
+      line-height: 1;
+      min-width: 64px;
+      letter-spacing: 0;
+    }
+    .priority-body h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0 0 12px;
+      color: var(--color-text-primary);
+    }
+    .priority-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .priority-meta span {
+      font-size: 13px;
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+    }
+    .priority-meta strong {
+      color: var(--color-text-primary);
+      font-family: "Helvetica Neue", Arial, sans-serif;
+    }
+    .empty-state {
+      background: var(--color-surface);
+      border: 1px dashed var(--color-border);
+      border-radius: 10px;
+      padding: 18px;
+      color: var(--color-text-secondary);
+    }
+    .query-card h3, .appendix-card h3 { margin: 0 0 10px; color: var(--color-text-primary); }
+    .data-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0;
+      border: 1px solid var(--color-border-light);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+    .data-item {
+      padding: 10px 12px;
+      border-right: 1px solid var(--color-border-light);
+      background: var(--color-bg);
+    }
+    .data-item:last-child { border-right: none; }
+    .data-label {
+      display: block;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      color: var(--color-text-muted);
+      margin-bottom: 4px;
+    }
+    .data-value {
+      display: block;
+      font-size: 13px;
+      color: var(--color-text-primary);
+      overflow-wrap: anywhere;
+    }
+    .reliability-note {
+      color: var(--color-text-muted);
+      font-size: 12px;
+      margin: 12px 0 0;
+    }
+    .chart-svg { width: 100%; height: auto; display: block; }
+    .origin-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .bar-row { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+    .bar-label { width: 96px; font-size: 12px; overflow-wrap: anywhere; }
+    .bar-track { flex: 1; background: var(--color-border-light); border-radius: 4px; height: 8px; }
+    .bar-fill { height: 100%; background: var(--color-accent); border-radius: 4px; }
+    .bar-value { width: 92px; text-align: right; color: var(--color-text-muted); font-size: 12px; }
+    .footer-note {
+      margin-top: 56px;
+      border-top: 1px solid var(--color-border);
+      padding-top: 18px;
+      color: var(--color-text-muted);
+    }
+    .print-footer { display: none; }
+    @media (max-width: 820px) {
+      .report-container { padding: 0 18px 42px; }
+      .cover-page { margin: 0 -18px; padding: 48px 28px; }
+      .cover-title { font-size: 40px; }
+      .cover-meta { gap: 18px; }
+      .insight { grid-template-columns: 1fr; }
+      .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .page-card-header, .card-head, .priority-item { flex-direction: column; }
+      .page-metrics, .metric-row, .data-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric, .data-item { border-right: 0; border-bottom: 1px solid var(--color-border-light); }
+      .bar-label, .bar-value { width: auto; min-width: 64px; }
+    }
+    @media print {
+      .btn-export,
+      nav,
+      .filter-bar,
+      .summary-links,
+      .no-print { display: none !important; }
+      .print-footer { display: block; position: fixed; left: 14mm; right: 14mm; bottom: 6mm; color: #6B7280; font: 700 9px/1.2 "Helvetica Neue", Arial, sans-serif; text-align: center; }
+      @page {
+        size: A4;
+        margin: 16mm 14mm;
+      }
+      * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      body {
+        font-size: 12px;
+        background: var(--color-bg) !important;
+        color: var(--color-text-primary) !important;
+      }
+      .report-container { max-width: none; padding: 0; }
+      .cover-page {
+        background: #1E40AF !important;
+        color: #FFFFFF !important;
+        min-height: 265mm;
+        margin: 0;
+        page-break-after: always;
+        break-after: page;
+      }
+      .cover-title { font-size: 44px; color: #FFFFFF !important; }
+      .page-card, .priority-item, .snippet-card, .report-panel, .report-section, .kpi-grid {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .page-card::before { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .priority-badge--high, .priority-badge--medium, .priority-badge--low,
+      .kpi-card--warning, .kpi-card--positive, .kpi-card--accent,
+      .metric--warning, .metric--positive, .executive-summary, .type-tag {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .page-url::after, a[href]::after { content: none; }
+      .kpi-value { font-size: 22px; }
+      .page-card { display: block !important; }
+      .report-section, .report-panel { break-before: auto; page-break-before: auto; }
+      .appendix { break-inside: auto; page-break-inside: auto; }
+      .position-bar-fill { width: var(--print-position-width, 100%) !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="report-toolbar no-print"><button class="report-toolbar-button" type="button" onclick="exportPDF()">Exporter en PDF</button><span class="language-toggle-group"><a class="report-toolbar-button language-toggle is-active" href="gsc_report.html" aria-current="true">FR</a><a class="report-toolbar-button language-toggle" href="gsc_report.en.html">EN</a></span><a class="report-toolbar-button" href="./">Retour dashboard</a></div>
+  <main class="report-container">
+    <section class="cover-page">
+      <div class="cover-content">
+        <div class="cover-label">Rapport SEO · Google Search Console</div>
+        <h1 class="cover-title">Audit SEO GSC</h1>
+        <p class="cover-subtitle">Plan d&#x27;action basé sur les données Google Search Console</p>
+        <div class="cover-meta">
+          <div class="cover-meta-item">
+            <span class="cover-meta-label">Domaine analysé</span>
+            <span class="cover-meta-value">BaselineTest</span>
+          </div>
+          <div class="cover-meta-item">
+            <span class="cover-meta-label">Période</span>
+            <span class="cover-meta-value">export Google Search Console fourni</span>
+          </div>
+          <div class="cover-meta-item">
+            <span class="cover-meta-label">Généré le</span>
+            <span class="cover-meta-value">09/05/2026</span>
+          </div>
+        </div>
+        <button onclick="exportPDF()" class="btn-export no-print">Exporter en PDF</button>
+      </div>
+      <div class="cover-footer">Analyse basée sur les données Google Search Console exportées.</div>
+    </section>
+
+    <section class="source-box">
+      <ul class="source-list"><li>Ce rapport est basé sur les exports Google Search Console fournis. Il identifie les opportunités SEO visibles dans GSC, mais ne remplace pas un audit technique crawl complet.</li><li>Export Pages précédent: fourni, les variations peuvent être contextualisées.</li><li>Les baisses et gains doivent être lus comme des variations entre les deux exports fournis.</li><li>Export Requêtes: fourni et exploité pour qualifier les intentions de recherche.</li></ul>
+    </section>
+
+    <nav aria-label="Navigation du rapport"><a href='#synthese'>Synthèse</a><a href='#decision-rapide'>Décision rapide</a><a href='#priorites'>Priorités</a><a href='#pages-prioritaires'>Pages</a><a href='#requetes'>Requêtes</a><a href='#snippets'>Résultats Google</a><a href='#renforcer'>À renforcer</a><a href='#methodologie'>Méthode</a><a href='#annexes'>Annexes</a></nav>
+
+    <section class="report-section" id="synthese">
+      <div class="section-header"><h2 class="section-title">Synthèse exécutive</h2><p class="section-intro">Les indicateurs à retenir avant d’entrer dans le détail.</p></div>
+      <section class="kpi-grid" aria-label="Indicateurs clés"><div class='kpi-card'><div class='kpi-label'>Pages analysées</div><div class='kpi-value'>2</div></div><div class='kpi-card'><div class='kpi-label'>Clics totaux</div><div class='kpi-value'>15</div></div><div class='kpi-card'><div class='kpi-label'>Impressions totales</div><div class='kpi-value'>1 080</div></div><div class='kpi-card kpi-card--warning'><div class='kpi-label'>Taux de clic moyen</div><div class='kpi-value'>1,4 %</div><div class='kpi-note'>À surveiller selon la position moyenne</div></div><div class='kpi-card'><div class='kpi-label'>Position moyenne</div><div class='kpi-value'>9.4</div></div><div class='kpi-card kpi-card--accent'><div class='kpi-label'>Pages prioritaires</div><div class='kpi-value'>2</div></div><div class='kpi-card'><div class='kpi-label'>Résultats Google à améliorer</div><div class='kpi-value'>0</div></div><div class='kpi-card'><div class='kpi-label'>Requêtes exploitables</div><div class='kpi-value'>2</div></div><div class='kpi-card kpi-card--positive'><div class='kpi-label'>Potentiel théorique détecté</div><div class='kpi-value'>Voir note</div><div class='kpi-note'>estimation qualifiée</div></div></section>
+      <div class='estimate-box'><strong>Potentiel théorique détecté : 13 à 53 clics/mois supplémentaires, selon comparaison CTR à position équivalente.</strong><p></p></div>
+      <div class="executive-summary"><p>Le site dispose déjà de pages visibles dans Google, mais plusieurs pages génèrent beaucoup d’impressions sans obtenir un taux de clic satisfaisant. La priorité est donc d’améliorer les pages déjà exposées avant de produire davantage de contenus. Les requêtes fournies permettent aussi d’affiner les angles éditoriaux et les questions à intégrer.</p></div>
+      <div class='summary-links'><a class='summary-link' href='#pages-prioritaires'>Pages</a><a class='summary-link' href='#snippets'>Résultats Google</a><a class='summary-link' href='#business'>Business</a></div>
+    </section>
+
+    <section class="report-section" id="decision-rapide"><div class="section-header"><h2 class="section-title">Décision rapide</h2><p class="section-intro">À lire en 30 secondes pour décider quoi lancer en premier.</p></div><table class='compact-table quick-decision-table'><thead><tr><th>Priorité</th><th>Action recommandée</th><th>Pages concernées</th><th>Impact attendu</th><th>Effort</th><th>Pourquoi maintenant</th></tr></thead><tbody><tr><td>1</td><td>Traiter les pages à plus fort potentiel de clics</td><td>Guide padel</td><td>Potentiel théorique prioritaire</td><td>moyen</td><td>Elles concentrent le plus de clics récupérables parmi les pages du top 10.</td></tr><tr><td>2</td><td>Exploiter les requêtes sous-utilisées</td><td>2 requêtes à trier</td><td>Intentions mieux couvertes</td><td>moyen</td><td>Les requêtes GSC montrent les angles réellement demandés par les utilisateurs.</td></tr><tr><td>3</td><td>Valider les arbitrages avant production</td><td>Top 10 pages</td><td>Moins d&#x27;actions inutiles</td><td>faible</td><td>Le rapport priorise GSC, sans remplacer un crawl technique complet.</td></tr></tbody></table></section>
+
+    <section class="report-section priorities-section" id="priorites">
+      <div class="section-header"><h2 class="section-title">Les 3 priorités du mois</h2><p class="section-intro">Un plan d’action volontairement court pour décider vite.</p></div>
+      <div class='priorities-list'><article class='priority-item'><div class='priority-number'>01</div><div class='priority-body'><h3>Renforcer les pages proches du haut des résultats</h3><div class='priority-meta'><span class='priority-why'><strong>Pourquoi :</strong> 1 page est déjà en page 1 ou au début de la page 2.</span><span class='priority-action'><strong>Action :</strong> Enrichir le contenu, ajouter une FAQ, mettre à jour les informations et renforcer le maillage interne.</span><span class='priority-impact'><strong>Impact :</strong> Gain potentiel plus rapide car les pages ont déjà une visibilité Google.</span></div></div></article><article class='priority-item'><div class='priority-number'>02</div><div class='priority-body'><h3>Améliorer les résultats Google des pages à fortes impressions</h3><div class='priority-meta'><span class='priority-why'><strong>Pourquoi :</strong> 1 page est déjà visible mais sous-cliquée.</span><span class='priority-action'><strong>Action :</strong> Réécrire les titles, les meta descriptions et l’angle d’entrée des pages prioritaires.</span><span class='priority-impact'><strong>Impact :</strong> Potentiel d’amélioration du taux de clic sans attendre une progression de position.</span></div></div></article><article class='priority-item'><div class='priority-number'>03</div><div class='priority-body'><h3>Exploiter les requêtes sous-utilisées</h3><div class='priority-meta'><span class='priority-why'><strong>Pourquoi :</strong> 2 requêtes exploitables révèlent des intentions précises.</span><span class='priority-action'><strong>Action :</strong> Ajouter des sections ciblées dans les pages existantes ou créer des contenus satellites lorsque l’intention est distincte.</span><span class='priority-impact'><strong>Impact :</strong> Potentiel de trafic plus qualifié, à valider après mise en ligne et suivi GSC.</span></div></div></article></div>
+    </section>
+
+    <section class="report-section" id="pages-prioritaires">
+      <div class="section-header"><div class="section-tag">Priorité 1</div><h2 class="section-title">Top pages à traiter en premier</h2><p class="section-intro">Les pages avec le meilleur rapport visibilité, effort et potentiel.</p></div>
+      
+      <div class="filter-bar">
+        <div class="filter-group"><span class="filter-label">Urgence</span><button class='filter-btn is-active' type='button' data-section='pages-prioritaires' data-filter-kind='priority' data-filter-value='all'>Toutes</button><button class='filter-btn' type='button' data-section='pages-prioritaires' data-filter-kind='priority' data-filter-value='high'>Haute</button><button class='filter-btn' type='button' data-section='pages-prioritaires' data-filter-kind='priority' data-filter-value='medium'>Moyenne</button><button class='filter-btn' type='button' data-section='pages-prioritaires' data-filter-kind='priority' data-filter-value='low'>Faible</button></div>
+      </div>
+
+      <div class='cards-grid'>
+      <article class="page-card page-card--high" data-priority="high">
+        <div class="page-card-header">
+          <div class="page-info">
+            <span class="page-slug">Guide padel</span>
+            <a class="page-url" href="https://example.com/guide-padel" title="https://example.com/guide-padel">example.com/guide-padel ↗</a>
+          </div>
+          <span class="priority-badge priority-badge--high">Priorité haute</span>
+        </div>
+        <div class="page-metrics"><div class='metric '><span class='metric-label'>Clics</span><span class='metric-value'>12</span></div><div class='metric '><span class='metric-label'>Impressions</span><span class='metric-value'>1 000</span></div><div class='metric metric--warning'><span class='metric-label'>Taux de clic</span><span class='metric-value'>1,2 %</span></div><div class='metric '><span class='metric-label'>Position</span><span class='metric-value'>8.4</span></div><div class='metric metric--positive'><span class='metric-label'>Potentiel</span><span class='metric-value'>jusqu’à 48</span></div></div>
+        
+        <div class="position-bar">
+          <div class="position-bar-label">Position actuelle dans Google</div>
+          <div class="position-bar-track"><div class="position-bar-fill" data-position-width="61" style="width: 0%; --print-position-width: 61%; background: #f59e0b"></div></div>
+          <span class="position-bar-value">8,4</span>
+        </div>
+
+        <div class="page-constat"><span class="constat-label">Constat</span>La page est déjà bien positionnée (top 10) mais son CTR reste sous la médiane attendue à cette position. Le gain probable vient d&#x27;une réécriture du résultat Google (title + meta).</div>
+        <div class='page-constat'><span class='constat-label'>Action recommandée spécifique</span>Le CTR est anormalement bas pour la position actuelle sur « guide padel » : réécrire le title autour du bénéfice concret, renforcer la meta avec un angle distinctif et vérifier si un featured snippet ou un PAA domine la SERP.</div>
+        <div class="insight-grid">
+          <div class="insight"><span class="mini-label">Effort estimé</span><strong>Élevé</strong></div>
+          <div class='insight'><span class='mini-label'>Valeur business</span><strong>moyen · produit numérique</strong></div>
+          <div class="insight"><span class="mini-label">Type d&#x27;action</span><div class="chip-row"><span class='type-tag'>Résultat Google (titre + description)</span></div></div>
+          <div class="insight"><span class="mini-label">Impact attendu</span><strong>jusqu’à 48 clics non captés</strong></div>
+        </div>
+        <div class='target-metric-box'><span class='target-metric-label'>Objectif mesurable</span>CTR actuel 1,2 % → cible 2,5 %–6,5 % (médiane pos. 8 / P75 pos. 6). Gain estimé : +13 à +53 clics/mois sous 6-8 semaines.</div>
+        
+      </article>
+</div>
+      <p class="reliability-note">Le potentiel théorique détecté est un ordre de grandeur, pas une promesse. À confirmer après mise en ligne et suivi dans Google Search Console.</p>
+    </section>
+
+    <section class="report-section" id="requetes">
+      <div class="section-header"><h2 class="section-title">Exploitation des requêtes</h2><p class="section-intro">Une sélection limitée aux requêtes utiles pour orienter les titles, FAQ et contenus.</p></div>
+      <div class='query-card'><h3>Top requêtes avec beaucoup d’impressions et peu de clics</h3><p class='empty-state'>Aucun signal prioritaire détecté sur cette catégorie dans l’export fourni.</p></div><div class='query-card'><h3>Top requêtes déjà proches d’un gain</h3><div class='data-card-list'><article class='appendix-card'><h3>guide padel debutant</h3><div class='data-grid'><div class='data-item'><span class='data-label'>Clics</span><span class='data-value'>10</span></div><div class='data-item'><span class='data-label'>Impressions</span><span class='data-value'>200</span></div><div class='data-item'><span class='data-label'>Taux de clic</span><span class='data-value'>5,0 %</span></div><div class='data-item'><span class='data-label'>Position</span><span class='data-value'>9.0</span></div><div class='data-item'><span class='data-label'>Recommandation</span><span class='data-value'>à intégrer dans une page existante</span></div></div></article><article class='appendix-card'><h3>guide raquette padel</h3><div class='data-grid'><div class='data-item'><span class='data-label'>Clics</span><span class='data-value'>6</span></div><div class='data-item'><span class='data-label'>Impressions</span><span class='data-value'>120</span></div><div class='data-item'><span class='data-label'>Taux de clic</span><span class='data-value'>5,0 %</span></div><div class='data-item'><span class='data-label'>Position</span><span class='data-value'>11.0</span></div><div class='data-item'><span class='data-label'>Recommandation</span><span class='data-value'>à intégrer dans une page existante</span></div></div></article></div></div><div class='query-card'><h3>Requêtes à intégrer dans les pages existantes</h3><div class='data-card-list'><article class='appendix-card'><h3>guide padel debutant</h3><div class='data-grid'><div class='data-item'><span class='data-label'>Clics</span><span class='data-value'>10</span></div><div class='data-item'><span class='data-label'>Impressions</span><span class='data-value'>200</span></div><div class='data-item'><span class='data-label'>Taux de clic</span><span class='data-value'>5,0 %</span></div><div class='data-item'><span class='data-label'>Position</span><span class='data-value'>9.0</span></div><div class='data-item'><span class='data-label'>Recommandation</span><span class='data-value'>à intégrer dans une page existante</span></div></div></article><article class='appendix-card'><h3>guide raquette padel</h3><div class='data-grid'><div class='data-item'><span class='data-label'>Clics</span><span class='data-value'>6</span></div><div class='data-item'><span class='data-label'>Impressions</span><span class='data-value'>120</span></div><div class='data-item'><span class='data-label'>Taux de clic</span><span class='data-value'>5,0 %</span></div><div class='data-item'><span class='data-label'>Position</span><span class='data-value'>11.0</span></div><div class='data-item'><span class='data-label'>Recommandation</span><span class='data-value'>à intégrer dans une page existante</span></div></div></article></div></div><div class='query-card'><h3>Requêtes pouvant justifier un nouveau contenu</h3><p class='empty-state'>Aucun signal prioritaire détecté sur cette catégorie dans l’export fourni.</p></div>
+    </section>
+
+    
+    <section class="report-section" id="snippets">
+      <div class="section-header"><h2 class="section-title">Résultats Google à améliorer</h2><p class="section-intro">Des propositions concrètes pour rendre les titres et descriptions Google plus cliquables.</p></div>
+      
+      
+      <div class="filter-bar">
+        <div class="filter-group"><span class="filter-label">Urgence</span><button class='filter-btn is-active' type='button' data-section='snippets' data-filter-kind='priority' data-filter-value='all'>Toutes</button><button class='filter-btn' type='button' data-section='snippets' data-filter-kind='priority' data-filter-value='high'>Haute</button><button class='filter-btn' type='button' data-section='snippets' data-filter-kind='priority' data-filter-value='medium'>Moyenne</button><button class='filter-btn' type='button' data-section='snippets' data-filter-kind='priority' data-filter-value='low'>Faible</button></div>
+      </div>
+
+      <p class='empty-state'>Aucun signal prioritaire détecté sur cette catégorie dans l’export fourni.</p>
+    </section>
+
+    
+    <section class="report-section" id="renforcer">
+      <div class="section-header"><h2 class="section-title">Pages déjà visibles à renforcer</h2><p class="section-intro">Ces pages ont déjà une base SEO: les améliorer est souvent plus rentable que repartir de zéro.</p></div>
+      <div class='data-card-list'><article class='appendix-card'><h3><a href='https://example.com/guide-padel'>Guide padel</a></h3><div class='data-grid'><div class='data-item'><span class='data-label'>Position</span><span class='data-value'>8.4</span></div><div class='data-item'><span class='data-label'>Impressions</span><span class='data-value'>1 000</span></div><div class='data-item'><span class='data-label'>Clics</span><span class='data-value'>12</span></div><div class='data-item'><span class='data-label'>Effort</span><span class='data-value'>Élevé</span></div><div class='data-item'><span class='data-label'>Impact</span><span class='data-value'>jusqu’à 48 clics non captés</span></div></div><div class='page-constat'><span class='constat-label'>Action principale</span>Améliorer le résultat Google</div></article></div>
+    </section>
+
+    
+    
+    
+    <section class="report-section" id="methodologie">
+      <div class="section-header"><h2 class="section-title">Comment lire ce rapport</h2><p class="section-intro">Les règles de lecture pour éviter les mauvaises interprétations.</p></div>
+      <ul class="actions"><li>Ce rapport est basé sur les exports Google Search Console fournis. Il identifie les opportunités SEO visibles dans GSC, mais ne remplace pas un audit technique crawl complet.</li><li>Le potentiel théorique détecté est un ordre de grandeur, pas une promesse de trafic.</li><li>Les positions sont des moyennes Google Search Console.</li><li>Les priorités sont calculées selon impressions, taux de clic, position et potentiel d’amélioration.</li><li>Les signaux de pages en concurrence doivent être vérifiés manuellement.</li><li>Les résultats sont à confirmer après mise en ligne et suivi dans GSC.</li><li>Aucun export précédent n’a été fourni: le rapport ne diagnostique pas une baisse de trafic.</li></ul>
+    </section>
+
+    
+    <section class="report-section appendix" id="annexes">
+      <div class="section-header"><h2 class="section-title">Annexes</h2><p class="section-intro">Données complètes et limites méthodologiques.</p></div>
+      <h3>Tableau complet des pages analysées</h3>
+      <div class='data-card-list'><article class='appendix-card'><h3>https://example.com/guide-padel</h3><div class='data-grid'><div class='data-item'><span class='data-label'>Priorité</span><span class='data-value'>Priorité 1</span></div><div class='data-item'><span class='data-label'>Clics</span><span class='data-value'>12</span></div><div class='data-item'><span class='data-label'>Impressions</span><span class='data-value'>1 000</span></div><div class='data-item'><span class='data-label'>Taux de clic</span><span class='data-value'>1,2 %</span></div><div class='data-item'><span class='data-label'>Position</span><span class='data-value'>8.4</span></div><div class='data-item'><span class='data-label'>Potentiel</span><span class='data-value'>jusqu’à 48</span></div><div class='data-item'><span class='data-label'>Action principale</span><span class='data-value'>Améliorer le résultat Google</span></div></div></article><article class='appendix-card'><h3>https://example.com/raquette-padel</h3><div class='data-grid'><div class='data-item'><span class='data-label'>Priorité</span><span class='data-value'>Priorité 2</span></div><div class='data-item'><span class='data-label'>Clics</span><span class='data-value'>3</span></div><div class='data-item'><span class='data-label'>Impressions</span><span class='data-value'>80</span></div><div class='data-item'><span class='data-label'>Taux de clic</span><span class='data-value'>3,8 %</span></div><div class='data-item'><span class='data-label'>Position</span><span class='data-value'>22.0</span></div><div class='data-item'><span class='data-label'>Potentiel</span><span class='data-value'></span></div><div class='data-item'><span class='data-label'>Action principale</span><span class='data-value'>Vérifier les pages en concurrence</span></div></div></article></div>
+      <h3>Tableau complet des requêtes</h3>
+      <div class='data-card-list'><article class='appendix-card'><h3>guide padel debutant</h3><div class='data-grid'><div class='data-item'><span class='data-label'>Clics</span><span class='data-value'>10</span></div><div class='data-item'><span class='data-label'>Impressions</span><span class='data-value'>200</span></div><div class='data-item'><span class='data-label'>Taux de clic</span><span class='data-value'>5,0 %</span></div><div class='data-item'><span class='data-label'>Position</span><span class='data-value'>9.0</span></div><div class='data-item'><span class='data-label'>Recommandation</span><span class='data-value'>maillage interne</span></div></div></article><article class='appendix-card'><h3>guide raquette padel</h3><div class='data-grid'><div class='data-item'><span class='data-label'>Clics</span><span class='data-value'>6</span></div><div class='data-item'><span class='data-label'>Impressions</span><span class='data-value'>120</span></div><div class='data-item'><span class='data-label'>Taux de clic</span><span class='data-value'>5,0 %</span></div><div class='data-item'><span class='data-label'>Position</span><span class='data-value'>11.0</span></div><div class='data-item'><span class='data-label'>Recommandation</span><span class='data-value'>maillage interne</span></div></div></article></div>
+      <h3>Détails méthodologiques et limites</h3>
+      <ul class="actions">
+        <li>Google Search Console agrège les positions et les taux de clic: ce ne sont pas des mesures page par page en temps réel.</li>
+        <li>Ce rapport est basé sur les exports Google Search Console fournis. Il identifie les opportunités SEO visibles dans GSC, mais ne remplace pas un audit technique crawl complet.</li>
+        <li>Les estimations de clics récupérables donnent un ordre de grandeur sur la période exportée.</li>
+      </ul>
+    </section>
+
+
+    <p class="footer-note">Analyse basée sur les données Google Search Console exportées. Les recommandations doivent être priorisées avec la connaissance métier du site.</p>
+  </main>
+  <script>
+    function exportPDF() {
+      const original = document.title;
+      document.title = 'Rapport_SEO_' + new Date().toISOString().slice(0,10);
+      window.print();
+      document.title = original;
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.position-bar-fill').forEach(function(bar, index) {
+        bar.style.transitionDelay = (index * 80) + 'ms';
+        requestAnimationFrame(function() {
+          bar.style.width = (bar.dataset.positionWidth || '0') + '%';
+        });
+      });
+      document.querySelectorAll('.filter-btn[data-filter-kind="priority"]').forEach(function(button) {
+        button.addEventListener('click', function() {
+          const section = document.getElementById(button.dataset.section || '');
+          if (!section) return;
+          const value = button.dataset.filterValue || 'all';
+          section.querySelectorAll('.filter-btn[data-filter-kind="priority"]').forEach(function(peer) {
+            peer.classList.toggle('is-active', peer === button);
+          });
+          section.querySelectorAll('.page-card, .snippet-card').forEach(function(card) {
+            card.classList.toggle('is-filtered-out', value !== 'all' && card.dataset.priority !== value);
+          });
+        });
+      });
+      document.querySelectorAll('#synthese a[href^="#"]').forEach(function(link) {
+        link.addEventListener('click', function(event) {
+          const target = document.querySelector(link.getAttribute('href'));
+          if (!target) return;
+          event.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      });
+    });
+  </script>
+  <div class="print-footer">Rapport d’opportunités SEO GSC · 09/05/2026</div>
+</body>
+</html>
