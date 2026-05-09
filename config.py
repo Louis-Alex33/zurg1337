@@ -403,6 +403,9 @@ GSC_STRUCTURAL_SLUGS = {
     "terms",
 }
 
+# Gain bas minimum (clics/mois) pour qu'une page soit éligible au Top 10 prioritaire
+MIN_POTENTIAL_CLICKS_FOR_TOP10: int = 5
+
 GSC_CANNIBAL_STOPWORDS = {
     "avec",
     "best",

@@ -16,12 +16,13 @@ from typing import Any
 from urllib.parse import quote, unquote, urlparse
 from zipfile import BadZipFile, ZipFile
 
-from config import GSC_CANNIBAL_STOPWORDS, GSC_STRUCTURAL_SLUGS, GSC_TECHNICAL_URL_PATTERNS, GSC_TECHNICAL_URL_SUFFIXES
+from config import GSC_CANNIBAL_STOPWORDS, GSC_STRUCTURAL_SLUGS, GSC_TECHNICAL_URL_PATTERNS, GSC_TECHNICAL_URL_SUFFIXES, MIN_POTENTIAL_CLICKS_FOR_TOP10
 from i18n import get_text
 from io_helpers import ensure_parent_dir
 from labels import EMPTY_SECTION_MESSAGES, SECTION_INTROS, translate as translate_label
 from models import GSCPageAnalysis, GSCPageData, GSCQueryData
 from scoring import gsc_score_ctr, gsc_score_decline, gsc_score_impressions, gsc_score_position, is_dead_gsc_page
+from url_variants import detect_url_variants, merge_variant_pair_metrics, canonical_url_from_pair
 from utils import CLIError, coerce_float, coerce_int
 
 PAGINATION_RE = re.compile(r"/page/\d+/?$")
@@ -2107,9 +2108,11 @@ def build_report(
     query_opportunities_count = len(query_opportunities)
     sections = assign_report_sections(results)
     has_query_export = has_queries if has_queries is not None else bool(queries)
-    priority_pages = build_priority_page_cards(results)[:10]
+    url_variant_pairs = detect_url_variants([item.url for item in results if item.url])
+    merged_results = merge_url_variant_results(results, url_variant_pairs)
+    priority_pages = build_priority_page_cards(merged_results)[:10]
     priority_page_urls = {normalize_url_for_query_match(str(page.get("url", ""))) for page in priority_pages}
-    snippet_pages = build_snippet_cards(results, excluded_urls=priority_page_urls)[:10]
+    snippet_pages = build_snippet_cards(merged_results, excluded_urls=priority_page_urls)[:10]
     snippet_count = len(snippet_pages)
     quick_decisions = build_quick_decisions(priority_pages, snippet_pages, query_opportunities_count)
 
@@ -2196,7 +2199,9 @@ def build_report(
         "breakthrough_pages": build_breakthrough_cards(results)[:10],
         "query_sections": build_query_sections(queries, results),
         "top_query_opportunities": build_top_query_opportunities(query_opportunities, results, limit=20),
-        "business_opportunities": build_business_opportunities(results)[:10],
+        "business_opportunities": filter_business_opportunities(
+            build_business_opportunities(merged_results), priority_page_urls
+        )[:10],
         "action_plan_30_days": build_action_plan_30_days(priority_pages, snippet_pages, cannibalization_groups or []),
         "appendix_pages": [page_to_appendix_row(item) for item in results],
         "appendix_queries": [query_to_appendix_row(query, results) for query in queries],
@@ -2238,6 +2243,7 @@ def build_report(
             },
         ],
         "cannibalization_groups": cannibalization_groups or [],
+        "url_variant_pairs": build_url_variant_report_data(url_variant_pairs, results),
         "has_queries": bool(queries),
         "graphique_data": graphique,
         "pays_data": pays,
@@ -2550,15 +2556,32 @@ def format_count(count: int, singular: str, plural: str) -> str:
     return f"{format_number(count)} {singular if count == 1 else plural}"
 
 
+def filter_top10_candidates(pages: list[GSCPageAnalysis]) -> list[GSCPageAnalysis]:
+    """Exclut les pages dont le gain bas estimé < MIN_POTENTIAL_CLICKS_FOR_TOP10.
+
+    Ces pages restent dans pages_full_export.csv mais n'apparaissent pas dans le top prioritaire.
+    """
+    from ctr_benchmarks import potential_range
+    filtered = []
+    for page in pages:
+        if page.impressions < 10:
+            continue
+        gain_low, _ = potential_range(page.impressions, page.ctr, page.position)
+        if gain_low >= MIN_POTENTIAL_CLICKS_FOR_TOP10:
+            filtered.append(page)
+    return filtered
+
+
 def build_priority_page_cards(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
     ordered = sorted(
         [item for item in results if not is_weak_page(item)],
         key=lambda item: (item.opportunity_score, business_sort_weight(item.business_value), item.estimated_recoverable_clicks or 0, item.impressions),
         reverse=True,
     )
+    candidates = filter_top10_candidates(ordered)
     seen_slugs: set[str] = set()
     cards: list[dict[str, object]] = []
-    for item in ordered:
+    for item in candidates:
         if item.priority not in {"HIGH", "MEDIUM"} and not item.estimated_recoverable_clicks:
             continue
         slug_key = _slug_dedup_key(item.url)
@@ -2571,6 +2594,48 @@ def build_priority_page_cards(results: list[GSCPageAnalysis]) -> list[dict[str, 
 
 def business_sort_weight(value: str) -> int:
     return {"high": 3, "medium": 2, "low": 1}.get(value, 0)
+
+
+def check_snippet_uniqueness(snippets: list[dict[str, object]]) -> list[str]:
+    """Retourne les URLs dont le title ou la meta est trop similaire (ratio >= 0.85) à un autre snippet."""
+    import difflib
+    duplicate_urls: list[str] = []
+    for i, a in enumerate(snippets):
+        for j, b in enumerate(snippets):
+            if j <= i:
+                continue
+            url_a = str(a.get("url", ""))
+            url_b = str(b.get("url", ""))
+            title_a = str(a.get("title_example", ""))
+            title_b = str(b.get("title_example", ""))
+            meta_a = str(a.get("meta_example", ""))
+            meta_b = str(b.get("meta_example", ""))
+            if (
+                difflib.SequenceMatcher(None, title_a, title_b).ratio() >= 0.85
+                or difflib.SequenceMatcher(None, meta_a, meta_b).ratio() >= 0.85
+            ):
+                if url_b not in duplicate_urls:
+                    duplicate_urls.append(url_b)
+    return duplicate_urls
+
+
+def _diversify_snippet_card(card: dict[str, object], existing_cards: list[dict[str, object]], item: GSCPageAnalysis) -> dict[str, object]:
+    """Applique un suffixe différenciant si le snippet est trop similaire aux cartes existantes."""
+    import difflib
+    title = str(card.get("title_example", ""))
+    meta = str(card.get("meta_example", ""))
+    for existing in existing_cards:
+        t_ratio = difflib.SequenceMatcher(None, title, str(existing.get("title_example", ""))).ratio()
+        m_ratio = difflib.SequenceMatcher(None, meta, str(existing.get("meta_example", ""))).ratio()
+        if t_ratio >= 0.85 or m_ratio >= 0.85:
+            # Suffixe différenciant basé sur la requête principale
+            query = str(card.get("main_query", "")) or display_page_label(str(card.get("url", "")))
+            suffix = f" — focus {query[:40]}" if query else ""
+            card = dict(card)
+            card["title_example"] = str(card.get("title_example", ""))[:55] + suffix
+            card["title_example"] = card["title_example"][:65]
+            break
+    return card
 
 
 def build_snippet_cards(
@@ -2587,6 +2652,7 @@ def build_snippet_cards(
             continue
         card = snippet_to_report_dict(item)
         if card:
+            card = _diversify_snippet_card(card, cards, item)
             cards.append(card)
     return cards
 
@@ -2663,23 +2729,54 @@ def build_top_query_opportunities(
         ),
         reverse=True,
     )
-    rows: list[dict[str, object]] = []
-    for query in candidates[:limit]:
+    return aggregate_queries_by_target_url(candidates, results, top_n=limit)
+
+
+def aggregate_queries_by_target_url(
+    queries: list[GSCQueryData],
+    results: list[GSCPageAnalysis],
+    top_n: int = 20,
+) -> list[dict[str, object]]:
+    """Regroupe les requêtes par (URL cible, action) avant le slice top_n.
+
+    Chaque entrée agrège toutes les requêtes qui ciblent la même URL avec la même action,
+    évitant d'afficher N fois la même recommandation pour la même page.
+    """
+    from collections import defaultdict as _defaultdict
+    groups: dict[tuple[str, str], list[GSCQueryData]] = _defaultdict(list)
+    for query in queries:
+        target_url = best_target_url_for_query(query, results)
         recommendation = classify_query_recommendation(query, results)
-        rows.append(
-            {
-                "query": query.query,
-                "clicks": format_number(query.clicks),
-                "impressions": format_number(query.impressions),
-                "ctr": format_percent(query.ctr),
-                "position": f"{query.position:.1f}",
-                "intent": probable_intent_from_keyword(query.query),
-                "recommendation": recommendation,
-                "target_url": best_target_url_for_query(query, results),
-                "should_create_new_content": "oui" if should_consider_new_content(query, results) else "non",
-            }
-        )
-    return rows
+        groups[(target_url, recommendation)].append(query)
+
+    aggregated = []
+    for (target_url, recommendation), group_queries in groups.items():
+        total_impressions = sum(q.impressions for q in group_queries)
+        total_clicks = sum(q.clicks for q in group_queries)
+        if total_impressions > 0:
+            avg_position = sum(q.position * q.impressions for q in group_queries) / total_impressions
+            aggregated_ctr = total_clicks / total_impressions
+        else:
+            avg_position = sum(q.position for q in group_queries) / len(group_queries)
+            aggregated_ctr = 0.0
+        top_queries_sorted = sorted(group_queries, key=lambda q: q.impressions, reverse=True)[:3]
+        aggregated.append({
+            "target_url": target_url,
+            "recommendation": recommendation,
+            "queries_count": len(group_queries),
+            "top_queries": " · ".join(q.query for q in top_queries_sorted),
+            "query": top_queries_sorted[0].query if top_queries_sorted else "",
+            "total_impressions": total_impressions,
+            "total_clicks": total_clicks,
+            "clicks": format_number(total_clicks),
+            "impressions": format_number(total_impressions),
+            "ctr": format_percent(aggregated_ctr),
+            "position": f"{avg_position:.1f}",
+            "intent": probable_intent_from_keyword(top_queries_sorted[0].query if top_queries_sorted else ""),
+        })
+
+    aggregated.sort(key=lambda r: int(r["total_impressions"]), reverse=True)
+    return aggregated[:top_n]
 
 
 def _slug_dedup_key(url: str) -> str:
@@ -2712,6 +2809,75 @@ def build_business_opportunities(results: list[GSCPageAnalysis]) -> list[dict[st
         reverse=True,
     )
     return [page_to_report_dict(item) for item in deduped]
+
+
+def filter_business_opportunities(
+    pages: list[dict[str, object]],
+    top10_urls: set[str],
+) -> list[dict[str, object]]:
+    """Retourne uniquement les pages business qui ne sont pas déjà dans le Top 10."""
+    return [p for p in pages if normalize_url_for_query_match(str(p.get("url", ""))) not in top10_urls]
+
+
+def merge_url_variant_results(
+    results: list[GSCPageAnalysis],
+    variant_pairs: list[tuple[str, str, float]],
+) -> list[GSCPageAnalysis]:
+    """Fusionne les GSCPageAnalysis des paires de variantes d'URL.
+
+    Pour chaque paire détectée, supprime l'URL la plus courte (typo probable)
+    et ajoute ses métriques à l'URL canonique (la plus longue).
+    """
+    if not variant_pairs:
+        return results
+    url_map = {item.url: item for item in results}
+    to_remove: set[str] = set()
+    for url_a, url_b, _ in variant_pairs:
+        canonical = canonical_url_from_pair(url_a, url_b)
+        other = url_b if canonical == url_a else url_a
+        canon_item = url_map.get(canonical)
+        other_item = url_map.get(other)
+        if canon_item is None or other_item is None:
+            continue
+        # Fusionner les métriques dans l'item canonique
+        merged = merge_variant_pair_metrics(
+            {"clicks": canon_item.clicks, "impressions": canon_item.impressions, "position": canon_item.position},
+            {"clicks": other_item.clicks, "impressions": other_item.impressions, "position": other_item.position},
+        )
+        canon_item.clicks = int(merged["clicks"])
+        canon_item.impressions = int(merged["impressions"])
+        canon_item.position = float(merged["position"])
+        canon_item.ctr = float(merged["ctr"])
+        to_remove.add(other)
+    return [item for item in results if item.url not in to_remove]
+
+
+def build_url_variant_report_data(
+    variant_pairs: list[tuple[str, str, float]],
+    results: list[GSCPageAnalysis],
+) -> list[dict[str, object]]:
+    """Construit les données pour la section 'Variantes d'URL détectées' du rapport."""
+    if not variant_pairs:
+        return []
+    url_map = {item.url: item for item in results}
+    rows = []
+    for url_a, url_b, ratio in variant_pairs:
+        item_a = url_map.get(url_a)
+        item_b = url_map.get(url_b)
+        merged = merge_variant_pair_metrics(
+            {"clicks": item_a.clicks if item_a else 0, "impressions": item_a.impressions if item_a else 0, "position": item_a.position if item_a else 0},
+            {"clicks": item_b.clicks if item_b else 0, "impressions": item_b.impressions if item_b else 0, "position": item_b.position if item_b else 0},
+        )
+        rows.append({
+            "url_a": url_a,
+            "url_b": url_b,
+            "similarity": round(ratio, 3),
+            "canonical_url": canonical_url_from_pair(url_a, url_b),
+            "total_clicks": int(merged["clicks"]),
+            "total_impressions": int(merged["impressions"]),
+            "avg_position": round(float(merged["position"]), 1),
+        })
+    return rows
 
 
 def has_specific_snippet_angle(title: str, query: str) -> bool:
@@ -2901,33 +3067,70 @@ def detect_serp_anomaly(position: float, ctr: float) -> str | None:
     return None
 
 
+def compute_target_metric(position: float, ctr_actual: float, impressions: int) -> dict[str, object]:
+    """Calcule la fourchette CTR cible et les gains estimés bas/haut.
+
+    Garantit toujours une fourchette non dégénérée : ctr_high >= 1.3 × ctr_low.
+    """
+    from ctr_benchmarks import CTR_BY_POSITION_MEDIAN, CTR_BY_POSITION_P75
+    pos_rounded = max(1, min(20, round(position)))
+
+    # Borne basse : médiane de la position actuelle
+    ctr_low_target = CTR_BY_POSITION_MEDIAN.get(pos_rounded, 0.005)
+
+    # Borne haute : P75 de la position cible
+    if pos_rounded <= 5:
+        target_pos = max(1, pos_rounded - 1)
+    else:
+        target_pos = max(3, pos_rounded - 2)
+    ctr_high_target = CTR_BY_POSITION_P75.get(target_pos, ctr_low_target * 1.4)
+
+    # Garantie de fourchette non dégénérée
+    if ctr_high_target < ctr_low_target * 1.3:
+        ctr_high_target = ctr_low_target * 1.5
+
+    # La borne basse ne peut pas être inférieure au CTR actuel (gain bas jamais négatif)
+    ctr_low_target = max(ctr_low_target, ctr_actual * 1.1)
+
+    gain_low = max(0, round(impressions * (ctr_low_target - ctr_actual)))
+    gain_high = max(gain_low + 1, round(impressions * (ctr_high_target - ctr_actual)))
+
+    return {
+        "ctr_low_target": ctr_low_target,
+        "ctr_high_target": ctr_high_target,
+        "gain_low": gain_low,
+        "gain_high": gain_high,
+        "target_pos": target_pos,
+        "pos_rounded": pos_rounded,
+    }
+
+
 def build_target_metric(item: GSCPageAnalysis) -> str:
-    """Formate la cible chiffrée CTR + gain estimé pour une page prioritaire (T6)."""
-    from ctr_benchmarks import ctr_median, ctr_p75, ctr_target_position
+    """Formate la cible chiffrée CTR + gain estimé pour une page prioritaire."""
     if item.impressions < 10:
         return ""
-    pos = item.position
-    med = ctr_median(pos)
-    target_pos = ctr_target_position(pos)
-    p75 = ctr_p75(target_pos)
-    gain_low = round(item.impressions * max(0.0, med - item.ctr))
-    gain_high = round(item.impressions * max(0.0, p75 - item.ctr))
-    gain_high = max(gain_low, gain_high)
-    ctr_current_pct = format_percent(item.ctr)
-    ctr_low_pct = format_percent(med)
-    ctr_high_pct = format_percent(p75)
-    pos_low = round(pos)
-    pos_high = max(1, round(target_pos))
+    result = compute_target_metric(item.position, item.ctr, item.impressions)
+    gain_low = int(result["gain_low"])
+    gain_high = int(result["gain_high"])
+    ctr_low_target = float(result["ctr_low_target"])
+    ctr_high_target = float(result["ctr_high_target"])
+    pos_rounded = int(result["pos_rounded"])
+    target_pos = int(result["target_pos"])
+
     if gain_high <= 0:
         return ""
-    if gain_low <= 0:
+    ctr_current_pct = format_percent(item.ctr)
+    ctr_low_pct = format_percent(ctr_low_target)
+    ctr_high_pct = format_percent(ctr_high_target)
+    if gain_low == 0:
         return (
-            f"CTR actuel {ctr_current_pct} → cible {ctr_high_pct} (P75 position {pos_high}). "
-            f"Gain estimé : +{format_number(gain_high)} clics/mois sous 6-8 semaines."
+            f"CTR actuel {ctr_current_pct} → cible {ctr_low_pct}–{ctr_high_pct} "
+            f"(médiane pos. {pos_rounded} / P75 pos. {target_pos}). "
+            f"Gain estimé : jusqu'à +{format_number(gain_high)} clics/mois sous 6-8 semaines."
         )
     return (
         f"CTR actuel {ctr_current_pct} → cible {ctr_low_pct}–{ctr_high_pct} "
-        f"(médiane pos. {pos_low} / P75 pos. {pos_high}). "
+        f"(médiane pos. {pos_rounded} / P75 pos. {target_pos}). "
         f"Gain estimé : +{format_number(gain_low)} à +{format_number(gain_high)} clics/mois sous 6-8 semaines."
     )
 
@@ -3132,8 +3335,25 @@ def generate_snippet_recommendation(
     lower = strip_accents(f"{page} {query} {page_type} {business_value} {intent}").lower()
     level = detect_tournament_level(page, query)
     if level:
-        title = f"Tournoi {level} padel : niveau, points et inscription"
-        meta = f"Comprenez le niveau requis en {level}, les points à gagner, les règles d'inscription et les repères pour préparer votre tournoi."
+        desc, focus = _TOURNAMENT_LEVEL_DESCRIPTIONS.get(
+            level, ("joueurs de ce niveau", "le format, le niveau requis et les conditions d'inscription")
+        )
+        # Choisir un angle différent selon les requêtes secondaires disponibles
+        gsc = gsc_data or {}
+        secondary = [str(q) for q in gsc.get("secondary_queries", [])[:5]]
+        secondary_text = strip_accents(" ".join(secondary)).lower()
+        if "points" in secondary_text or "classement" in secondary_text:
+            title = f"Tournoi {level} : points, classement et niveau requis"
+            meta = (f"Retrouvez les points distribués en {level}, le classement FFT associé et les repères de niveau "
+                    f"pour les {desc}. Inclut les conditions d'inscription et les variantes fréquentes.")
+        elif "inscription" in secondary_text or "format" in secondary_text:
+            title = f"Tournoi {level} : format, inscription et repères pratiques"
+            meta = (f"Tout ce que les {desc} doivent savoir avant de s'inscrire en {level} : "
+                    f"{focus}. Format tableau, délais et FAQ courte.")
+        else:
+            title = f"Tournoi {level} padel : niveau, points et repères clés"
+            meta = (f"Recentré sur l'intention principale des {desc} : réponse directe sur {focus}, "
+                    f"FAQ courte et liens vers les niveaux adjacents.")
     elif "par 4" in lower or "par-4" in lower:
         title = "Par 4 au padel : réussir le smash qui sort du terrain"
         meta = "Placement, hauteur de balle, timing et erreurs fréquentes : les repères pour tenter un par 4 plus proprement en match."
@@ -3495,7 +3715,11 @@ def render_executive_report(report: dict[str, object]) -> str:
         active_lang,
     )
     business = render_business_section(report.get("business_opportunities", []), active_lang)  # type: ignore[arg-type]
-    cannibalization = render_cannibalization_groups_section(report.get("cannibalization_groups", []), active_lang)  # type: ignore[arg-type]
+    cannibalization = render_cannibalization_groups_section(
+        report.get("cannibalization_groups", []),  # type: ignore[arg-type]
+        active_lang,
+        url_variant_pairs=report.get("url_variant_pairs", []),  # type: ignore[arg-type]
+    )
     annexes = render_annex_links(report.get("annex_files", []), active_lang)  # type: ignore[arg-type]
     source_notes = "".join(f"<li>{html.escape(_(str(note)))}</li>" for note in report.get("source_notes", []))  # type: ignore[union-attr]
     mode_label = _(str(report.get("report_mode_label") or "Analyse de la période actuelle"))
@@ -3664,8 +3888,8 @@ def render_executive_report(report: dict[str, object]) -> str:
     </section>
     {render_quick_decision_section(report.get("quick_decisions", []), active_lang)}
     <section class="report-section" id="priorites"><div class="section-header"><h2>{html.escape(_("Les 3 priorités du mois"))}</h2></div>{priorities}</section>
-    <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>{html.escape(_("Top 10 pages prioritaires"))}</h2><p class="section-intro">{html.escape(_("Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business."))}</p></div>{render_filter_bar("pages-prioritaires")}{priority_cards}</section>
-    <section class="report-section" id="requetes"><div class="section-header"><h2>{html.escape(_("Top 20 requêtes à exploiter"))}</h2><p class="section-intro">{html.escape(_("Regroupées par intention d’action : résultat Google, FAQ, section, contenu, maillage ou faible valeur."))}</p></div>{queries}</section>
+    <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>{html.escape(_(str(len(report.get("priority_pages") or [])) + " pages prioritaires"))}</h2><p class="section-intro">{html.escape(_("Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business."))}</p></div>{render_filter_bar("pages-prioritaires")}{priority_cards}</section>
+    <section class="report-section" id="requetes"><div class="section-header"><h2>{html.escape(_("Top opportunités requêtes par URL cible"))}</h2><p class="section-intro">{html.escape(_("Regroupées par URL cible et action. Les requêtes brutes complètes sont dans queries_full_export.csv."))}</p></div>{queries}</section>
     {snippets}
     {cannibalization}
     <section class="report-section" id="business"><div class="section-header"><h2>{html.escape(_("Opportunités business"))}</h2><p class="section-intro">{html.escape(_("Pages à forte valeur business : équipement, comparatifs, tests, affiliation, prospects ou produits numériques."))}</p></div>{business}</section>
@@ -4840,20 +5064,23 @@ def render_executive_query_opportunities(rows: list[dict[str, object]], lang: st
     for row in rows[:20]:
         target_url = str(row.get("target_url", "") or "")
         target_label = compact_url_for_display(target_url) if target_url else _("à valider")
+        top_queries = str(row.get("top_queries") or row.get("query") or "")
+        queries_count = row.get("queries_count", 1)
         table_rows.append(
             "<tr>"
             f"<td>{html.escape(_(str(row.get('recommendation', ''))))}</td>"
-            f"<td>{html.escape(str(row.get('query', '')))}</td>"
+            f"<td class='url-cell'><a href='{html.escape(target_url)}' title='{html.escape(target_url)}'>{html.escape(target_label)}</a></td>"
+            f"<td>{html.escape(top_queries)}</td>"
+            f"<td style='text-align:center'>{html.escape(str(queries_count))}</td>"
             f"<td>{html.escape(str(row.get('clicks', '')))}</td>"
             f"<td>{html.escape(str(row.get('impressions', '')))}</td>"
             f"<td>{html.escape(str(row.get('ctr', '')))}</td>"
             f"<td>{html.escape(str(row.get('position', '')))}</td>"
-            f"<td class='url-cell'><a href='{html.escape(target_url)}' title='{html.escape(target_url)}'>{html.escape(target_label)}</a></td>"
             "</tr>"
         )
     return (
         "<table class='compact-table'><thead><tr>"
-        f"<th>{html.escape(_('Action'))}</th><th>{html.escape(_('Requête'))}</th><th>{html.escape(_('Clics'))}</th><th>{html.escape(_('Impr.'))}</th><th>{html.escape(_('Taux de clic'))}</th><th>{html.escape(_('Pos.'))}</th><th>{html.escape(_('Cible'))}</th>"
+        f"<th>{html.escape(_('Action'))}</th><th>{html.escape(_('URL cible'))}</th><th>{html.escape(_('Requêtes principales'))}</th><th>{html.escape(_('Nb'))}</th><th>{html.escape(_('Clics'))}</th><th>{html.escape(_('Impr.'))}</th><th>{html.escape(_('CTR'))}</th><th>{html.escape(_('Pos.'))}</th>"
         "</tr></thead><tbody>"
         f"{''.join(table_rows)}"
         "</tbody></table>"
@@ -4958,7 +5185,18 @@ def render_breakthrough_section(pages: list[dict[str, object]], lang: str = "fr"
 
 def render_business_section(pages: list[dict[str, object]], lang: str = "fr") -> str:
     if not pages:
-        return render_empty_state("Aucune page à forte valeur business ne ressort clairement dans cet export.", lang)
+        return render_empty_state(
+            "Toutes les pages business à fort potentiel sont déjà traitées dans le Top prioritaire ci-dessus. "
+            "Voir opportunities_full_export.csv pour la liste complète.",
+            lang,
+        )
+    if len(pages) < 3:
+        note = html.escape(
+            "Pages business hors top prioritaire — à intégrer en relais des actions du top prioritaire. "
+            f"({len(pages)} page{'s' if len(pages) > 1 else ''} — les autres sont déjà dans le Top prioritaire.)"
+        )
+    else:
+        note = html.escape("Pages business hors top prioritaire — à intégrer en relais des actions du top prioritaire.")
     _ = gsc_gettext(lang)
     rows = []
     for page in pages[:10]:
@@ -4976,6 +5214,7 @@ def render_business_section(pages: list[dict[str, object]], lang: str = "fr") ->
             "</tr>"
         )
     return (
+        f"<p class='reliability-note' style='margin-bottom:10px;'>{note}</p>"
         "<table class='compact-table'><thead><tr>"
         f"<th>Page</th><th>{html.escape(_('Valeur'))}</th><th>{html.escape(_('Monétisation'))}</th><th>{html.escape(_('Score'))}</th><th>{html.escape(_('Requête'))}</th><th>{html.escape(_('Action'))}</th><th>{html.escape(_('Recommandation'))}</th>"
         "</tr></thead><tbody>"
@@ -4984,7 +5223,11 @@ def render_business_section(pages: list[dict[str, object]], lang: str = "fr") ->
     )
 
 
-def render_cannibalization_groups_section(groups: list[dict[str, Any]], lang: str = "fr") -> str:
+def render_cannibalization_groups_section(
+    groups: list[dict[str, Any]],
+    lang: str = "fr",
+    url_variant_pairs: list[dict[str, object]] | None = None,
+) -> str:
     _ = gsc_gettext(lang)
     visible_groups = [group for group in groups if str(group.get("confidence") or "") in {"medium", "high"}][:5]
     if not visible_groups:
@@ -5014,12 +5257,54 @@ def render_cannibalization_groups_section(groups: list[dict[str, Any]], lang: st
                 "</article>"
             )
         body = f"<div class='data-card-list'>{''.join(cards)}</div>"
+
+    variant_section = render_url_variants_subsection(url_variant_pairs or [], lang)
     return f"""
     <section class="report-section" id="cannibalisation">
       <div class="section-header"><h2>{html.escape(_("Pages en concurrence"))}</h2><p class="section-intro">{html.escape(_("Seulement les groupes précis et exploitables. Les signaux faibles restent dans les CSV."))}</p></div>
       {body}
+      {variant_section}
     </section>
 """
+
+
+def render_url_variants_subsection(pairs: list[dict[str, object]], lang: str = "fr") -> str:
+    if not pairs:
+        return ""
+    cards = []
+    for pair in pairs:
+        url_a = str(pair.get("url_a", ""))
+        url_b = str(pair.get("url_b", ""))
+        canonical = str(pair.get("canonical_url", ""))
+        cards.append(
+            "<article class='appendix-card' style='border-left:4px solid #D97706;'>"
+            "<h3>Variante d'URL détectée</h3>"
+            "<div class='data-grid'>"
+            f"{render_data_item('URL A', compact_url_for_display(url_a), lang, translate_value=False)}"
+            f"{render_data_item('URL B', compact_url_for_display(url_b), lang, translate_value=False)}"
+            f"{render_data_item('Clics cumulés', pair.get('total_clicks', 0), lang, translate_value=False)}"
+            f"{render_data_item('Impressions cumulées', pair.get('total_impressions', 0), lang, translate_value=False)}"
+            f"{render_data_item('Position moy. pondérée', pair.get('avg_position', ''), lang, translate_value=False)}"
+            f"{render_data_item('URL canonique retenue', compact_url_for_display(canonical), lang, translate_value=False)}"
+            "</div>"
+            "<div class='business-note' style='margin-top:10px;'>"
+            "<strong>Action requise — Vérification manuelle</strong> : Variantes d'URL quasi-identiques détectées. Deux cas possibles :"
+            "<ul style='margin:6px 0 0 18px;'>"
+            "<li><strong>Si une redirection 301 est déjà en place</strong> depuis l'une vers l'autre : ignorer ce signal. "
+            "Les anciennes données GSC peuvent persister 3 à 6 mois après la pose de la redirection. "
+            "La fusion des données s'opère naturellement dans GSC à terme.</li>"
+            "<li><strong>Si les deux URLs renvoient un statut 200</strong> : il s'agit d'une cannibalisation par typo ou variante d'URL. "
+            "Choisir une URL canonique (généralement la plus récente ou la mieux optimisée) et poser une 301 depuis l'autre.</li>"
+            "</ul>"
+            "</div>"
+            "</article>"
+        )
+    return (
+        "<div style='margin-top:24px;'>"
+        "<h3 style='font-size:15px;margin-bottom:12px;'>Variantes d'URL détectées</h3>"
+        f"<div class='data-card-list'>{''.join(cards)}</div>"
+        "</div>"
+    )
 
 
 def confidence_label(value: object) -> str:
