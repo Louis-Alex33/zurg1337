@@ -5140,8 +5140,8 @@ def render_annex_links(files: list[str] | list[dict[str, object]], lang: str = "
         if not name or name in seen_names:
             continue
         seen_names.add(name)
-        cat_tag = f"<span class='annex-category'>{html.escape(category)}</span>" if category else ""
-        desc_el = f"<span class='annex-desc'>{html.escape(desc)}</span>" if desc else ""
+        cat_tag = f"<span class='annex-category'>{html.escape(_(category))}</span>" if category else ""
+        desc_el = f"<span class='annex-desc'>{html.escape(_(desc))}</span>" if desc else ""
         items_html.append(
             f"<div class='annex-item'>"
             f"<span class='annex-name'>{html.escape(name)}</span>{cat_tag}{desc_el}"

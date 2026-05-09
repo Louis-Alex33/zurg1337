@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-05-09 15:13+0200\n"
+"POT-Creation-Date: 2026-05-09 15:46+0200\n"
 "PO-Revision-Date: 2026-05-09 15:13+0200\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: en\n"
@@ -18,471 +18,753 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: gsc.py:148 gsc.py:3553 gsc.py:4387
+#: gsc.py:148 gsc.py:3569 gsc.py:4403
 msgid "Période analysée: "
 msgstr "Analyzed period: "
 
-#: gsc.py:157
+#: gsc.py:159
 msgid "clics potentiels"
 msgstr "potential clicks"
 
-#: gsc.py:3547 gsc.py:4377
+#: gsc.py:3563 gsc.py:4393
 msgid "Rapport SEO · Google Search Console"
 msgstr "SEO Report · Google Search Console"
 
-#: gsc.py:3549 gsc.py:3618 gsc.py:4478
+#: gsc.py:3565 gsc.py:3634 gsc.py:4494
 msgid "Rapport d’opportunités SEO GSC"
 msgstr "GSC SEO Opportunity Report"
 
-#: gsc.py:3550
+#: gsc.py:3566
 msgid "Basé sur les données Google Search Console exportées."
 msgstr "Based on exported Google Search Console data."
 
-#: gsc.py:3552
+#: gsc.py:3568
 msgid "Domaine"
 msgstr "Domain"
 
-#: gsc.py:3552 gsc.py:4383
+#: gsc.py:3568 gsc.py:4399
 msgid "Non précisé"
 msgstr "Not specified"
 
-#: gsc.py:3553
+#: gsc.py:3569
 msgid "Période analysée"
 msgstr "Analyzed period"
 
-#: gsc.py:3554
+#: gsc.py:3570
 msgid "Date de génération"
 msgstr "Generation date"
 
-#: gsc.py:3557 gsc.py:4394
+#: gsc.py:3573 gsc.py:4410
 msgid "Exporter en PDF"
 msgstr "Export PDF"
 
-#: gsc.py:3559
+#: gsc.py:3575
 msgid "Rapport d'opportunités GSC"
 msgstr "GSC opportunities report"
 
-#: gsc.py:3562 gsc.py:4403
+#: gsc.py:3578 gsc.py:4419
 msgid "Navigation du rapport"
 msgstr "Report navigation"
 
-#: gsc.py:3564 gsc.py:4406
+#: gsc.py:3580 gsc.py:4422
 msgid "Synthèse exécutive"
 msgstr "Executive summary"
 
-#: gsc.py:3564
+#: gsc.py:3580
 msgid "Les chiffres et décisions à retenir avant l’exécution."
 msgstr "The numbers and decisions to keep in mind before execution."
 
-#: gsc.py:3571 gsc.py:4416
+#: gsc.py:3587 gsc.py:4432
 msgid "Les 3 priorités du mois"
 msgstr "The 3 priorities for the month"
 
-#: gsc.py:3572
+#: gsc.py:3588
 msgid " pages prioritaires"
 msgstr " priority pages"
 
-#: gsc.py:3572
+#: gsc.py:3588
 msgid ""
 "Maximum 10 pages dans le PDF principal, classées par potentiel SEO et "
 "valeur business."
 msgstr ""
+"Maximum 10 pages in the main PDF, ranked by SEO potential and business "
+"value."
 
-#: gsc.py:3573
+#: gsc.py:3589
 msgid "Top opportunités requêtes par URL cible"
 msgstr "Top query opportunities by target URL"
 
-#: gsc.py:3573
+#: gsc.py:3589
 msgid ""
 "Regroupées par URL cible et action. Les requêtes brutes complètes sont "
 "dans queries_full_export.csv."
 msgstr ""
+"Grouped by target URL and action. Full raw queries are in "
+"queries_full_export.csv."
 
-#: gsc.py:3576
+#: gsc.py:3592
 msgid "Opportunités business"
 msgstr "Business opportunities"
 
-#: gsc.py:3576
+#: gsc.py:3592
 msgid ""
 "Pages à forte valeur business : équipement, comparatifs, tests, "
 "affiliation, prospects ou produits numériques."
 msgstr ""
+"High business value pages: equipment, comparisons, reviews, affiliates, "
+"prospects, or digital products."
 
-#: gsc.py:4378
+#: gsc.py:4394
 msgid "Audit SEO GSC"
 msgstr "GSC SEO Audit"
 
-#: gsc.py:4379
+#: gsc.py:4395
 msgid "Plan d'action basé sur les données Google Search Console"
 msgstr "Action plan based on Google Search Console data"
 
-#: gsc.py:4382
+#: gsc.py:4398
 msgid "Domaine analysé"
 msgstr "Analyzed domain"
 
-#: gsc.py:4386
+#: gsc.py:4402
 msgid "Période"
 msgstr "Period"
 
-#: gsc.py:4390
+#: gsc.py:4406
 msgid "Généré le"
 msgstr "Generated on"
 
-#: gsc.py:4396
+#: gsc.py:4412
 msgid "Analyse basée sur les données Google Search Console exportées."
 msgstr "Analysis based on exported Google Search Console data."
 
-#: gsc.py:4406
+#: gsc.py:4422
 msgid "Les indicateurs à retenir avant d’entrer dans le détail."
 msgstr "The key indicators before getting into the details."
 
-#: gsc.py:4407
+#: gsc.py:4423
 msgid "Indicateurs clés"
 msgstr "Key indicators"
 
-#: gsc.py:4416
+#: gsc.py:4432
 msgid "Un plan d’action volontairement court pour décider vite."
 msgstr "A deliberately short action plan for faster decisions."
 
-#: gsc.py:4421
+#: gsc.py:4437
 msgid "Priorité 1"
 msgstr "Priority 1"
 
-#: gsc.py:4421
+#: gsc.py:4437
 msgid "Top pages à traiter en premier"
 msgstr "Top pages to tackle first"
 
-#: gsc.py:4421
+#: gsc.py:4437
 msgid "Les pages avec le meilleur rapport visibilité, effort et potentiel."
 msgstr "Pages with the best mix of visibility, effort, and potential."
 
-#: gsc.py:4424
+#: gsc.py:4440
 msgid ""
 "Le potentiel théorique détecté est un ordre de grandeur, pas une "
 "promesse. À confirmer après mise en ligne et suivi dans Google Search "
 "Console."
 msgstr ""
+"The detected theoretical potential is an order of magnitude, not a "
+"promise. Confirm after publishing and Google Search Console monitoring."
 
-#: gsc.py:4428
+#: gsc.py:4444
 msgid "Exploitation des requêtes"
 msgstr "Query opportunities"
 
-#: gsc.py:4428
+#: gsc.py:4444
 msgid ""
 "Une sélection limitée aux requêtes utiles pour orienter les titles, FAQ "
 "et contenus."
-msgstr ""
+msgstr "A shortlist of useful queries to guide titles, FAQs, and content."
 
-#: gsc.py:4439
+#: gsc.py:4455
 msgid ""
 "Analyse basée sur les données Google Search Console exportées. Les "
 "recommandations doivent être priorisées avec la connaissance métier du "
 "site."
 msgstr ""
+"Analysis based on exported Google Search Console data. Recommendations "
+"should be prioritized with business knowledge of the site."
 
-#: gsc.py:4503
+#: gsc.py:4519
 msgid "Décision rapide"
 msgstr "Quick decision"
 
-#: gsc.py:4504
+#: gsc.py:4520
 msgid "À lire en 30 secondes pour décider quoi lancer en premier."
 msgstr "Read in 30 seconds to decide what to launch first."
 
-#: gsc.py:4506
+#: gsc.py:4522
 msgid "Priorité"
 msgstr "Priority"
 
-#: gsc.py:4506
+#: gsc.py:4522
 msgid "Action recommandée"
 msgstr "Recommended action"
 
-#: gsc.py:4506
+#: gsc.py:4522
 msgid "Pages concernées"
 msgstr "Affected pages"
 
-#: gsc.py:4506 gsc.py:4640
+#: gsc.py:4522 gsc.py:4656
 msgid "Impact attendu"
 msgstr "Expected impact"
 
-#: gsc.py:4506
+#: gsc.py:4522
 msgid "Effort"
 msgstr "Effort"
 
-#: gsc.py:4506
+#: gsc.py:4522
 msgid "Pourquoi maintenant"
 msgstr "Why now"
 
-#: gsc.py:4523
+#: gsc.py:4539
 msgid "À surveiller selon la position moyenne"
 msgstr "Watch according to average position"
 
-#: gsc.py:4528
+#: gsc.py:4544
 msgid "estimation qualifiée"
 msgstr "qualified estimate"
 
-#: gsc.py:4544
+#: gsc.py:4560
 msgid "selon comparaison CTR à position équivalente"
 msgstr "based on CTR comparison at equivalent position"
 
-#: gsc.py:4547
+#: gsc.py:4563
 msgid "Potentiel théorique détecté :"
 msgstr "Detected theoretical potential:"
 
-#: gsc.py:4565
+#: gsc.py:4581
 msgid "Pourquoi :"
 msgstr "Why:"
 
-#: gsc.py:4566
+#: gsc.py:4582
 msgid "Action :"
 msgstr "Action:"
 
-#: gsc.py:4567
+#: gsc.py:4583
 msgid "Impact :"
 msgstr "Impact:"
 
-#: gsc.py:4596
+#: gsc.py:4612
 msgid "Valeur business"
 msgstr "Business value"
 
-#: gsc.py:4600
+#: gsc.py:4616
 msgid "Action recommandée spécifique"
 msgstr "Specific recommended action"
 
-#: gsc.py:4610
+#: gsc.py:4626
 msgid "Objectif mesurable"
 msgstr "Measurable target"
 
-#: gsc.py:4619
+#: gsc.py:4635
 msgid "Attention : SERP enrichie suspectée"
 msgstr "Note: enriched SERP suspected"
 
-#: gsc.py:4620
+#: gsc.py:4636
 msgid ""
 "Le CTR est anormalement bas pour cette position. Des features SERP "
 "(featured snippet, Knowledge Panel, annonces) captent probablement une "
 "partie des clics. Vérifier la SERP avant d'optimiser le titre seul."
 msgstr ""
+"CTR is abnormally low for this position. SERP features (featured snippet,"
+" Knowledge Panel, ads) are likely capturing part of the clicks. Check the"
+" SERP before optimizing the title alone."
 
-#: gsc.py:4634
+#: gsc.py:4650
 msgid "Constat"
 msgstr "Finding"
 
-#: gsc.py:4637
+#: gsc.py:4653
 msgid "Effort estimé"
 msgstr "Estimated effort"
 
-#: gsc.py:4639
+#: gsc.py:4655
 msgid "Type d'action"
 msgstr "Action type"
 
-#: gsc.py:4719
+#: gsc.py:4735
 msgid "Position actuelle dans Google"
 msgstr "Current Google position"
 
-#: gsc.py:4783 gsc.py:4919
+#: gsc.py:4799 gsc.py:4935
 msgid "Action"
 msgstr "Action"
 
-#: gsc.py:4783
+#: gsc.py:4799
 msgid "URL cible"
 msgstr "Target URL"
 
-#: gsc.py:4783
+#: gsc.py:4799
 msgid "Requêtes principales"
 msgstr "Main queries"
 
-#: gsc.py:4783
+#: gsc.py:4799
 msgid "Nb"
 msgstr "Nb"
 
-#: gsc.py:4783 gsc.py:5317
+#: gsc.py:4799 gsc.py:5334
 msgid "Clics"
 msgstr "Clicks"
 
-#: gsc.py:4783
+#: gsc.py:4799
 msgid "Impr."
 msgstr "Impr."
 
-#: gsc.py:4783
+#: gsc.py:4799
 msgid "CTR"
 msgstr "CTR"
 
-#: gsc.py:4783
+#: gsc.py:4799
 msgid "Pos."
 msgstr "Pos."
 
-#: gsc.py:4822
+#: gsc.py:4838
 msgid "Résultats Google à améliorer"
 msgstr "Google results to improve"
 
-#: gsc.py:4822
+#: gsc.py:4838
 msgid ""
 "Des propositions concrètes pour rendre les titres et descriptions Google "
 "plus cliquables."
 msgstr ""
+"Concrete suggestions to make Google titles and descriptions more "
+"clickable."
 
-#: gsc.py:4843
+#: gsc.py:4859
 msgid "Résultat Google"
 msgstr "Google result"
 
-#: gsc.py:4847
+#: gsc.py:4863
 msgid "Problème"
 msgstr "Problem"
 
-#: gsc.py:4873
+#: gsc.py:4889
 msgid "Action principale"
 msgstr "Main action"
 
-#: gsc.py:4880
+#: gsc.py:4896
 msgid "Pages déjà visibles à renforcer"
 msgstr "Already visible pages to strengthen"
 
-#: gsc.py:4880
+#: gsc.py:4896
 msgid ""
 "Ces pages ont déjà une base SEO: les améliorer est souvent plus rentable "
 "que repartir de zéro."
 msgstr ""
+"These pages already have an SEO base: improving them is often more "
+"profitable than starting from scratch."
 
-#: gsc.py:4919
+#: gsc.py:4935
 msgid "Valeur"
 msgstr "Value"
 
-#: gsc.py:4919
+#: gsc.py:4935
 msgid "Monétisation"
 msgstr "Monetization"
 
-#: gsc.py:4919
+#: gsc.py:4935
 msgid "Score"
 msgstr "Score"
 
-#: gsc.py:4919
+#: gsc.py:4935
 msgid "Requête"
 msgstr "Query"
 
-#: gsc.py:4919
+#: gsc.py:4935
 msgid "Recommandation"
 msgstr "Recommendation"
 
-#: gsc.py:4944
+#: gsc.py:4960
 msgid "à valider avec l'export Requêtes"
 msgstr "to validate with the Queries export"
 
-#: gsc.py:4947
+#: gsc.py:4963
 msgid "Cluster à valider"
 msgstr "Cluster to validate"
 
-#: gsc.py:4964
+#: gsc.py:4980
 msgid "Pages en concurrence"
 msgstr "Competing pages"
 
-#: gsc.py:4964
+#: gsc.py:4980
 msgid ""
 "Seulement les groupes précis et exploitables. Les signaux faibles restent"
 " dans les CSV."
-msgstr ""
+msgstr "Only precise and actionable groups. Weak signals stay in the CSV files."
 
-#: gsc.py:5051
+#: gsc.py:5067
 msgid "Plan d'action 30 jours"
 msgstr "30-day action plan"
 
-#: gsc.py:5051
+#: gsc.py:5067
 msgid "Un déroulé court pour transformer le rapport en exécution."
 msgstr "A short sequence to turn the report into execution."
 
-#: gsc.py:5061
+#: gsc.py:5077
 msgid "Évolution du trafic"
 msgstr "Traffic trend"
 
-#: gsc.py:5061
+#: gsc.py:5077
 msgid "Évolution quotidienne des clics, si l’export Graphique est disponible."
 msgstr "Daily click trend, when the Chart export is available."
 
-#: gsc.py:5084
+#: gsc.py:5100
 msgid "Comment lire ce rapport"
 msgstr "How to read this report"
 
-#: gsc.py:5084
+#: gsc.py:5100
 msgid "Les règles de lecture pour éviter les mauvaises interprétations."
 msgstr "Reading rules to avoid misinterpretation."
 
-#: gsc.py:5096
+#: gsc.py:5112
 msgid "Annexes"
 msgstr "Appendices"
 
-#: gsc.py:5096
+#: gsc.py:5112
 msgid "Données complètes et limites méthodologiques."
 msgstr "Complete data and methodology limits."
 
-#: gsc.py:5097
+#: gsc.py:5113
 msgid "Tableau complet des pages analysées"
 msgstr "Full table of analyzed pages"
 
-#: gsc.py:5099
+#: gsc.py:5115
 msgid "Tableau complet des requêtes"
 msgstr "Full query table"
 
-#: gsc.py:5101
+#: gsc.py:5117
 msgid "Détails méthodologiques et limites"
 msgstr "Methodology details and limits"
 
-#: gsc.py:5103
+#: gsc.py:5119
 msgid ""
 "Google Search Console agrège les positions et les taux de clic: ce ne "
 "sont pas des mesures page par page en temps réel."
 msgstr ""
+"Google Search Console aggregates positions and click-through rates: these"
+" are not real-time page-by-page measurements."
 
-#: gsc.py:5104
+#: gsc.py:5120
 msgid ""
 "Ce rapport est basé sur les exports Google Search Console fournis. Il "
 "identifie les opportunités SEO visibles dans GSC, mais ne remplace pas un"
 " audit technique crawl complet."
 msgstr ""
+"This report is based on the provided Google Search Console exports. It "
+"identifies SEO opportunities visible in GSC, but does not replace a full "
+"technical crawl audit."
 
-#: gsc.py:5105
+#: gsc.py:5121
 msgid ""
 "Les estimations de clics récupérables donnent un ordre de grandeur sur la"
 " période exportée."
 msgstr ""
+"Recoverable click estimates give an order of magnitude for the exported "
+"period."
 
-#: gsc.py:5137
+#: gsc.py:5153
 msgid "Annexes séparées"
 msgstr "Separate appendices"
 
-#: gsc.py:5137
+#: gsc.py:5153
 msgid ""
 "Les tableaux complets sont fournis en annexes CSV. Le PDF principal reste"
 " volontairement court pour la décision."
 msgstr ""
+"Full tables are provided as CSV appendices. The main PDF stays "
+"intentionally short for decision-making."
 
-#: gsc.py:5292
-msgid "Origine du trafic"
-msgstr "Traffic origin"
-
-#: gsc.py:5292
-msgid "Répartition des clics par pays et par appareil."
-msgstr "Clicks split by country and device."
-
-#: gsc.py:5295
-msgid "Par pays"
-msgstr "By country"
-
-#: gsc.py:5299
-msgid "Par appareil"
-msgstr "By device"
-
-
-#: gsc.py:render_filter_bar
-msgid "Urgence"
-msgstr "Priority"
-
-#: gsc.py:render_filter_bar
+#: gsc.py:5241
 msgid "Toutes"
 msgstr "All"
 
-#: gsc.py:render_filter_bar
+#: gsc.py:5241
 msgid "Haute"
 msgstr "High"
 
-#: gsc.py:render_filter_bar
+#: gsc.py:5241
 msgid "Moyenne"
 msgstr "Medium"
+
+#: gsc.py:5241
+msgid "Faible"
+msgstr "Low"
+
+#: gsc.py:5247
+msgid "Urgence"
+msgstr "Priority"
+
+#: gsc.py nav
+msgid "Synthèse"
+msgstr "Summary"
+
+#: gsc.py nav
+msgid "Priorités"
+msgstr "Priorities"
+
+#: gsc.py nav
+msgid "Pages"
+msgstr "Pages"
+
+#: gsc.py nav
+msgid "Requêtes"
+msgstr "Queries"
+
+#: gsc.py nav
+msgid "Résultats Google"
+msgstr "Google results"
+
+#: gsc.py nav
+msgid "À renforcer"
+msgstr "Strengthen"
+
+#: gsc.py nav
+msgid "Méthode"
+msgstr "Method"
+
+#: gsc.py source_notes
+msgid "Ce rapport est basé sur les exports Google Search Console fournis. Il identifie les opportunités SEO visibles dans GSC, mais ne remplace pas un audit technique crawl complet."
+msgstr "This report is based on the provided Google Search Console exports. It identifies SEO opportunities visible in GSC, but does not replace a full technical crawl audit."
+
+#: gsc.py source_notes period_note
+msgid "Comparaison entre deux périodes: export précédent fourni, les variations peuvent être contextualisées."
+msgstr "Two-period comparison: previous export provided, changes can be contextualized."
+
+#: gsc.py source_notes period_note
+msgid "Analyse de la période actuelle: aucun export précédent fourni, ce rapport identifie des opportunités sur la visibilité actuelle."
+msgstr "Current period analysis: no previous export provided, this report identifies opportunities in current visibility."
+
+#: gsc.py source_notes previous_note
+msgid "Export Pages précédent: fourni, les variations peuvent être contextualisées."
+msgstr "Previous Pages export: provided, changes can be contextualized."
+
+#: gsc.py source_notes previous_note
+msgid "Export Pages précédent: non fourni, la lecture reste centrée sur la période actuelle."
+msgstr "Previous Pages export: not provided, the reading stays focused on the current period."
+
+#: gsc.py source_notes
+msgid "Sans export précédent, ce rapport ne diagnostique pas une baisse de trafic."
+msgstr "Without a previous export, this report does not diagnose a traffic drop."
+
+#: gsc.py source_notes
+msgid "Les baisses et gains doivent être lus comme des variations entre les deux exports fournis."
+msgstr "Drops and gains should be read as changes between the two provided exports."
+
+#: gsc.py source_notes
+msgid "Export Requêtes: fourni et exploité pour qualifier les intentions de recherche."
+msgstr "Queries export: provided and used to qualify search intent."
+
+#: gsc.py source_notes
+msgid "Export Requêtes: non fourni, les recommandations s'appuient surtout sur les pages."
+msgstr "Queries export: not provided, recommendations mostly rely on pages."
+
+#: gsc.py kpis
+msgid "Pages analysées"
+msgstr "Analyzed pages"
+
+#: gsc.py kpis
+msgid "Clics totaux"
+msgstr "Total clicks"
+
+#: gsc.py kpis
+msgid "Impressions totales"
+msgstr "Total impressions"
+
+#: gsc.py kpis
+msgid "Taux de clic moyen"
+msgstr "Average click-through rate"
+
+#: gsc.py kpis
+msgid "Position moyenne"
+msgstr "Average position"
+
+#: gsc.py kpis
+msgid "Pages prioritaires"
+msgstr "Priority pages"
+
+#: gsc.py kpis
+msgid "Requêtes exploitables"
+msgstr "Actionable queries"
+
+#: gsc.py kpis
+msgid "Potentiel théorique détecté"
+msgstr "Detected theoretical potential"
+
+#: gsc.py kpis
+msgid "Voir note"
+msgstr "See note"
+
+#: gsc.py build_query_sections
+msgid "Top requêtes avec beaucoup d'impressions et peu de clics"
+msgstr "Top queries with many impressions and few clicks"
+
+#: gsc.py build_query_sections
+msgid "Top requêtes déjà proches d'un gain"
+msgstr "Top queries already close to a gain"
+
+#: gsc.py build_query_sections
+msgid "Requêtes à intégrer dans les pages existantes"
+msgstr "Queries to add to existing pages"
+
+#: gsc.py build_query_sections
+msgid "Requêtes pouvant justifier un nouveau contenu"
+msgstr "Queries that may justify new content"
+
+#: gsc.py annex_files
+msgid "Pages prioritaires uniquement (signal fort)"
+msgstr "Priority pages only (strong signal)"
+
+#: gsc.py annex_files
+msgid "Requêtes exploitables filtrées (signal fort)"
+msgstr "Filtered actionable queries (strong signal)"
+
+#: gsc.py annex_files
+msgid "Propositions de title/meta pour les résultats Google à améliorer"
+msgstr "Title/meta suggestions for Google results to improve"
+
+#: gsc.py annex_files
+msgid "Groupes de pages en concurrence détectés"
+msgstr "Detected competing page groups"
+
+#: gsc.py annex_files
+msgid "Toutes les pages avec données GSC complètes"
+msgstr "All pages with full GSC data"
+
+#: gsc.py annex_files
+msgid "Toutes les requêtes avec données GSC complètes"
+msgstr "All queries with full GSC data"
+
+#: gsc.py annex_files
+msgid "Export complet des opportunités toutes pages confondues"
+msgstr "Full export of opportunities across all pages"
+
+#: gsc.py annex_files
+msgid "prioritaire"
+msgstr "priority"
+
+#: gsc.py annex_files
+msgid "brut"
+msgstr "raw"
+
+#: gsc.py build_monthly_priorities build_quick_decisions
+msgid "Améliorer les résultats Google des pages à fortes impressions"
+msgstr "Improve Google results for high-impression pages"
+
+#: gsc.py build_monthly_priorities
+msgid "Les pages visibles doivent donner une raison plus claire de cliquer."
+msgstr "Visible pages need to give users a clearer reason to click."
+
+#: gsc.py build_monthly_priorities
+msgid "Réécrire les titles, les meta descriptions et l'angle d'entrée des pages prioritaires."
+msgstr "Rewrite titles, meta descriptions, and the entry angle of priority pages."
+
+#: gsc.py build_monthly_priorities
+msgid "Potentiel d'amélioration du taux de clic sans attendre une progression de position."
+msgstr "Potential click-through-rate improvement without waiting for ranking gains."
+
+#: gsc.py build_monthly_priorities
+msgid "Renforcer les pages proches du haut des résultats"
+msgstr "Strengthen pages close to the top results"
+
+#: gsc.py build_monthly_priorities
+msgid "Les pages avec une base SEO existante sont souvent plus rentables à améliorer que des contenus neufs."
+msgstr "Pages with an existing SEO base are often more profitable to improve than new content."
+
+#: gsc.py build_monthly_priorities
+msgid "Enrichir le contenu, ajouter une FAQ, mettre à jour les informations et renforcer le maillage interne."
+msgstr "Enrich the content, add an FAQ, update information, and strengthen internal linking."
+
+#: gsc.py build_monthly_priorities
+msgid "Gain potentiel plus rapide car les pages ont déjà une visibilité Google."
+msgstr "Potentially faster gain because the pages already have Google visibility."
+
+#: gsc.py build_monthly_priorities
+msgid "Exploiter les requêtes sous-utilisées"
+msgstr "Use underused queries"
+
+#: gsc.py build_monthly_priorities
+msgid "Cette piste sera à confirmer dès qu'un export Requêtes sera disponible."
+msgstr "This path should be confirmed as soon as a Queries export is available."
+
+#: gsc.py build_monthly_priorities
+msgid "Ajouter des sections ciblées dans les pages existantes ou créer des contenus satellites lorsque l'intention est distincte."
+msgstr "Add targeted sections to existing pages or create supporting content when the intent is distinct."
+
+#: gsc.py build_monthly_priorities
+msgid "Potentiel de trafic plus qualifié, à valider après mise en ligne et suivi GSC."
+msgstr "Potential for more qualified traffic, to validate after publishing and GSC monitoring."
+
+#: gsc.py build_quick_decisions
+msgid "Traiter les pages à plus fort potentiel de clics"
+msgstr "Tackle the highest-potential pages"
+
+#: gsc.py build_quick_decisions
+msgid "Potentiel théorique prioritaire"
+msgstr "Priority theoretical potential"
+
+#: gsc.py build_quick_decisions
+msgid "Elles concentrent le plus de clics récupérables parmi les pages du top 10."
+msgstr "They concentrate the most recoverable clicks among the top 10 pages."
+
+#: gsc.py build_quick_decisions
+msgid "Réécrire les résultats Google sous-cliqués"
+msgstr "Rewrite under-clicked Google results"
+
+#: gsc.py build_quick_decisions
+msgid "Taux de clic à améliorer"
+msgstr "Click-through rate to improve"
+
+#: gsc.py build_quick_decisions
+msgid "Ces pages sont déjà affichées dans Google mais leur CTR est en dessous de la médiane."
+msgstr "These pages already appear in Google but their CTR is below the median."
+
+#: gsc.py build_quick_decisions
+msgid "Intentions mieux couvertes"
+msgstr "Better covered intents"
+
+#: gsc.py build_quick_decisions
+msgid "Les requêtes GSC montrent les angles réellement demandés par les utilisateurs."
+msgstr "GSC queries show the angles people actually search for."
+
+#: gsc.py build_quick_decisions
+msgid "Valider les arbitrages avant production"
+msgstr "Validate decisions before production"
+
+#: gsc.py build_quick_decisions
+msgid "Moins d'actions inutiles"
+msgstr "Fewer unnecessary actions"
+
+#: gsc.py build_quick_decisions
+msgid "Le rapport priorise GSC, sans remplacer un crawl technique complet."
+msgstr "The report prioritizes GSC signals without replacing a technical crawl."
+
+#: gsc.py build_quick_decisions
+msgid "moyen"
+msgstr "medium"
+
+#: gsc.py build_quick_decisions
+msgid "faible"
+msgstr "low"
+
+#: gsc.py:5309
+msgid "Origine du trafic"
+msgstr "Traffic origin"
+
+#: gsc.py:5309
+msgid "Répartition des clics par pays et par appareil."
+msgstr "Clicks split by country and device."
+
+#: gsc.py:5312
+msgid "Par pays"
+msgstr "By country"
+
+#: gsc.py:5316
+msgid "Par appareil"
+msgstr "By device"
+
