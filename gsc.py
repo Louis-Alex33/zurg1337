@@ -1431,6 +1431,16 @@ def classify_page_type(url: str, main_query: str = "") -> str:
     return "editorial"
 
 
+GENERIC_QUERY_STOPLIST = {"comparatif", "test", "avis", "guide", "tuto", "prix", "achat", "meilleur", "top", "comparer", "produit"}
+
+
+def _is_generic_query(query: str) -> bool:
+    """Return True if query is a mono-word generic term that should not trigger business scoring."""
+    q = query.strip().lower()
+    words = [w for w in q.split() if len(w) > 2]
+    return q in GENERIC_QUERY_STOPLIST or len(words) < 2
+
+
 def estimate_business_value(
     url: str,
     title: str = "",
@@ -1438,6 +1448,9 @@ def estimate_business_value(
     page_type: str = "",
     site_context: str = "affiliate_media",
 ) -> tuple[str, str, str]:
+    main_query = (queries or [""])[0]
+    if main_query and _is_generic_query(main_query):
+        return "low", "Requête générique mono-mot sans valeur business directe.", "none"
     haystack = strip_accents(" ".join([url, title, page_type, " ".join(queries or [])])).lower()
     commercial_modifiers = ("meilleur", "meilleure", "avis", "comparatif", "test", "acheter", "achat", "prix", "promo", "choisir")
     if page_type == "practical guide" and not any(term in haystack for term in commercial_modifiers):
@@ -2619,6 +2632,13 @@ def check_snippet_uniqueness(snippets: list[dict[str, object]]) -> list[str]:
     return duplicate_urls
 
 
+def _truncate_title(s: str, max_len: int = 60) -> str:
+    if len(s) <= max_len:
+        return s
+    cut = s[:max_len].rsplit(' ', 1)[0]
+    return cut.rstrip(' ,;:—-')
+
+
 def _diversify_snippet_card(card: dict[str, object], existing_cards: list[dict[str, object]], item: GSCPageAnalysis) -> dict[str, object]:
     """Applique un suffixe différenciant si le snippet est trop similaire aux cartes existantes."""
     import difflib
@@ -2628,12 +2648,14 @@ def _diversify_snippet_card(card: dict[str, object], existing_cards: list[dict[s
         t_ratio = difflib.SequenceMatcher(None, title, str(existing.get("title_example", ""))).ratio()
         m_ratio = difflib.SequenceMatcher(None, meta, str(existing.get("meta_example", ""))).ratio()
         if t_ratio >= 0.85 or m_ratio >= 0.85:
-            # Suffixe différenciant basé sur la requête principale
             query = str(card.get("main_query", "")) or display_page_label(str(card.get("url", "")))
-            suffix = f" — focus {query[:40]}" if query else ""
             card = dict(card)
-            card["title_example"] = str(card.get("title_example", ""))[:55] + suffix
-            card["title_example"] = card["title_example"][:65]
+            base_title = str(card.get("title_example", ""))
+            if query and len(query) <= 35:
+                suffix = f" — focus {query}"
+                card["title_example"] = _truncate_title(base_title, 65 - len(suffix)) + suffix
+            else:
+                card["title_example"] = _truncate_title(base_title, 65)
             break
     return card
 

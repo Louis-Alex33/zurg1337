@@ -16,6 +16,7 @@ from gsc import (
     detect_cannibalization_groups,
     detect_csv_dialect,
     detect_possible_query_overlap,
+    estimate_business_value,
     estimate_recoverable_clicks,
     format_ctr,
     generate_snippet_recommendation,
@@ -32,6 +33,8 @@ from gsc import (
     render_report,
     run_gsc_analysis,
     validate_rendered_gsc_html,
+    _truncate_title,
+    _diversify_snippet_card,
 )
 from models import AuditPage, GSCPageAnalysis, GSCPageData, GSCQueryData
 
@@ -665,6 +668,66 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertEqual(normalize_url_for_matching("HTTP://www.Example.com/Final/?utm=1#x"), "example.com/final")
         self.assertTrue(match["matched"])
         self.assertEqual(match["match_type"], "final_url")
+
+
+class GenericQueryStoplistTests(unittest.TestCase):
+    def test_mono_word_generic_query_is_not_high_business(self) -> None:
+        for word in ("comparatif", "test", "avis", "guide", "prix", "achat", "meilleur", "top", "comparer", "produit", "tuto"):
+            value, _, _ = estimate_business_value(
+                url="https://example.com/page",
+                queries=[word],
+            )
+            self.assertNotEqual(
+                value, "high",
+                f"Generic mono-word query '{word}' should not yield high business value",
+            )
+
+    def test_multi_word_query_with_commercial_term_still_qualifies(self) -> None:
+        value, _, _ = estimate_business_value(
+            url="https://example.com/raquette-padel",
+            queries=["comparatif raquette padel"],
+        )
+        self.assertEqual(value, "high")
+
+    def test_single_meaningful_word_query_falls_back_to_low(self) -> None:
+        # Even a product term like "raquette" alone is a mono-word query → low
+        # Business value comes from URL/title context, not bare single-word query
+        value, _, _ = estimate_business_value(
+            url="https://example.com/raquette-padel",
+            queries=["raquette"],
+        )
+        self.assertEqual(value, "low")
+
+
+class TruncateTitleTests(unittest.TestCase):
+    def test_short_title_unchanged(self) -> None:
+        s = "Quand changer raquette padel"
+        self.assertEqual(_truncate_title(s, 60), s)
+
+    def test_no_mid_word_cut(self) -> None:
+        s = "Quand changer raquette padel : critères, avis et choix"
+        result = _truncate_title(s, 40)
+        last_char = result[-1] if result else ""
+        # must not end mid-word (no partial token)
+        self.assertFalse(result.endswith("qu"), f"Ends mid-word: {result!r}")
+        self.assertFalse(result.endswith("ch"), f"Ends mid-word: {result!r}")
+        self.assertLessEqual(len(result), 40)
+
+    def test_no_trailing_punctuation(self) -> None:
+        s = "Raquette padel babolat technical viper : critères"
+        result = _truncate_title(s, 35)
+        self.assertNotIn(result[-1], " ,;:—-", f"Trailing punct: {result!r}")
+
+    def test_diversify_card_title_no_fragment(self) -> None:
+        long_title = "Quand changer raquette padel : critères, avis et choix complets"
+        card: dict[str, object] = {"title_example": long_title, "meta_example": long_title, "main_query": "raquette padel conseil"}
+        existing: dict[str, object] = {"title_example": long_title, "meta_example": long_title}
+        result = _diversify_snippet_card(card, [existing], GSCPageAnalysis(url="https://example.com/", clicks=0, impressions=0, ctr=0.0, position=5.0))
+        title = str(result["title_example"])
+        self.assertLessEqual(len(title), 65)
+        # last token must not be a 1-2 char fragment
+        last_word = title.rstrip(" ,;:—-").rsplit(" ", 1)[-1]
+        self.assertGreater(len(last_word), 2, f"Ends on fragment: {title!r}")
 
 
 if __name__ == "__main__":
