@@ -3306,6 +3306,9 @@ def write_html(
     )
     warn_gsc_quality(validate_gsc_report_quality(report), output_path)
     html_doc = render_report(report)
+    if lang != "fr":
+        from html_translate import translate_html
+        html_doc = translate_html(html_doc, lang)
     warn_gsc_quality(validate_rendered_gsc_html(html_doc, report), output_path)
     with output_file.open("w", encoding="utf-8") as handle:
         handle.write(html_doc)
