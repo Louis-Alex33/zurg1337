@@ -165,6 +165,8 @@ REPORT_TEXT = {
         "explication_description_generique": "Description proposée pour rendre l'extrait plus concret et exploitable.",
         "explication_titre_local": "Titre resserré pour éviter la troncature dans Google.",
         "explication_description_local": "Description reformulée pour garder un extrait clair et exploitable dans les résultats.",
+        "desc_label_reformulee": "Description reformulée",
+        "desc_label_proposee": "Description proposée",
     },
     "en": {
         "seo_report": "SEO REPORT",
@@ -310,6 +312,8 @@ REPORT_TEXT = {
         "explication_description_generique": "Proposed description to make the snippet more concrete and actionable.",
         "explication_titre_local": "Title trimmed to avoid truncation in Google.",
         "explication_description_local": "Description rewritten to keep the snippet clear and actionable in search results.",
+        "desc_label_reformulee": "Rewritten description",
+        "desc_label_proposee": "Proposed description",
     },
 }
 
@@ -493,32 +497,20 @@ ENGLISH_LANGUAGE_MARKERS = {
 }
 
 BAD_TITLE_END_WORDS = {
-    "aux",
-    "et",
-    "ou",
+    "aux", "au",
+    "et", "ou", "mais",
     "avec",
-    "de",
-    "des",
-    "du",
-    "pour",
-    "sur",
-    "en",
-    "dans",
-    "a",
-    "à",
-    "la",
-    "le",
-    "les",
-    "un",
-    "une",
-    "notre",
-    "votre",
-    "the",
-    "and",
-    "with",
-    "for",
-    "of",
-    "to",
+    "de", "des", "du",
+    "pour", "sur", "en", "dans", "par", "vers",
+    "a", "à",
+    "la", "le", "les",
+    "un", "une",
+    "notre", "votre", "nos", "vos", "mon", "ma", "mes",
+    # Infinitifs courts non couverts par la regex (< 6 chars)
+    "faire", "aller", "voir", "être", "avoir",
+    "use", "make", "get", "go", "see", "have", "be",
+    "the", "and", "or", "but",
+    "with", "for", "of", "to", "in", "at", "by", "from",
 }
 
 FORBIDDEN_RECOMMENDATION_TERMS = (
@@ -572,11 +564,20 @@ SEUIL_DESC_LONGUE = META_MAX_LEN
 # Mots grammaticaux sur lesquels il est inacceptable de couper un titre suggéré.
 # Couper sur un déterminant ou une préposition produit un fragment pire que l'original.
 _SMART_TRUNCATE_BAD_ENDINGS = frozenset({
-    "le", "la", "les", "l", "un", "une", "des", "du", "de", "d", "mon", "votre", "notre",
+    "le", "la", "les", "l", "un", "une", "des", "du", "de", "d",
+    "mon", "ma", "mes", "votre", "vos", "notre", "nos",
     "et", "ou", "mais", "donc", "or", "ni", "car",
     "à", "a", "de", "en", "pour", "vers", "par", "sur", "dans", "avec", "sans", "sous",
+    "au", "aux",
     "est", "sont", "a", "ont", "être", "avoir",
+    # Infinitifs orphelins courants (terminaison -er/-ir/-re sans complément)
+    "passer", "faire", "aller", "voir", "avoir", "être", "venir", "prendre",
+    "donner", "trouver", "partir", "mettre", "savoir", "vouloir", "pouvoir",
+    "choisir", "finir", "sortir", "tenir", "obtenir", "réussir", "améliorer",
+    "utiliser", "comprendre", "apprendre", "suivre", "vivre", "écrire", "lire",
     "the", "a", "an", "of", "in", "for", "to", "by", "on", "at", "from", "and", "or", "but",
+    # Infinitifs orphelins EN
+    "use", "make", "get", "go", "see", "have", "be", "come", "take", "give",
 })
 
 
@@ -899,11 +900,23 @@ def title_in_grey_zone(page: dict[str, Any]) -> bool:
     return bool(title) and TITLE_MAX_LEN < len(title) <= TITLE_HARD_LIMIT
 
 
+_DESC_CLEAN_END_RE = re.compile(r"[.!?]\s*$")
+_DESC_DIRTY_END_RE = re.compile(r"[,;:…]\s*$")  # virgule, points de suspension, etc.
+
+def _desc_ends_cleanly(desc: str) -> bool:
+    """True si la description se termine sur une ponctuation forte (. ! ?)."""
+    return bool(_DESC_CLEAN_END_RE.search(desc.strip()))
+
 def needs_desc_fix(page: dict[str, Any]) -> bool:
     desc = str(page.get("description_google") or "")
     if not desc:
         return True
-    return len(desc) < META_MIN_LEN or len(desc) > META_MAX_LEN
+    n = len(desc)
+    # Zone acceptable : 70-160 chars terminé sur ponctuation forte → pas de suggestion
+    if META_MIN_LEN <= n <= 160 and _desc_ends_cleanly(desc):
+        return False
+    # Trop courte, trop longue (>160), ou coupée en milieu de phrase
+    return True
 
 
 def analyste_name_is_valid(value: str) -> bool:
@@ -2259,10 +2272,17 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
                 if desc
                 else ""
             )
+            # Badge dynamique : "reformulée" si description existante retravaillée, "proposée" si nouvelle
+            expl_desc = str(suggestion.get("explication_description") or "")
+            _desc_badge = (
+                t("desc_label_reformulee")
+                if "reformul" in expl_desc.lower() or "rewritten" in expl_desc.lower()
+                else t("desc_label_proposee")
+            )
             desc_block = f"""
     <div class="suggestion-bloc">
       <div class="suggestion-bloc-header">
-        <span class="suggestion-type">{escape(t("description_google"))}</span>
+        <span class="suggestion-type">{escape(t("description_google"))} <span class="suggestion-type-badge">{escape(_desc_badge)}</span></span>
         {desc_status}
       </div>
       {current_desc}
@@ -3097,9 +3117,19 @@ def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]], lang: s
     except ImportError:
         return []
     is_en = sanitize_report_language(lang) == "en"
-    def _first_200_words(text: str) -> str:
+    def _first_300_words(text: str) -> str:
         words = re.split(r"\s+", text.strip())
-        return " ".join(words[:200])
+        return " ".join(words[:300])
+
+    def _desc_problem(page: dict[str, Any]) -> str:
+        desc = str(page.get("description_google") or "")
+        if not desc:
+            return "absente"
+        if len(desc) > 160:
+            return "trop_longue"
+        if not _desc_ends_cleanly(desc):
+            return "coupee_milieu_phrase"
+        return "trop_courte"
 
     pages_json = json.dumps(
         [
@@ -3108,15 +3138,16 @@ def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]], lang: s
                 "slug": slug_to_title(page["url"]),
                 "titre_actuel": page.get("titre_google", ""),
                 "h1": (page.get("h1") or [""])[0] if isinstance(page.get("h1"), list) else str(page.get("h1") or ""),
-                "contenu_extrait": _first_200_words(str(page.get("description_google") or "")),
+                "contenu_extrait": _first_300_words(str(page.get("description_google") or "")),
                 "description_actuelle": page.get("description_google", ""),
+                "probleme_description": _desc_problem(page),
                 "nb_mots": page.get("mots", 0),
                 "type": page.get("type", "page"),
                 "problemes": {
                     "titre_absent": not page.get("titre_google"),
                     "titre_trop_long": len(str(page.get("titre_google") or "")) > SEUIL_TITRE_LONG,
                     "description_absente": not page.get("description_google"),
-                    "description_trop_longue": len(str(page.get("description_google") or "")) > SEUIL_DESC_LONGUE,
+                    "description_trop_longue": len(str(page.get("description_google") or "")) > 160,
                     "description_trop_courte": 0 < len(str(page.get("description_google") or "")) < SEUIL_DESC_COURTE,
                 },
             }
@@ -3126,17 +3157,15 @@ def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]], lang: s
         indent=2,
     )
     if is_en:
-        prompt = f"""You are an SEO expert. For each page below, generate an optimized Google title and an optimized Google description.
+        prompt = f"""You are an SEO expert. For each page below, generate an optimized Google title and/or description as needed.
 
 Strict rules:
-- Title: between 50 and 60 characters maximum
-- Description: between 140 and 155 characters — use the h1, slug and contenu_extrait fields to write a specific, non-generic description faithful to the page content
-- Language: same language as the current title
-- Tone: professional, engaging, faithful to the subject
-- Do not invent content that does not exist
-- If the current title is not missing or too long, leave "titre_suggere" empty and "titre_longueur" at 0
+- Title: between 50 and 65 characters. Only propose if problemes.titre_absent or problemes.titre_trop_long. Otherwise leave "titre_suggere" empty and "titre_longueur" at 0.
+- Description: between 140 and 155 characters. Use h1, slug and contenu_extrait to write a specific, faithful description. If probleme_description is "absente", write a new description from scratch ("proposee"). If "trop_longue" or "coupee_milieu_phrase", rewrite cleanly ("reformulee"). Always end on strong punctuation (. ! ?).
+- Language: same as current title
+- Tone: informative, neutral, faithful to the page content
+- Do not invent content
 - Never propose the same title as the current one
-- Do not pad a correct title with a generic suffix like ": key information"
 - Write explication_titre and explication_description in English
 
 Pages to fix:
@@ -3150,22 +3179,22 @@ Reply ONLY with valid JSON, no markdown, no backticks, no comments:
     "titre_longueur": 0,
     "description_suggeree": "...",
     "description_longueur": 0,
+    "desc_was_present": true,
     "explication_titre": "...",
     "explication_description": "..."
   }}
 ]"""
     else:
-        prompt = f"""Tu es un expert SEO. Pour chaque page ci-dessous, génère un titre Google optimisé et une description Google optimisée.
+        prompt = f"""Tu es un expert SEO. Pour chaque page ci-dessous, génère un titre Google optimisé et/ou une description optimisée selon les besoins.
 
 Règles strictes :
-- Titre : entre 50 et 60 caractères maximum
-- Description : entre 140 et 155 caractères — utilise les champs h1, slug et contenu_extrait pour rédiger une description spécifique, non générique, fidèle au contenu de la page
+- Titre : entre 50 et 65 caractères. Ne propose que si problemes.titre_absent ou problemes.titre_trop_long. Sinon laisse "titre_suggere" vide et "titre_longueur" à 0.
+- Description : entre 140 et 155 caractères. Utilise h1, slug et contenu_extrait pour rédiger une description spécifique et fidèle. Si probleme_description est "absente", crée une description entièrement nouvelle ("proposée"). Si "trop_longue" ou "coupee_milieu_phrase", réécris proprement ("reformulée"). Termine toujours sur une ponctuation forte (. ! ?).
 - Langue : même langue que le titre actuel
-- Ton : professionnel, accrocheur, fidèle au sujet
-- Ne pas inventer de contenu qui n'existe pas
-- Si le titre actuel n'est pas absent ou trop long, laisse "titre_suggere" vide et "titre_longueur" à 0
-- Ne propose jamais le même titre que le titre actuel
-- N'allonge pas un titre correct avec un suffixe générique comme ": informations essentielles"
+- Ton : informatif, neutre, fidèle au contenu
+- Ne pas inventer de contenu
+- Ne propose jamais le même titre que l'actuel
+- N'allonge pas un titre correct avec un suffixe générique
 
 Pages à corriger :
 {pages_json}
@@ -3178,6 +3207,7 @@ Réponds UNIQUEMENT avec un JSON valide, sans markdown, sans backticks, sans com
     "titre_longueur": 0,
     "description_suggeree": "...",
     "description_longueur": 0,
+    "desc_was_present": true,
     "explication_titre": "...",
     "explication_description": "..."
   }}
@@ -3228,27 +3258,45 @@ def build_local_seo_suggestion(page: dict[str, Any]) -> dict[str, Any]:
 def _smart_truncate(text: str, max_len: int) -> str | None:
     """Tronque au dernier mot complet grammaticalement acceptable.
 
+    Priorité de coupe : ponctuation forte (. : ? !) dans la fenêtre, sinon dernier espace.
     Retourne None si aucune troncature acceptable n'est trouvable
     (fragment trop court < TITLE_MIN_LEN, ou dernier mot grammatical vide).
     Retourne le texte inchangé si déjà sous la limite.
     """
     _ORPHAN_PUNCT = frozenset(".,;:-—?!«»")
+    _STRONG_PUNCT_RE = re.compile(r"[.!?:]\s")
 
     cleaned = re.sub(r"\s+", " ", text).strip()
     if len(cleaned) <= max_len:
         return cleaned
+
+    # Priorité : couper sur dernière ponctuation forte dans la fenêtre
+    window = cleaned[:max_len]
+    strong_match = None
+    for m in _STRONG_PUNCT_RE.finditer(window):
+        strong_match = m
+    if strong_match:
+        candidate = window[: strong_match.start() + 1].strip()
+        candidate = candidate.strip(" -|")
+        if candidate and len(candidate) >= TITLE_MIN_LEN:
+            # Vérifier que le fragment ne finit pas sur un mauvais mot après la ponctuation
+            last_word = re.sub(r"[^A-Za-zÀ-ÿ'-]+", "", candidate.split()[-1]).casefold()
+            if last_word not in _SMART_TRUNCATE_BAD_ENDINGS:
+                return candidate
+
+    # Fallback : dernier espace avant max_len
     candidate = cleaned[:max_len].rsplit(" ", 1)[0].strip()
-    # Supprimer la ponctuation orpheline de fin (y compris ?, !, :, ...)
+    # Supprimer la ponctuation orpheline de fin
     while candidate and candidate[-1] in _ORPHAN_PUNCT:
         candidate = candidate[:-1].strip()
     candidate = candidate.strip(" -|")
     if not candidate or len(candidate) < TITLE_MIN_LEN:
         return None
-    # Remonter tant que le dernier mot est grammatical
+    # Remonter tant que le dernier mot est grammatical ou infinitif orphelin
     words = candidate.split()
     while words and re.sub(r"[^A-Za-zÀ-ÿ'-]+", "", words[-1]).casefold() in _SMART_TRUNCATE_BAD_ENDINGS:
         words.pop()
-    # Supprimer la ponctuation orpheline après avoir retiré le mot grammatical
+    # Supprimer la ponctuation orpheline après avoir retiré le mot
     candidate = " ".join(words).strip()
     while candidate and candidate[-1] in _ORPHAN_PUNCT:
         candidate = candidate[:-1].strip()
@@ -3262,8 +3310,12 @@ def fit_seo_title(title: str, url: str) -> str:
     cleaned = re.sub(r"\s+", " ", title).strip(" -|")
     if not cleaned:
         cleaned = slug_to_title(url)
+    was_truncated = len(cleaned) > TITLE_MAX_LEN
     fitted = _smart_truncate(cleaned, TITLE_MAX_LEN)
     if fitted is None or title_looks_truncated(fitted):
+        return ""
+    # Rejeter seulement si une troncature a produit un fragment trop court (< 50 chars)
+    if was_truncated and len(fitted) < 50:
         return ""
     return fitted
 
@@ -3290,8 +3342,12 @@ def sanitize_seo_suggestion(page: dict[str, Any], suggestion: dict[str, Any]) ->
         if not title_suggested:
             title_suggested = fit_seo_title(title_current, url)
         else:
+            orig_len = len(title_suggested)
             smart = _smart_truncate(title_suggested, TITLE_MAX_LEN)
             title_suggested = smart if smart is not None else ""
+            # Rejeter si une troncature a produit un fragment trop court (< 50 cars)
+            if title_suggested and orig_len > TITLE_MAX_LEN and len(title_suggested) < 50:
+                title_suggested = ""
         if title_looks_truncated(title_suggested):
             title_suggested = ""
         if title_suggested and not same_normalized_text(title_current, title_suggested):
@@ -3304,29 +3360,44 @@ def sanitize_seo_suggestion(page: dict[str, Any], suggestion: dict[str, Any]) ->
         remove_title_suggestion(cleaned)
 
     desc_suggested = re.sub(r"\s+", " ", str(cleaned.get("description_suggeree") or "")).strip()
-    target_language = infer_seo_language(title_current, str(page.get("description_google") or ""), slug_to_title(url))
+    desc_original = str(page.get("description_google") or "")
+    target_language = infer_seo_language(title_current, desc_original, slug_to_title(url))
     if needs_desc_fix(page):
+        # desc_was_present : True si la LLM a reçu une description existante à reformuler
+        # (transmis dans le JSON LLM), sinon on déduit depuis la page
+        desc_had_content = bool(cleaned.get("desc_was_present", bool(desc_original.strip())))
         seed_title = str(cleaned.get("titre_suggere") or title_current or slug_to_title(url))
         if (
             not desc_suggested
             or not (META_MIN_LEN <= len(desc_suggested) <= META_MAX_LEN)
             or infer_seo_language(desc_suggested) != target_language
         ):
-            desc_suggested = fit_meta_description(url, seed_title, language=target_language, content=str(page.get("description_google") or ""))
-        if meta_description_is_unsafe(desc_suggested):
-            remove_description_suggestion(cleaned)
-        else:
+            # Pas de suggestion LLM valide : pas de fallback template, marquer "manuel"
+            desc_suggested = ""
+        if desc_suggested and not meta_description_is_unsafe(desc_suggested):
             cleaned["description_suggeree"] = desc_suggested
             cleaned["description_longueur"] = len(desc_suggested)
-            cleaned.setdefault(
-                "explication_description",
-                "Description reformulée pour garder un extrait clair et exploitable dans les résultats.",
-            )
+            # Label dynamique selon que la description existait déjà ou non
+            if not cleaned.get("explication_description"):
+                if desc_had_content:
+                    cleaned["explication_description"] = "Description reformulée pour garder un extrait clair et exploitable dans les résultats."
+                else:
+                    cleaned["explication_description"] = "Description proposée pour rendre l'extrait plus concret et exploitable."
+        else:
+            remove_description_suggestion(cleaned)
     else:
         remove_description_suggestion(cleaned)
 
     return cleaned
 
+
+_INFINITIVE_RE = re.compile(r"^[a-zàâçéèêëîïôûùüÿœæ]{4,}(er|ir|re)$")
+# Prépositions déclenchant l'orphelin (exclut conjonctions "et", "ou", "mais")
+_ORPHAN_TRIGGER_PREPS = frozenset({
+    "pour", "à", "a", "de", "afin", "avant", "après", "apres",
+    "sans", "par", "en", "vers",
+    "to", "for", "to",
+})
 
 def title_looks_truncated(value: str) -> bool:
     cleaned = re.sub(r"\s+", " ", value).strip(" -|")
@@ -3335,7 +3406,16 @@ def title_looks_truncated(value: str) -> bool:
     if cleaned.endswith("- Ever"):
         return True
     last_word = re.sub(r"[^A-Za-zÀ-ÿ]+", "", cleaned.split()[-1]).casefold()
-    return last_word in BAD_TITLE_END_WORDS
+    if last_word in BAD_TITLE_END_WORDS:
+        return True
+    # Infinitif orphelin : dernier mot en -er/-ir/-re précédé d'une préposition
+    # (pas d'une conjonction comme "et/ou" — "débuter et progresser" est un syntagme complet)
+    words = cleaned.split()
+    if len(words) >= 2 and bool(_INFINITIVE_RE.match(last_word)):
+        prev_word = re.sub(r"[^A-Za-zÀ-ÿ]+", "", words[-2]).casefold()
+        if prev_word in _ORPHAN_TRIGGER_PREPS:
+            return True
+    return False
 
 
 def meta_description_is_unsafe(value: str) -> bool:
@@ -3909,17 +3989,69 @@ def build_strengths(summary: dict[str, Any], pages: int, score: int, lang: str =
     return strengths[:4] or [fallback]
 
 
+def _compute_weighted_issues(summary: dict[str, Any], signals: list[dict[str, Any]]) -> list[tuple[str, int]]:
+    """Retourne la liste des issues actives triées par score pondéré décroissant.
+
+    Format : [(issue_key, count), ...] où issue_key est un des 7 types connus.
+    Pondération : pages_lentes×3, descriptions_vides×2, titres_hors_plage×1,
+                  dates×1, pages_erreur×3, canonicals×2, pages_peu_reliees×1.
+    """
+    slow = get_int(summary, "slow_pages", 0)
+    bad_titles = get_int(summary, "titles_problematic", get_int(summary, "missing_titles", 0))
+    bad_metas = get_int(summary, "meta_descriptions_problematic", get_int(summary, "missing_meta_descriptions", 0))
+    dates = get_int(summary, "dated_content_signals", len(signals))
+    errors = get_int(summary, "pages_with_errors", get_int(summary, "http_errors", 0))
+    canonicals = get_int(summary, "canonical_to_other_url_pages", 0)
+    weak_links = get_int(summary, "weak_internal_linking_pages", 0) + get_int(summary, "probable_orphan_pages", 0)
+    raw = [
+        ("pages_lentes",      slow,        slow * 3),
+        ("pages_erreur",      errors,      errors * 3),
+        ("descriptions_vides", bad_metas,  bad_metas * 2),
+        ("canonicals",        canonicals,  canonicals * 2),
+        ("titres_hors_plage", bad_titles,  bad_titles * 1),
+        ("dates_obsoletes",   dates,       dates * 1),
+        ("pages_peu_reliees", weak_links,  weak_links * 1),
+    ]
+    active = [(key, count) for key, count, score in raw if count > 0]
+    scores = {key: score for key, count, score in raw}
+    active.sort(key=lambda kv: scores[kv[0]], reverse=True)
+    return active
+
+
+def _issue_label(key: str, count: int, is_en: bool) -> str:
+    """Libellé lisible pour une issue pondérée."""
+    s = "s" if count > 1 else ""
+    if key == "pages_lentes":
+        return f"{count} page{s} over 3s load time" if is_en else f"{count} page{s} dépassent 3s de chargement"
+    if key == "pages_erreur":
+        return f"{count} HTTP error page{s}" if is_en else f"{count} page{s} en erreur HTTP"
+    if key == "descriptions_vides":
+        return f"{count} missing or too-short description{s}" if is_en else f"{count} description{s} absente{s} ou trop courte{s}"
+    if key == "canonicals":
+        return f"{count} canonical{s} to verify" if is_en else f"{count} canonical{s} à vérifier"
+    if key == "titres_hors_plage":
+        return f"{count} title{s} out of range (absent, too short or too long)" if is_en else f"{count} titre{s} hors plage (absent{s}, trop court{s} ou trop long{s})"
+    if key == "dates_obsoletes":
+        return f"{count} page{s} with visible dates to check" if is_en else f"{count} page{s} avec dates visibles à vérifier"
+    if key == "pages_peu_reliees":
+        return f"{count} poorly linked page{s}" if is_en else f"{count} page{s} peu reliée{s} en interne"
+    return key
+
+
 def build_attention_points(summary: dict[str, Any], signals: list[dict[str, Any]], data: dict[str, Any], lang: str = "fr") -> list[str]:
     is_en = sanitize_report_language(lang) == "en"
     if data.get("critical_findings"):
         return [translate_finding(str(item), lang) for item in data.get("critical_findings", [])[:4]]
+    issues = _compute_weighted_issues(summary, signals)
+    if issues:
+        # Max 2 lignes : signal principal + 2e issue par ordre d'impact
+        return [_issue_label(key, count, is_en) for key, count in issues[:2]]
+    # Fallback : signaux analyst-provided si aucune issue pondérée détectée
     points = []
-    for signal in signals[:4]:
+    for signal in signals[:2]:
         count = get_int(signal, "count", 0)
         label = signal_label_from_key(str(signal.get("key") or ""), lang) or str(signal.get("signal") or ("Signal to check" if is_en else "Signal à vérifier"))
         points.append(f"{label} ({count})" if count else label)
-    if get_int(summary, "dated_content_signals", 0) and not points:
-        points.append("Some visible dates deserve a manual check." if is_en else "Des dates visibles méritent une vérification.")
     fallback = "No major blocking point was automatically isolated." if is_en else "Aucun point bloquant majeur n'a été isolé automatiquement."
     return points or [fallback]
 
@@ -4019,27 +4151,53 @@ def build_primary_signal(summary: dict[str, Any], signals: list[dict[str, Any]],
     return "Overall healthy base, to confirm on business pages." if is_en else "Socle globalement sain, à confirmer sur les pages business."
 
 
+_ACTION_MAPPING: dict[str, tuple[str, str, str, str, str, str]] = {
+    # key: (label_fr, label_en, impact_fr, effort_fr, impact_en, effort_en)
+    "pages_lentes":      ("Investiguer la performance serveur",        "Investigate server performance",      "élevé", "moyen",  "high",     "medium"),
+    "pages_erreur":      ("Corriger les erreurs HTTP",                  "Fix HTTP errors",                     "élevé", "faible", "high",     "low"),
+    "descriptions_vides":("Compléter les descriptions manquantes",     "Complete missing descriptions",        "moyen", "faible", "medium",   "low"),
+    "canonicals":        ("Vérifier les canonicals",                    "Check canonicals",                    "moyen", "faible", "medium",   "low"),
+    "titres_hors_plage": ("Réécrire les titres hors plage",             "Rewrite out-of-range titles",         "moyen", "faible", "medium",   "low"),
+    "dates_obsoletes":   ("Mettre à jour les contenus datés",           "Update dated content",                "moyen", "moyen",  "medium",   "medium"),
+    "pages_peu_reliees": ("Renforcer le maillage interne",              "Strengthen internal linking",         "moyen", "moyen",  "medium",   "medium"),
+}
+
+
 def build_plan_action(summary: dict[str, Any], top_pages: list[dict[str, Any]], lang: str = "fr") -> dict[str, dict[str, str]]:
     is_en = sanitize_report_language(lang) == "en"
-    quick = []
-    if get_int(summary, "dated_content_signals", 0):
-        quick.append("check visible dates" if is_en else "vérifier les dates visibles")
-    if get_int(summary, "missing_meta_descriptions", 0):
-        quick.append("complete missing Google descriptions" if is_en else "compléter les descriptions Google")
-    if get_int(summary, "weak_internal_linking_pages", 0):
-        quick.append("strengthen obvious internal links" if is_en else "renforcer les liens internes évidents")
-    if top_pages:
-        quick.append("rework priority pages" if is_en else "reprendre les pages prioritaires")
-    if not quick:
-        quick = ["review key business pages" if is_en else "relire les pages business clés"]
+    issues = _compute_weighted_issues(summary, [])
+    top3 = issues[:3]
+
+    def _action_line(rank: int, key: str, count: int) -> str:
+        mapping = _ACTION_MAPPING.get(key)
+        if not mapping:
+            return ""
+        label_fr, label_en, imp_fr, eff_fr, imp_en, eff_en = mapping
+        if is_en:
+            return f"{rank}. {label_en} ({count}) — Impact {imp_en}, Effort {eff_en}"
+        return f"{rank}. {label_fr} ({count}) — Impact {imp_fr}, Effort {eff_fr}"
+
+    actions_lines = [_action_line(i + 1, key, count) for i, (key, count) in enumerate(top3) if count > 0]
+    actions_lines = [l for l in actions_lines if l]
+
+    if not actions_lines:
+        actions_lines = [
+            "1. Review key business pages — Impact medium, Effort low" if is_en
+            else "1. Relire les pages business clés — Impact moyen, Effort faible"
+        ]
+
+    j30_desc = "\n".join(actions_lines) if actions_lines else (
+        "Validate J30 priorities." if is_en else "Valider les priorités J30."
+    )
+
     if is_en:
         return {
-            "j30": {"titre": "Fix visible signals", "description": sentence_from_items(quick[:3], lang=lang)},
+            "j30": {"titre": "Fix priority signals", "description": j30_desc},
             "j60": {"titre": "Rework priority pages", "description": "Turn page sheets into editorial briefs, then publish a first batch."},
             "j90": {"titre": "Consolidate the structure", "description": "Strengthen hubs, internal linking and content that supports business pages."},
         }
     return {
-        "j30": {"titre": "Corriger les signaux visibles", "description": sentence_from_items(quick[:3], lang=lang)},
+        "j30": {"titre": "Corriger les signaux prioritaires", "description": j30_desc},
         "j60": {"titre": "Reprendre les pages prioritaires", "description": "Transformer les fiches page en briefs éditoriaux puis publier un premier lot."},
         "j90": {"titre": "Consolider la structure", "description": "Renforcer les hubs, le maillage interne et les contenus qui soutiennent les pages business."},
     }
