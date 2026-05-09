@@ -113,8 +113,8 @@ def translate_html(html: str, target_lang: str) -> str:
     # Réinjecte les traductions en préservant les espaces originaux
     for node, original_stripped, translated in zip(text_nodes, text_values, translated_values):
         original = str(node)
-        # Préserve les espaces/sauts de ligne autour du texte
-        new_text = original.replace(original_stripped, translated, 1)
-        node.replace_with(NavigableString(new_text))
+        leading = original[: len(original) - len(original.lstrip())]
+        trailing = original[len(original.rstrip()):]
+        node.replace_with(NavigableString(leading + translated + trailing))
 
     return str(soup)
