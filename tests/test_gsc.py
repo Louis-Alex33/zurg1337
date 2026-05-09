@@ -35,6 +35,7 @@ from gsc import (
     validate_rendered_gsc_html,
     _truncate_title,
     _diversify_snippet_card,
+    _inject_distinctive_token,
 )
 from models import AuditPage, GSCPageAnalysis, GSCPageData, GSCQueryData
 
@@ -746,6 +747,35 @@ class TruncateTitleTests(unittest.TestCase):
         self.assertLessEqual(len(title), 60)
         last_char = title[-1] if title else ""
         self.assertNotIn(last_char, " ,;:—-")
+
+    def test_similar_pages_produce_different_titles(self) -> None:
+        base_title = "Tournoi padel : niveau, points et repères clés"
+        card_p1500: dict[str, object] = {"title_example": "Tournoi P1500 padel : niveau, points et repères clés", "meta_example": base_title, "main_query": "tournoi padel p1500"}
+        card_p2000: dict[str, object] = {"title_example": "Tournoi P2000 padel : niveau, points et repères clés", "meta_example": base_title, "main_query": "tournoi padel p2000"}
+        existing_p1500: dict[str, object] = {"title_example": "Tournoi P1500 padel : niveau, points et repères clés", "meta_example": base_title}
+        item = GSCPageAnalysis(url="https://example.com/tournoi-padel-p2000/", clicks=0, impressions=0, ctr=0.0, position=5.0)
+        result = _diversify_snippet_card(card_p2000, [existing_p1500], item)
+        title_p2000 = str(result["title_example"])
+        title_p1500 = str(card_p1500["title_example"])
+        self.assertNotEqual(title_p2000.lower(), title_p1500.lower(), "Similar pages must produce different titles")
+        self.assertNotIn("— focus", title_p2000)
+        self.assertLessEqual(len(title_p2000), 60)
+        last_char = title_p2000[-1] if title_p2000 else ""
+        self.assertNotIn(last_char, " ,;:—-")
+
+    def test_inject_distinctive_token_inserts_unique_query_word(self) -> None:
+        title = "Tournoi P2000 padel : niveau, points et repères clés"
+        existing = "Tournoi P1500 padel : niveau, points et repères clés"
+        result = _inject_distinctive_token(title, existing, "tournoi padel p2000")
+        self.assertIn("p2000", result.lower())
+        self.assertLessEqual(len(result), 60)
+
+    def test_inject_distinctive_token_no_distinctive_token_falls_back(self) -> None:
+        title = "Tournoi padel : niveau, points et repères clés"
+        existing = "Tournoi padel : niveau, points et repères clés"
+        result = _inject_distinctive_token(title, existing, "tournoi padel")
+        self.assertLessEqual(len(result), 60)
+        self.assertNotIn("— focus", result)
 
 
 class BusinessOpportunitiesStoplistTests(unittest.TestCase):

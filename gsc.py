@@ -2635,12 +2635,15 @@ def check_snippet_uniqueness(snippets: list[dict[str, object]]) -> list[str]:
 def _truncate_title(s: str, max_len: int = 60) -> str:
     if len(s) <= max_len:
         return s
-    cut = s[:max_len].rsplit(' ', 1)[0]
-    return cut.rstrip(' ,;:—-')
+    cut = s[:max_len].rsplit(' ', 1)[0].rstrip(' ,;:—-')
+    # drop trailing short words (conjunctions / prepositions ≤ 2 chars)
+    while cut and len(cut.rsplit(' ', 1)[-1]) <= 2:
+        cut = cut.rsplit(' ', 1)[0].rstrip(' ,;:—-')
+    return cut
 
 
 def _diversify_snippet_card(card: dict[str, object], existing_cards: list[dict[str, object]], item: GSCPageAnalysis) -> dict[str, object]:
-    """Applique un suffixe différenciant si le snippet est trop similaire aux cartes existantes."""
+    """Applique une variation des value_props si le snippet est trop similaire aux cartes existantes."""
     import difflib
     title = str(card.get("title_example", ""))
     meta = str(card.get("meta_example", ""))
@@ -2649,9 +2652,42 @@ def _diversify_snippet_card(card: dict[str, object], existing_cards: list[dict[s
         m_ratio = difflib.SequenceMatcher(None, meta, str(existing.get("meta_example", ""))).ratio()
         if t_ratio >= 0.85 or m_ratio >= 0.85:
             card = dict(card)
-            card["title_example"] = _truncate_title(str(card.get("title_example", "")), 60)
+            # Only inject a distinctive token when titles are too similar; if only meta triggered, just truncate
+            if t_ratio >= 0.85:
+                card["title_example"] = _inject_distinctive_token(
+                    str(card.get("title_example", "")),
+                    str(existing.get("title_example", "")),
+                    str(card.get("main_query", "")),
+                )
+            else:
+                card["title_example"] = _truncate_title(str(card.get("title_example", "")), 60)
             break
     return card
+
+
+def _inject_distinctive_token(title: str, existing_title: str, main_query: str) -> str:
+    """Varie les value_props en injectant un token distinctif de main_query absent du titre existant."""
+    if ":" not in title:
+        return _truncate_title(title, 60)
+    existing_words = set(re.findall(r"[a-z0-9]+", existing_title.lower()))
+    # block: words in value_props (already present) + words shared between both topics (generic)
+    # allow topic-specific identifiers (e.g. "p2000") that distinguish this card from the existing one
+    topic_part, _, value_props = title.partition(" : ")
+    existing_topic, _, _ = existing_title.partition(" : ")
+    value_words = set(re.findall(r"[a-z0-9]+", value_props.lower()))
+    shared_topic_words = (
+        set(re.findall(r"[a-z0-9]+", topic_part.lower()))
+        & set(re.findall(r"[a-z0-9]+", existing_topic.lower()))
+    )
+    blocked = existing_words | value_words | shared_topic_words
+    query_tokens = [w for w in re.findall(r"[a-z0-9]+", main_query.lower()) if w not in blocked and len(w) > 2]
+    if not query_tokens:
+        return _truncate_title(title, 60)
+    token = query_tokens[0]
+    topic, _, value_props = title.partition(" : ")
+    new_value_props = f"{token}, {value_props}" if value_props else token
+    candidate = f"{topic} : {new_value_props}"
+    return _truncate_title(candidate, 60)
 
 
 def build_snippet_cards(
