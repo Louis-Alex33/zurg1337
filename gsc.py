@@ -3224,21 +3224,22 @@ def page_to_appendix_row(item: GSCPageAnalysis) -> dict[str, object]:
     }
 
 
-def explain_reason(item: GSCPageAnalysis) -> str:
+def explain_reason(item: GSCPageAnalysis, lang: str | None = None) -> str:
+    _ = gsc_gettext(lang)
     reasons: list[str] = []
     if item.estimated_recoverable_clicks:
         reasons.append(item.impact_label)
     if 4 <= item.position <= 10:
-        reasons.append("La page est déjà proche du haut de la première page Google.")
+        reasons.append(_("La page est déjà proche du haut de la première page Google."))
     elif 10 < item.position <= 20:
-        reasons.append("La page est déjà visible: un contenu renforcé et de meilleurs liens internes peuvent faire levier.")
+        reasons.append(_("La page est déjà visible: un contenu renforcé et de meilleurs liens internes peuvent faire levier."))
     if item.ctr < 0.02 and item.impressions >= 100:
-        reasons.append("Elle apparaît souvent dans Google mais génère peu de clics.")
+        reasons.append(_("Elle apparaît souvent dans Google mais génère peu de clics."))
     if item.click_delta is not None and item.click_delta < 0:
-        reasons.append("Elle perd des clics par rapport à la période précédente.")
+        reasons.append(_("Elle perd des clics par rapport à la période précédente."))
     if item.possible_overlap_queries:
-        reasons.append("Des requêtes proches semblent toucher plusieurs URLs.")
-    return " ".join(reasons) or "Signal faible: garder en observation plutôt que traiter en urgence."
+        reasons.append(_("Des requêtes proches semblent toucher plusieurs URLs."))
+    return " ".join(reasons) or _("Signal faible: garder en observation plutôt que traiter en urgence.")
 
 
 def display_page_label(url: str) -> str:
