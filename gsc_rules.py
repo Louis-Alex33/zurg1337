@@ -138,8 +138,8 @@ _TOURNAMENT_LEVEL_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "P250":  ("joueurs réguliers de niveau intermédiaire", "les points à gagner, le classement, les conditions d'inscription et les coupes possibles"),
     "P500":  ("joueurs intermédiaires confirmés", "les points distribués, le format, les conditions de qualification et les pièges fréquents"),
     "P1000": ("joueurs de niveau avancé", "le nombre de points, les critères de sélection et ce qui distingue un P1000 d'un P500"),
-    "P1500": ("joueurs expérimentés visant la compétition régionale", "le niveau requis, les points, le classement national et les conditions de participation"),
-    "P2000": ("joueurs experts et compétiteurs confirmés", "les points distribués, le format tableau, les critères de niveau et les spécificités de la SERP"),
+    "P1500": ("joueurs expérimentés visant la compétition régionale", "le niveau requis, les points FFT et les conditions de participation"),
+    "P2000": ("joueurs experts et compétiteurs confirmés", "les points distribués, le format tableau et les critères de niveau"),
 }
 
 # ---------------------------------------------------------------------------
@@ -277,9 +277,13 @@ def title_case_snippet(value: str) -> str:
 
 
 _TRAILING_PUNCT_RE = re.compile(r"[,;:\-–—\s]+$")
-# Conjonctions de coordination + pronoms/relatifs orphelins qui signalent une subordonnée tronquée
+# Mots orphelins en fin de meta signalant une phrase tronquée : conjonctions, pronoms,
+# relatifs, déterminants et prépositions courtes qui ne peuvent pas clore une phrase.
 _TRAILING_COORD_RE = re.compile(
-    r"\s+(et|ou|mais|donc|or|ni|car|pour|dont|que|qui|lesquels|lesquelles|elles|ils|elle|il|leur|leurs|y|en)$",
+    r"\s+(et|ou|mais|donc|or|ni|car|pour|dont|que|qui"
+    r"|lesquels|lesquelles|elles|ils|elle|il|leur|leurs|y|en"
+    r"|le|la|les|l|un|une|des|du|au|aux|de|d|ce|cet|cette|ces"
+    r"|à|par|sur|sous|dans|avec|sans|vers|entre)$",
     re.I,
 )
 
@@ -287,17 +291,29 @@ def trim_to_length(value: str, max_length: int) -> str:
     """Coupe au dernier mot complet <= max_length.
 
     - Supprime toute ponctuation orpheline (virgule, point-virgule, tiret) en fin.
-    - Supprime les conjonctions de coordination isolées en fin.
+    - Supprime les mots orphelins en fin (conjonctions, pronoms, déterminants, prépositions)
+      qui signalent une phrase tronquée — appliqué même si le texte n'est pas tronqué.
     - N'ajoute jamais de point ; la ponctuation finale est gérée par l'appelant.
     """
     if len(value) <= max_length:
-        return value
+        # Nettoyer les mots orphelins même sans troncature (meta template trop proche de la limite)
+        cleaned = value
+        for _ in range(4):
+            prev = cleaned
+            cleaned = _TRAILING_COORD_RE.sub("", cleaned)
+            cleaned = _TRAILING_PUNCT_RE.sub("", cleaned)
+            if cleaned == prev:
+                break
+        return cleaned or value
     # Couper au dernier espace avant max_length+1 (pour ne pas couper en milieu de mot)
     shortened = value[: max_length + 1].rsplit(" ", 1)[0]
-    # Supprimer ponctuation et conjonctions traînantes
-    shortened = _TRAILING_PUNCT_RE.sub("", shortened)
-    shortened = _TRAILING_COORD_RE.sub("", shortened)
-    shortened = _TRAILING_PUNCT_RE.sub("", shortened)
+    # Supprimer ponctuation et mots orphelins traînants (itéré jusqu'à stabilisation)
+    for _ in range(4):
+        prev = shortened
+        shortened = _TRAILING_PUNCT_RE.sub("", shortened)
+        shortened = _TRAILING_COORD_RE.sub("", shortened)
+        if shortened == prev:
+            break
     return shortened or value[:max_length].rstrip()
 
 
@@ -612,7 +628,7 @@ def generate_snippet_recommendation(
         meta = "Semelle, maintien, confort, surface de jeu : les critères à vérifier avant de choisir une paire de chaussures de padel."
     elif any(term in lower for term in ("meilleur", "comparatif", "avis", "test", "raquette", "chaussure", "balle", "sac")):
         title = title_case_snippet(f"{query} : critères, avis et choix utiles")
-        meta = f"Comparez les options autour de {query}, avec les critères de choix, les limites à connaître et les profils pour lesquels elles conviennent."
+        meta = f"Critères de choix, limites et profils adaptés : ce qu'il faut savoir sur {query} avant de décider."
     elif lower.startswith("comment") or "comment " in lower:
         title = title_case_snippet(f"{query} : méthode simple et erreurs à éviter")
         meta = f"Retrouvez les gestes, repères et erreurs fréquentes pour {query.replace('comment ', '')}, avec une approche concrète à appliquer sur le terrain."
@@ -630,8 +646,11 @@ def generate_snippet_recommendation(
     if not has_specific_snippet_angle(title, query):
         return {"title": "", "meta": "", "reason": ""}
     if len(meta) < 120:
-        meta = sanitize_snippet_text(f"{meta} Une synthèse pratique pour décider quoi faire ensuite.")
-        meta = trim_to_length(meta, 155)
+        suffix = " Une synthèse pratique pour décider quoi faire ensuite."
+        # N'ajouter le suffix que si le résultat reste dans les 155 chars,
+        # sinon la troncature couperait en milieu de phrase.
+        if len(meta) + len(suffix) <= 155:
+            meta = sanitize_snippet_text(f"{meta}{suffix}")
         meta = re.sub(r"[,;]+$", "", meta).rstrip()
     return {
         "title": title,
@@ -657,23 +676,49 @@ def slug_prefix(url: str, depth: int = 1) -> str:
     return "-".join(tokens[-depth:]) if tokens else ""
 
 
-_SLUG_ONLY_CLUSTER_SUFFIXES: frozenset[str] = frozenset({
-    "joueur-padel",
+# Mots thématiques padel : présents dans les slugs de pages de contenu mais PAS dans les noms propres.
+# Un slug dont les 2 premiers tokens sont absents de ce lexique = slug de personnalité.
+_PADEL_THEMATIC_TOKENS: frozenset[str] = frozenset({
+    "tournoi", "raquette", "balle", "balles", "niveau", "niveaux", "classement",
+    "chaussure", "chaussures", "padel", "regle", "regles", "grip", "prise",
+    "technique", "tactique", "service", "smash", "vibora", "bajada", "bandeja",
+    "poids", "perte", "fibre", "verre", "carbone", "foam", "eva", "pressurisateur",
+    "cours", "terrain", "club", "federations", "arbitre", "coaching", "entrainement",
+    "comment", "guide", "comparatif", "meilleur", "avis", "test", "tutoriel",
+    "reussir", "progresser", "gagner", "apprendre", "tenir", "nettoyer",
+    "quand", "changer", "choisir", "comparer",
 })
+
+
+def _is_personality_page(url: str) -> bool:
+    """True si l'URL ressemble à une fiche biographique de joueur/joueuse de padel.
+
+    Heuristique : slug se terminant par 'padel' ET les 2 premiers tokens du slug
+    ne sont pas dans le lexique thématique padel (= probablement un prénom + nom).
+    Couvre agustin-tapia-padel, fernando-belasteguin-padel, marta-ortega-padel,
+    arturo-coello-joueur-padel, juan-lebron-padel, etc.
+    """
+    parsed = urlparse(url)
+    last_segment = parsed.path.strip("/").split("/")[-1]
+    tokens = [t for t in re.split(r"[-_]+", last_segment) if t and not t.isdigit()]
+    if not tokens or tokens[-1] != "padel":
+        return False
+    # Les 2 premiers tokens doivent être absents du lexique thématique
+    first_two = {strip_accents(t.lower()) for t in tokens[:2]}
+    return not first_two.intersection(_PADEL_THEMATIC_TOKENS)
 
 
 def _cluster_sig(page: "GSCPageAnalysis") -> tuple[str, str, str]:
     """Calcule la signature de cluster d'une page.
 
-    Pour les pages dont le slug suffix correspond à un groupe homogène connu
-    (ex : *-joueur-padel), on utilise uniquement ce suffix comme clé afin de
-    regrouper des pages dont action_type ou business_value peut varier (biographies,
-    fiches joueurs, etc.).  Pour les autres pages, la signature tripartite
-    (action_type, business_value, slug_suffix) assure une granularité fine.
+    Les pages de personnalité padel (*-padel où les premiers tokens sont un nom propre)
+    partagent la clé canonique ("", "", "personnalite-padel") quel que soit leur
+    action_type ou business_value — ce qui les regroupe toutes dans un même cluster.
+    Pour les autres pages, la signature tripartite assure une granularité fine.
     """
+    if _is_personality_page(page.url):
+        return ("", "", "personnalite-padel")
     suffix = slug_prefix(page.url, depth=2)
-    if suffix in _SLUG_ONLY_CLUSTER_SUFFIXES:
-        return ("", "", suffix)
     return (str(page.action_type or ""), str(page.business_value or ""), suffix)
 
 
