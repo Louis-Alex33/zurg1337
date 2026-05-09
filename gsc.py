@@ -3363,7 +3363,7 @@ def render_gsc_report_toolbar(report: dict[str, object]) -> str:
     buttons = []
     for lang, label in (("fr", "FR"), ("en", "EN")):
         target = str(paths.get(lang) or report.get("html_output_path") or "")
-        href = Path(target).name if target else "#"
+        href = f"/files?path={html.escape(target)}" if target else "#"
         active_class = " is-active" if lang == active_lang else ""
         aria_current = ' aria-current="true"' if lang == active_lang else ""
         buttons.append(
