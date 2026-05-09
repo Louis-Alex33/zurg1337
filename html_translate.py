@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -12,8 +13,7 @@ CACHE_FILE = Path(__file__).resolve().parent / "translation_cache.json"
 # Tags dont on ne traduit pas le contenu
 _SKIP_TAGS = {"script", "style", "code", "pre", "svg"}
 
-# Attributs HTML à traduire (ex: title, alt, placeholder)
-_TRANSLATE_ATTRS = {"title", "alt", "placeholder", "aria-label"}
+_URL_RE = re.compile(r"https?://[^\s\`\"<>]+|`[^`]+`")
 
 
 def _load_cache() -> dict:
@@ -26,30 +26,54 @@ def _save_cache(cache: dict) -> None:
     CACHE_FILE.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _protect_urls(text: str) -> tuple[str, dict[str, str]]:
+    """Remplace les URLs et backtick-strings par des placeholders avant traduction."""
+    placeholders = {}
+    def replacer(m: re.Match) -> str:
+        key = f"__PH{len(placeholders)}__"
+        placeholders[key] = m.group(0)
+        return key
+    protected = _URL_RE.sub(replacer, text)
+    return protected, placeholders
+
+
+def _restore_urls(text: str, placeholders: dict[str, str]) -> str:
+    for key, original in placeholders.items():
+        text = text.replace(key, original)
+    return text
+
+
 def _batch_translate(texts: list[str], target_lang: str, cache: dict) -> list[str]:
-    to_translate = [(i, t) for i, t in enumerate(texts) if t not in cache]
-    results = list(texts)
+    # Protège les URLs dans chaque texte
+    protected_texts = []
+    all_placeholders = []
+    for t in texts:
+        protected, ph = _protect_urls(t)
+        protected_texts.append(protected)
+        all_placeholders.append(ph)
 
-    if not to_translate:
-        return [cache.get(t, t) for t in texts]
+    to_translate = [(i, t) for i, t in enumerate(protected_texts) if t not in cache]
+    results = list(protected_texts)
 
-    # Envoie par batch de 50 pour éviter les timeouts
-    batch_size = 50
-    for batch_start in range(0, len(to_translate), batch_size):
-        batch = to_translate[batch_start : batch_start + batch_size]
-        batch_texts = [t for _, t in batch]
-        try:
-            translated = GoogleTranslator(source="fr", target=target_lang).translate_batch(batch_texts)
-            time.sleep(0.2)
-        except Exception:
-            translated = batch_texts
+    if to_translate:
+        batch_size = 50
+        for batch_start in range(0, len(to_translate), batch_size):
+            batch = to_translate[batch_start : batch_start + batch_size]
+            batch_texts = [t for _, t in batch]
+            try:
+                translated = GoogleTranslator(source="fr", target=target_lang).translate_batch(batch_texts)
+                time.sleep(0.2)
+            except Exception:
+                translated = batch_texts
 
-        for (i, original), tr in zip(batch, translated):
-            cache[original] = tr or original
-            results[i] = cache[original]
+            for (i, original), tr in zip(batch, translated):
+                cache[original] = tr or original
+                results[i] = cache[original]
 
-    _save_cache(cache)
-    return [cache.get(t, t) for t in texts]
+        _save_cache(cache)
+
+    # Restaure les URLs dans les résultats
+    return [_restore_urls(cache.get(pt, pt), ph) for pt, ph in zip(protected_texts, all_placeholders)]
 
 
 def translate_html(html: str, target_lang: str) -> str:
@@ -72,12 +96,13 @@ def translate_html(html: str, target_lang: str) -> str:
         stripped = text.strip()
         if not stripped:
             continue
-        # Ignore si c'est un nombre pur, une URL, ou trop court
+        # Ignore si c'est un nombre pur ou trop court
         if stripped.replace(",", "").replace(".", "").replace(" ", "").replace("%", "").replace("+", "").replace("-", "").isnumeric():
             continue
-        if stripped.startswith("http") or stripped.startswith("/"):
-            continue
         if len(stripped) < 2:
+            continue
+        # Ignore si c'est une URL pure (sans autre texte)
+        if _URL_RE.fullmatch(stripped):
             continue
         text_nodes.append(node)
         text_values.append(stripped)
