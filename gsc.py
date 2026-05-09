@@ -3569,7 +3569,7 @@ def render_executive_report(report: dict[str, object]) -> str:
     </section>
     {render_quick_decision_section(report.get("quick_decisions", []), active_lang)}
     <section class="report-section" id="priorites"><div class="section-header"><h2>{html.escape(_("Les 3 priorités du mois"))}</h2></div>{priorities}</section>
-    <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>{html.escape(_(str(len(report.get("priority_pages") or [])) + " pages prioritaires"))}</h2><p class="section-intro">{html.escape(_("Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business."))}</p></div>{render_filter_bar("pages-prioritaires")}{priority_cards}</section>
+    <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>{html.escape(_(str(len(report.get("priority_pages") or [])) + " pages prioritaires"))}</h2><p class="section-intro">{html.escape(_("Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business."))}</p></div>{render_filter_bar("pages-prioritaires", active_lang)}{priority_cards}</section>
     <section class="report-section" id="requetes"><div class="section-header"><h2>{html.escape(_("Top opportunités requêtes par URL cible"))}</h2><p class="section-intro">{html.escape(_("Regroupées par URL cible et action. Les requêtes brutes complètes sont dans queries_full_export.csv."))}</p></div>{queries}</section>
     {snippets}
     {cannibalization}
@@ -4419,7 +4419,7 @@ def render_report(report: dict[str, object]) -> str:
 
     <section class="report-section" id="pages-prioritaires">
       <div class="section-header"><div class="section-tag">{html.escape(_("Priorité 1"))}</div><h2 class="section-title">{html.escape(_("Top pages à traiter en premier"))}</h2><p class="section-intro">{html.escape(_("Les pages avec le meilleur rapport visibilité, effort et potentiel."))}</p></div>
-      {render_filter_bar("pages-prioritaires")}
+      {render_filter_bar("pages-prioritaires", active_lang)}
       {priority_cards}
       <p class="reliability-note">{html.escape(_("Le potentiel théorique détecté est un ordre de grandeur, pas une promesse. À confirmer après mise en ligne et suivi dans Google Search Console."))}</p>
     </section>
@@ -4821,7 +4821,7 @@ def render_snippet_section(snippets: list[dict[str, object]], note: str = "", la
     <section class="report-section" id="snippets">
       <div class="section-header"><h2 class="section-title">{html.escape(_("Résultats Google à améliorer"))}</h2><p class="section-intro">{html.escape(_("Des propositions concrètes pour rendre les titres et descriptions Google plus cliquables."))}</p></div>
       {note_html}
-      {render_filter_bar("snippets")}
+      {render_filter_bar("snippets", lang)}
       {body}
     </section>
 """
@@ -5220,14 +5220,15 @@ def render_report_section(section: dict[str, object]) -> str:
 """
 
 
-def render_filter_bar(section_id: str) -> str:
-    priorities = [("all", "Toutes"), ("high", "Haute"), ("medium", "Moyenne"), ("low", "Faible")]
+def render_filter_bar(section_id: str, lang: str = "fr") -> str:
+    _ = gsc_gettext(lang)
+    priorities = [("all", _("Toutes")), ("high", _("Haute")), ("medium", _("Moyenne")), ("low", _("Faible"))]
     priority_buttons = "".join(
         filter_button(section_id, "priority", value, label, active=value == "all") for value, label in priorities
     )
     return f"""
       <div class="filter-bar">
-        <div class="filter-group"><span class="filter-label">Urgence</span>{priority_buttons}</div>
+        <div class="filter-group"><span class="filter-label">{_("Urgence")}</span>{priority_buttons}</div>
       </div>
 """
 

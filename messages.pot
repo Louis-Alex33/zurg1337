@@ -1,0 +1,471 @@
+# Translations template for PROJECT.
+# Copyright (C) 2026 ORGANIZATION
+# This file is distributed under the same license as the PROJECT project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2026-05-09 15:13+0200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: gsc.py:148 gsc.py:3553 gsc.py:4387
+msgid "Période analysée: "
+msgstr ""
+
+#: gsc.py:157
+msgid "clics potentiels"
+msgstr ""
+
+#: gsc.py:3547 gsc.py:4377
+msgid "Rapport SEO · Google Search Console"
+msgstr ""
+
+#: gsc.py:3549 gsc.py:3618 gsc.py:4478
+msgid "Rapport d’opportunités SEO GSC"
+msgstr ""
+
+#: gsc.py:3550
+msgid "Basé sur les données Google Search Console exportées."
+msgstr ""
+
+#: gsc.py:3552
+msgid "Domaine"
+msgstr ""
+
+#: gsc.py:3552 gsc.py:4383
+msgid "Non précisé"
+msgstr ""
+
+#: gsc.py:3553
+msgid "Période analysée"
+msgstr ""
+
+#: gsc.py:3554
+msgid "Date de génération"
+msgstr ""
+
+#: gsc.py:3557 gsc.py:4394
+msgid "Exporter en PDF"
+msgstr ""
+
+#: gsc.py:3559
+msgid "Rapport d'opportunités GSC"
+msgstr ""
+
+#: gsc.py:3562 gsc.py:4403
+msgid "Navigation du rapport"
+msgstr ""
+
+#: gsc.py:3564 gsc.py:4406
+msgid "Synthèse exécutive"
+msgstr ""
+
+#: gsc.py:3564
+msgid "Les chiffres et décisions à retenir avant l’exécution."
+msgstr ""
+
+#: gsc.py:3571 gsc.py:4416
+msgid "Les 3 priorités du mois"
+msgstr ""
+
+#: gsc.py:3572
+msgid " pages prioritaires"
+msgstr ""
+
+#: gsc.py:3572
+msgid ""
+"Maximum 10 pages dans le PDF principal, classées par potentiel SEO et "
+"valeur business."
+msgstr ""
+
+#: gsc.py:3573
+msgid "Top opportunités requêtes par URL cible"
+msgstr ""
+
+#: gsc.py:3573
+msgid ""
+"Regroupées par URL cible et action. Les requêtes brutes complètes sont "
+"dans queries_full_export.csv."
+msgstr ""
+
+#: gsc.py:3576
+msgid "Opportunités business"
+msgstr ""
+
+#: gsc.py:3576
+msgid ""
+"Pages à forte valeur business : équipement, comparatifs, tests, "
+"affiliation, prospects ou produits numériques."
+msgstr ""
+
+#: gsc.py:4378
+msgid "Audit SEO GSC"
+msgstr ""
+
+#: gsc.py:4379
+msgid "Plan d'action basé sur les données Google Search Console"
+msgstr ""
+
+#: gsc.py:4382
+msgid "Domaine analysé"
+msgstr ""
+
+#: gsc.py:4386
+msgid "Période"
+msgstr ""
+
+#: gsc.py:4390
+msgid "Généré le"
+msgstr ""
+
+#: gsc.py:4396
+msgid "Analyse basée sur les données Google Search Console exportées."
+msgstr ""
+
+#: gsc.py:4406
+msgid "Les indicateurs à retenir avant d’entrer dans le détail."
+msgstr ""
+
+#: gsc.py:4407
+msgid "Indicateurs clés"
+msgstr ""
+
+#: gsc.py:4416
+msgid "Un plan d’action volontairement court pour décider vite."
+msgstr ""
+
+#: gsc.py:4421
+msgid "Priorité 1"
+msgstr ""
+
+#: gsc.py:4421
+msgid "Top pages à traiter en premier"
+msgstr ""
+
+#: gsc.py:4421
+msgid "Les pages avec le meilleur rapport visibilité, effort et potentiel."
+msgstr ""
+
+#: gsc.py:4424
+msgid ""
+"Le potentiel théorique détecté est un ordre de grandeur, pas une "
+"promesse. À confirmer après mise en ligne et suivi dans Google Search "
+"Console."
+msgstr ""
+
+#: gsc.py:4428
+msgid "Exploitation des requêtes"
+msgstr ""
+
+#: gsc.py:4428
+msgid ""
+"Une sélection limitée aux requêtes utiles pour orienter les titles, FAQ "
+"et contenus."
+msgstr ""
+
+#: gsc.py:4439
+msgid ""
+"Analyse basée sur les données Google Search Console exportées. Les "
+"recommandations doivent être priorisées avec la connaissance métier du "
+"site."
+msgstr ""
+
+#: gsc.py:4503
+msgid "Décision rapide"
+msgstr ""
+
+#: gsc.py:4504
+msgid "À lire en 30 secondes pour décider quoi lancer en premier."
+msgstr ""
+
+#: gsc.py:4506
+msgid "Priorité"
+msgstr ""
+
+#: gsc.py:4506
+msgid "Action recommandée"
+msgstr ""
+
+#: gsc.py:4506
+msgid "Pages concernées"
+msgstr ""
+
+#: gsc.py:4506 gsc.py:4640
+msgid "Impact attendu"
+msgstr ""
+
+#: gsc.py:4506
+msgid "Effort"
+msgstr ""
+
+#: gsc.py:4506
+msgid "Pourquoi maintenant"
+msgstr ""
+
+#: gsc.py:4523
+msgid "À surveiller selon la position moyenne"
+msgstr ""
+
+#: gsc.py:4528
+msgid "estimation qualifiée"
+msgstr ""
+
+#: gsc.py:4544
+msgid "selon comparaison CTR à position équivalente"
+msgstr ""
+
+#: gsc.py:4547
+msgid "Potentiel théorique détecté :"
+msgstr ""
+
+#: gsc.py:4565
+msgid "Pourquoi :"
+msgstr ""
+
+#: gsc.py:4566
+msgid "Action :"
+msgstr ""
+
+#: gsc.py:4567
+msgid "Impact :"
+msgstr ""
+
+#: gsc.py:4596
+msgid "Valeur business"
+msgstr ""
+
+#: gsc.py:4600
+msgid "Action recommandée spécifique"
+msgstr ""
+
+#: gsc.py:4610
+msgid "Objectif mesurable"
+msgstr ""
+
+#: gsc.py:4619
+msgid "Attention : SERP enrichie suspectée"
+msgstr ""
+
+#: gsc.py:4620
+msgid ""
+"Le CTR est anormalement bas pour cette position. Des features SERP "
+"(featured snippet, Knowledge Panel, annonces) captent probablement une "
+"partie des clics. Vérifier la SERP avant d'optimiser le titre seul."
+msgstr ""
+
+#: gsc.py:4634
+msgid "Constat"
+msgstr ""
+
+#: gsc.py:4637
+msgid "Effort estimé"
+msgstr ""
+
+#: gsc.py:4639
+msgid "Type d'action"
+msgstr ""
+
+#: gsc.py:4719
+msgid "Position actuelle dans Google"
+msgstr ""
+
+#: gsc.py:4783 gsc.py:4919
+msgid "Action"
+msgstr ""
+
+#: gsc.py:4783
+msgid "URL cible"
+msgstr ""
+
+#: gsc.py:4783
+msgid "Requêtes principales"
+msgstr ""
+
+#: gsc.py:4783
+msgid "Nb"
+msgstr ""
+
+#: gsc.py:4783 gsc.py:5317
+msgid "Clics"
+msgstr ""
+
+#: gsc.py:4783
+msgid "Impr."
+msgstr ""
+
+#: gsc.py:4783
+msgid "CTR"
+msgstr ""
+
+#: gsc.py:4783
+msgid "Pos."
+msgstr ""
+
+#: gsc.py:4822
+msgid "Résultats Google à améliorer"
+msgstr ""
+
+#: gsc.py:4822
+msgid ""
+"Des propositions concrètes pour rendre les titres et descriptions Google "
+"plus cliquables."
+msgstr ""
+
+#: gsc.py:4843
+msgid "Résultat Google"
+msgstr ""
+
+#: gsc.py:4847
+msgid "Problème"
+msgstr ""
+
+#: gsc.py:4873
+msgid "Action principale"
+msgstr ""
+
+#: gsc.py:4880
+msgid "Pages déjà visibles à renforcer"
+msgstr ""
+
+#: gsc.py:4880
+msgid ""
+"Ces pages ont déjà une base SEO: les améliorer est souvent plus rentable "
+"que repartir de zéro."
+msgstr ""
+
+#: gsc.py:4919
+msgid "Valeur"
+msgstr ""
+
+#: gsc.py:4919
+msgid "Monétisation"
+msgstr ""
+
+#: gsc.py:4919
+msgid "Score"
+msgstr ""
+
+#: gsc.py:4919
+msgid "Requête"
+msgstr ""
+
+#: gsc.py:4919
+msgid "Recommandation"
+msgstr ""
+
+#: gsc.py:4944
+msgid "à valider avec l'export Requêtes"
+msgstr ""
+
+#: gsc.py:4947
+msgid "Cluster à valider"
+msgstr ""
+
+#: gsc.py:4964
+msgid "Pages en concurrence"
+msgstr ""
+
+#: gsc.py:4964
+msgid ""
+"Seulement les groupes précis et exploitables. Les signaux faibles restent"
+" dans les CSV."
+msgstr ""
+
+#: gsc.py:5051
+msgid "Plan d'action 30 jours"
+msgstr ""
+
+#: gsc.py:5051
+msgid "Un déroulé court pour transformer le rapport en exécution."
+msgstr ""
+
+#: gsc.py:5061
+msgid "Évolution du trafic"
+msgstr ""
+
+#: gsc.py:5061
+msgid "Évolution quotidienne des clics, si l’export Graphique est disponible."
+msgstr ""
+
+#: gsc.py:5084
+msgid "Comment lire ce rapport"
+msgstr ""
+
+#: gsc.py:5084
+msgid "Les règles de lecture pour éviter les mauvaises interprétations."
+msgstr ""
+
+#: gsc.py:5096
+msgid "Annexes"
+msgstr ""
+
+#: gsc.py:5096
+msgid "Données complètes et limites méthodologiques."
+msgstr ""
+
+#: gsc.py:5097
+msgid "Tableau complet des pages analysées"
+msgstr ""
+
+#: gsc.py:5099
+msgid "Tableau complet des requêtes"
+msgstr ""
+
+#: gsc.py:5101
+msgid "Détails méthodologiques et limites"
+msgstr ""
+
+#: gsc.py:5103
+msgid ""
+"Google Search Console agrège les positions et les taux de clic: ce ne "
+"sont pas des mesures page par page en temps réel."
+msgstr ""
+
+#: gsc.py:5104
+msgid ""
+"Ce rapport est basé sur les exports Google Search Console fournis. Il "
+"identifie les opportunités SEO visibles dans GSC, mais ne remplace pas un"
+" audit technique crawl complet."
+msgstr ""
+
+#: gsc.py:5105
+msgid ""
+"Les estimations de clics récupérables donnent un ordre de grandeur sur la"
+" période exportée."
+msgstr ""
+
+#: gsc.py:5137
+msgid "Annexes séparées"
+msgstr ""
+
+#: gsc.py:5137
+msgid ""
+"Les tableaux complets sont fournis en annexes CSV. Le PDF principal reste"
+" volontairement court pour la décision."
+msgstr ""
+
+#: gsc.py:5292
+msgid "Origine du trafic"
+msgstr ""
+
+#: gsc.py:5292
+msgid "Répartition des clics par pays et par appareil."
+msgstr ""
+
+#: gsc.py:5295
+msgid "Par pays"
+msgstr ""
+
+#: gsc.py:5299
+msgid "Par appareil"
+msgstr ""
+
