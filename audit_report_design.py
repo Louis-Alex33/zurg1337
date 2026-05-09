@@ -495,6 +495,7 @@ ENGLISH_LANGUAGE_MARKERS = {
 BAD_TITLE_END_WORDS = {
     "aux",
     "et",
+    "ou",
     "avec",
     "de",
     "des",
@@ -502,8 +503,16 @@ BAD_TITLE_END_WORDS = {
     "pour",
     "sur",
     "en",
+    "dans",
     "a",
     "à",
+    "la",
+    "le",
+    "les",
+    "un",
+    "une",
+    "notre",
+    "votre",
     "the",
     "and",
     "with",
@@ -3059,11 +3068,20 @@ def generate_seo_suggestions(pages: list[dict[str, Any]], lang: str = "fr") -> l
         return pages
     raw_suggestions = generate_seo_suggestions_with_anthropic(pages_a_corriger, lang=lang)
     suggestions_by_url = {str(suggestion.get("url") or ""): suggestion for suggestion in raw_suggestions}
+    seen_descriptions: set[str] = set()
     for page in pages:
         if not (needs_title_fix(page) or needs_desc_fix(page)):
             continue
         raw_suggestion = suggestions_by_url.get(str(page.get("url") or "")) or build_local_seo_suggestion(page)
         suggestion = sanitize_seo_suggestion(page, raw_suggestion)
+        # Dédupliquer les descriptions fallback identiques : si une même description a déjà
+        # été assignée à une autre page, la supprimer ici pour éviter les doublons à l'affichage.
+        desc = str(suggestion.get("description_suggeree") or "").strip()
+        if desc:
+            if desc in seen_descriptions:
+                remove_description_suggestion(suggestion)
+            else:
+                seen_descriptions.add(desc)
         if has_actionable_seo_suggestion(suggestion):
             page["seo_suggestions"] = suggestion
         elif needs_title_fix(page) or needs_desc_fix(page):
@@ -3079,11 +3097,18 @@ def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]], lang: s
     except ImportError:
         return []
     is_en = sanitize_report_language(lang) == "en"
+    def _first_200_words(text: str) -> str:
+        words = re.split(r"\s+", text.strip())
+        return " ".join(words[:200])
+
     pages_json = json.dumps(
         [
             {
                 "url": page["url"],
+                "slug": slug_to_title(page["url"]),
                 "titre_actuel": page.get("titre_google", ""),
+                "h1": (page.get("h1") or [""])[0] if isinstance(page.get("h1"), list) else str(page.get("h1") or ""),
+                "contenu_extrait": _first_200_words(str(page.get("description_google") or "")),
                 "description_actuelle": page.get("description_google", ""),
                 "nb_mots": page.get("mots", 0),
                 "type": page.get("type", "page"),
@@ -3105,7 +3130,7 @@ def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]], lang: s
 
 Strict rules:
 - Title: between 50 and 60 characters maximum
-- Description: between 140 and 155 characters
+- Description: between 140 and 155 characters — use the h1, slug and contenu_extrait fields to write a specific, non-generic description faithful to the page content
 - Language: same language as the current title
 - Tone: professional, engaging, faithful to the subject
 - Do not invent content that does not exist
@@ -3134,7 +3159,7 @@ Reply ONLY with valid JSON, no markdown, no backticks, no comments:
 
 Règles strictes :
 - Titre : entre 50 et 60 caractères maximum
-- Description : entre 140 et 155 caractères
+- Description : entre 140 et 155 caractères — utilise les champs h1, slug et contenu_extrait pour rédiger une description spécifique, non générique, fidèle au contenu de la page
 - Langue : même langue que le titre actuel
 - Ton : professionnel, accrocheur, fidèle au sujet
 - Ne pas inventer de contenu qui n'existe pas
@@ -3176,7 +3201,8 @@ def build_local_seo_suggestion(page: dict[str, Any]) -> dict[str, Any]:
     title_current = str(page.get("titre_google") or slug_to_title(url)).strip()
     title = fit_seo_title(title_current, url) if needs_title_fix(page) else ""
     description_seed = title or title_current or slug_to_title(url)
-    description = fit_meta_description(url, description_seed) if needs_desc_fix(page) else ""
+    content_for_desc = str(page.get("description_google") or "")
+    description = fit_meta_description(url, description_seed, content=content_for_desc) if needs_desc_fix(page) else ""
     suggestion = {
         "url": url,
     }
@@ -3286,7 +3312,7 @@ def sanitize_seo_suggestion(page: dict[str, Any], suggestion: dict[str, Any]) ->
             or not (META_MIN_LEN <= len(desc_suggested) <= META_MAX_LEN)
             or infer_seo_language(desc_suggested) != target_language
         ):
-            desc_suggested = fit_meta_description(url, seed_title, language=target_language)
+            desc_suggested = fit_meta_description(url, seed_title, language=target_language, content=str(page.get("description_google") or ""))
         if meta_description_is_unsafe(desc_suggested):
             remove_description_suggestion(cleaned)
         else:
@@ -3371,41 +3397,21 @@ def _description_is_generic(text: str) -> bool:
     return generic_count / len(tokens) > 0.50
 
 
-def fit_meta_description(url: str, title: str, *, language: str | None = None) -> str:
-    topic = slug_to_title(url)
-    if topic.lower() in {"page sans titre", "accueil"}:
-        topic = title
-    language = language or infer_seo_language(title, topic)
-    topic = trim_at_word(topic, 54 if language == "fr" else 68)
-    topic_lower = f"{topic} {title}".lower()
-    if language == "fr":
-        if any(term in topic_lower for term in ("fabricant", "grossiste", "oem", "odm", "private label", "marque")):
-            description = f"Comparez les options {topic} et les critères à vérifier avant de choisir un partenaire B2B fiable."
-        elif any(term in topic_lower for term in ("recycl", "durable", "packaging", "emballage")):
-            description = f"Comprenez ce que {topic} implique pour les choix produit, les arguments de marque et la confiance client."
-        elif any(term in topic_lower for term in ("padel", "tennis", "sport", "tournoi", "classement", "club", "compétition", "competition")):
-            description = f"Tout ce qu'il faut savoir sur {topic} : règles, classements, niveaux et conseils pour progresser."
-        elif any(term in topic_lower for term in ("guide", "conseil", "comment", "choisir", "comprendre", "savoir")):
-            description = f"Ce guide sur {topic} couvre les points essentiels pour bien comprendre le sujet et agir efficacement."
+def fit_meta_description(url: str, title: str, *, language: str | None = None, content: str = "") -> str:
+    language = language or infer_seo_language(title, slug_to_title(url))
+    # Fallback : troncature intelligente du contenu existant en coupant sur fin de phrase
+    source = re.sub(r"\s+", " ", content.strip()) if content else ""
+    if source and len(source) >= META_MIN_LEN:
+        # Tenter une coupure sur fin de phrase dans la fenêtre 140-155
+        match = re.search(r"[.!?](?=\s|$)", source[:META_MAX_LEN])
+        if match and match.end() >= META_MIN_LEN:
+            candidate = source[: match.end()].strip()
         else:
-            # Pas de template générique : retourner vide pour forcer le marquage "non fiable"
-            return ""
-    else:
-        if any(term in topic_lower for term in ("manufacturer", "supplier", "wholesale", "oem", "odm", "private label")):
-            description = f"Compare {topic} and learn what brands should check before choosing a private label or wholesale supplier."
-        elif any(term in topic_lower for term in ("recycl", "sustainable", "packaging", "tube")):
-            description = f"Learn what {topic} means for product packaging, sustainability claims, brand choices and customer trust."
-        elif any(term in topic_lower for term in ("padel", "tennis", "sport", "tournament", "ranking", "club")):
-            description = f"Everything you need to know about {topic}: rules, rankings, levels and tips to improve your game."
-        elif any(term in topic_lower for term in ("guide", "tips", "how", "choose", "understand")):
-            description = f"This guide on {topic} covers the key points to understand the topic and take effective action."
-        else:
-            return ""
-    result = complete_meta_description(description, language)
-    # Rejeter si le résultat ressemble encore trop au pool générique
-    if _description_is_generic(result):
-        return ""
-    return result
+            # Pas de fin de phrase exploitable : couper au dernier mot complet
+            candidate = _smart_truncate(source, META_MAX_LEN) or ""
+        if META_MIN_LEN <= len(candidate) <= META_MAX_LEN and not _description_is_generic(candidate):
+            return candidate
+    return ""
 
 
 def complete_meta_description(description: str, language: str) -> str:
@@ -3919,8 +3925,9 @@ def build_attention_points(summary: dict[str, Any], signals: list[dict[str, Any]
 
 
 def build_primary_signal(summary: dict[str, Any], signals: list[dict[str, Any]], lang: str = "fr") -> str:
-    """Signal principal selon une hiérarchie fixe : perf > erreurs HTTP > maillage > titres/metas > duplication > fraîcheur.
+    """Signal principal selon une hiérarchie fixe : perf > erreurs HTTP > maillage, puis score pondéré.
 
+    Pondération score pondéré : pages_lentes×3, descriptions_vides×2, titres_hors_plage×1, dates×1.
     Un site avec 98 % de pages lentes ne doit pas afficher 'Descriptions répétées (1)' en signal principal.
     """
     is_en = sanitize_report_language(lang) == "en"
@@ -3930,7 +3937,6 @@ def build_primary_signal(summary: dict[str, Any], signals: list[dict[str, Any]],
 
     # 1. Performance — signal le plus impactant côté UX
     if pct_slow >= 50:
-        avg_note = ""
         if is_en:
             return f"Degraded performance — {pct_slow}% of pages take more than 3s to load"
         return f"Performance dégradée — {pct_slow}% des pages mettent plus de 3s à charger"
@@ -3948,14 +3954,52 @@ def build_primary_signal(summary: dict[str, Any], signals: list[dict[str, Any]],
         return ("Pages with no or few internal links" if is_en
                 else "Pages peu ou pas reliées en interne")
 
-    # 4. Titres et descriptions problématiques
+    # 4. Score pondéré : titres_hors_plage×1, descriptions_vides×2, pages_lentes>3s×3, dates×1
+    # Les dates ne supplantent des signaux analyst-provided que si elles dominent clairement
     bad_titles = get_int(summary, "titles_problematic", get_int(summary, "missing_titles", 0))
     bad_metas = get_int(summary, "meta_descriptions_problematic", get_int(summary, "missing_meta_descriptions", 0))
-    n_content = max(1, get_int(summary, "content_like_pages", n_pages))
-    pct_title_issues = round((bad_titles + bad_metas) / (2 * n_content) * 100)
-    if pct_title_issues >= 40:
-        return ("Titles and descriptions to fix (absent or out of range)" if is_en
-                else "Titres et descriptions à corriger (absents ou hors plage)")
+    dates_count = get_int(summary, "dated_content_signals", len(signals))
+    score_titres = bad_titles * 1
+    score_descs = bad_metas * 2
+    score_lentes = slow_pages * 3
+    score_dates = dates_count * 1
+    weighted = {
+        "titres": score_titres,
+        "descs": score_descs,
+        "lentes": score_lentes,
+        "dates": score_dates,
+    }
+    top_key = max(weighted, key=lambda k: weighted[k])
+    top_score = weighted[top_key]
+    # N'utiliser le score pondéré que si au moins un signal non-dates est présent,
+    # ou si dates domine sans qu'aucun signal analyst-provided ne soit disponible.
+    non_dates_score = score_titres + score_descs + score_lentes
+    use_weighted = top_score > 0 and (non_dates_score > 0 or not signals)
+
+    if use_weighted:
+        # Construire un message pour les top 1-2 items (afficher les 2 si le second est >=50% du premier)
+        ranked = sorted(weighted.items(), key=lambda kv: kv[1], reverse=True)
+        items_to_show = [ranked[0]]
+        if len(ranked) > 1 and ranked[1][1] > 0 and ranked[1][1] >= ranked[0][1] * 0.5:
+            items_to_show.append(ranked[1])
+
+        def _signal_label(key: str, count: int) -> str:
+            if key == "titres":
+                return (f"{count} title{'s' if count > 1 else ''} out of range" if is_en
+                        else f"{count} titre{'s' if count > 1 else ''} hors plage")
+            if key == "descs":
+                return (f"{count} missing description{'s' if count > 1 else ''}" if is_en
+                        else f"{count} description{'s' if count > 1 else ''} manquante{'s' if count > 1 else ''}")
+            if key == "lentes":
+                return (f"{count} slow page{'s' if count > 1 else ''} (>3s)" if is_en
+                        else f"{count} page{'s' if count > 1 else ''} lente{'s' if count > 1 else ''} (>3s)")
+            if key == "dates":
+                return "Visible dates to check" if is_en else "Dates visibles à vérifier"
+            return key
+
+        counts_map = {"titres": bad_titles, "descs": bad_metas, "lentes": slow_pages, "dates": dates_count}
+        parts = [_signal_label(k, counts_map[k]) for k, _ in items_to_show]
+        return " — ".join(parts)
 
     # 5. Duplication de contenu
     dup_titles = get_int(summary, "duplicate_title_groups", 0)
@@ -3964,13 +4008,13 @@ def build_primary_signal(summary: dict[str, Any], signals: list[dict[str, Any]],
         return (f"Duplicate snippets: {dup_titles} title groups, {dup_metas} description groups" if is_en
                 else f"Doublons de snippets : {dup_titles} groupes de titres, {dup_metas} groupes de descriptions")
 
-    # 6. Fraîcheur — uniquement si rien d'autre ne se déclenche
+    # 6. Signaux analyst-provided ou dates en dernier recours
     if signals:
         first = signals[0]
         count = get_int(first, "count", 0)
         label = signal_label_from_key(str(first.get("key") or ""), lang) or str(first.get("signal") or ("Signal to check" if is_en else "Signal à vérifier"))
         return f"{label} ({count})" if count else label
-    if get_int(summary, "dated_content_signals", 0):
+    if dates_count:
         return "Visible dates to check" if is_en else "Dates visibles à vérifier"
     return "Overall healthy base, to confirm on business pages." if is_en else "Socle globalement sain, à confirmer sur les pages business."
 
