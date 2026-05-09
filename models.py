@@ -156,6 +156,7 @@ class AuditPage:
     crawl_depth: int = 0
     load_time_seconds: float = 0.0
     crawl_error: str = ""
+    perf_measurement_unreliable: bool = False
     page_health_score: int = 100
     content_like: bool = False
     meaningful_h1_count: int = 0

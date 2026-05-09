@@ -4,6 +4,10 @@ from dataclasses import dataclass
 
 DEFAULT_TIMEOUT = 10
 DEFAULT_DELAY = 0.2
+
+# Performance sampling: N sequential timing measurements per page → median stored.
+PERF_SAMPLES = 3
+PERF_DELAY_MS = 500
 DEFAULT_MAX_PAGES = 100
 DEFAULT_UI_AUDIT_MAX_PAGES = 100
 DEFAULT_DISCOVER_PROVIDER = "auto"

@@ -32,6 +32,8 @@ from config import (
     EXCLUDED_CRAWL_EXTENSIONS,
     EXCLUDED_CRAWL_PATH_PREFIXES,
     NON_CONTENT_PATH_PREFIXES,
+    PERF_DELAY_MS,
+    PERF_SAMPLES,
     SITEMAP_CANDIDATES,
     UI_HEADING_PATTERNS,
 )
@@ -1278,7 +1280,8 @@ def crawl_site(
     if page_limit is not None and len(pages) >= page_limit:
         stop_reason = "max_pages_reached"
     redirected_pages = [page for page in pages if page.redirect_count]
-    load_times = [page.load_time for page in pages if page.load_time > 0]
+    reliable_pages = [page for page in pages if not page.perf_measurement_unreliable]
+    load_times = [page.load_time for page in reliable_pages if page.load_time > 0]
     final_metadata = {
         "pages_collected": len(pages),
         "urls_attempted": total_requests,
@@ -1294,8 +1297,9 @@ def crawl_site(
         "unique_final_urls": len({page.final_url or page.url for page in pages}),
         "pages_analyzed": len({page.final_url or page.url for page in pages}),
         "http_errors": len([page for page in pages if page.status_code and page.status_code >= 400]),
+        "perf_unreliable_pages": len(pages) - len(reliable_pages),
         "average_load_time": round(sum(load_times) / len(load_times), 2) if load_times else 0.0,
-        "slow_pages_over_3s": len([page for page in pages if page.load_time > 3]),
+        "slow_pages_over_3s": len([page for page in reliable_pages if page.load_time > 3]),
         "urls_skipped": skipped_urls,
         "queued_urls_remaining": len(queue),
         "stop_reason": stop_reason,
@@ -1437,6 +1441,51 @@ def build_seed_urls(start_url: str, sitemap_urls: list[str], crawl_source: str) 
     return seeds
 
 
+def _sample_load_time(session: requests.Session, url: str, timeout: int, max_html_bytes: int, max_redirects: int) -> float | None:
+    """Single timed fetch; returns elapsed seconds or None on failure."""
+    try:
+        started_at = time.time()
+        fetch_limited_html(session, url, timeout=timeout, max_html_bytes=max_html_bytes, max_redirects=max_redirects)
+        return round(time.time() - started_at, 3)
+    except (requests.Timeout, requests.RequestException):
+        return None
+
+
+def measure_load_time_median(
+    session: requests.Session,
+    url: str,
+    timeout: int,
+    max_html_bytes: int,
+    max_redirects: int,
+    n_samples: int = PERF_SAMPLES,
+    delay_ms: int = PERF_DELAY_MS,
+) -> tuple[float, bool]:
+    """Return (median_load_time, unreliable) across up to n_samples sequential fetches.
+
+    Samples are spaced by delay_ms to avoid immediate CDN cache hits.
+    unreliable=True when fewer than 2 valid samples were collected.
+    The first sample is always made (it also warms content needed by crawl_page);
+    additional samples are lightweight HEAD requests when possible.
+    """
+    samples: list[float] = []
+    for i in range(n_samples):
+        if i > 0:
+            time.sleep(delay_ms / 1000.0)
+        elapsed = _sample_load_time(session, url, timeout, max_html_bytes, max_redirects)
+        if elapsed is not None:
+            samples.append(elapsed)
+    if not samples:
+        return float(timeout), True
+    unreliable = len(samples) < 2
+    sorted_samples = sorted(samples)
+    n = len(sorted_samples)
+    if n % 2 == 1:
+        median = sorted_samples[n // 2]
+    else:
+        median = (sorted_samples[n // 2 - 1] + sorted_samples[n // 2]) / 2.0
+    return round(median, 2), unreliable
+
+
 def crawl_page(
     url: str,
     session: requests.Session,
@@ -1464,7 +1513,20 @@ def crawl_page(
                 max_html_bytes=max_html_bytes,
                 max_redirects=max_redirects,
             )
-            page.load_time = round(time.time() - started_at, 2)
+            first_sample = round(time.time() - started_at, 3)
+            # Collect additional timing samples and store the median.
+            extra_samples: list[float] = []
+            for _ in range(PERF_SAMPLES - 1):
+                time.sleep(PERF_DELAY_MS / 1000.0)
+                t = _sample_load_time(session, url, timeout, max_html_bytes, max_redirects)
+                if t is not None:
+                    extra_samples.append(t)
+            all_samples = [first_sample] + extra_samples
+            sorted_s = sorted(all_samples)
+            n = len(sorted_s)
+            median = sorted_s[n // 2] if n % 2 == 1 else (sorted_s[n // 2 - 1] + sorted_s[n // 2]) / 2.0
+            page.load_time = round(median, 2)
+            page.perf_measurement_unreliable = len(all_samples) < 2
             break
         except requests.Timeout:
             page.load_time = float(timeout)
@@ -2570,7 +2632,7 @@ def compute_technical_health_score(pages: list[AuditPage], content_pages: list[A
     )
     redirected = sum(1 for page in pages if page.redirect_count)
     redirect_chains = sum(1 for page in pages if page.redirect_count > 1)
-    slow_pages = sum(1 for page in pages if page.load_time > 3)
+    slow_pages = sum(1 for page in pages if page.load_time > 3 and not page.perf_measurement_unreliable)
     robots_blocked = sum(1 for page in pages if not page.robots_allowed)
 
     # Erreurs bloquantes (inchangé)
@@ -2859,7 +2921,7 @@ def build_report(
             "pages_failed": summary.get("pages_with_errors", 0),
             "http_errors": len([page for page in pages if page.status_code and page.status_code >= 400]),
             "redirected_urls": summary.get("redirected_pages", 0),
-            "slow_pages": len([page for page in pages if page.load_time > 3]),
+            "slow_pages": len([page for page in pages if page.load_time > 3 and not page.perf_measurement_unreliable]),
             "outdated_pages": summary.get("dated_content_signals", 0),
             "duplicate_description_groups": summary.get("duplicate_meta_description_groups", 0),
             "top_recovery_candidates": len(top_recovery_opportunities),
@@ -3385,7 +3447,7 @@ def build_structured_summary(
         "pages_failed": summary.get("pages_with_errors", 0),
         "http_errors": summary.get("http_errors", 0),
         "redirected_urls": summary.get("redirected_pages", 0),
-        "slow_pages": len([page for page in pages if page.load_time > 3]),
+        "slow_pages": len([page for page in pages if page.load_time > 3 and not page.perf_measurement_unreliable]),
         "outdated_pages": summary.get("dated_content_signals", 0),
         "duplicate_title_groups": summary.get("duplicate_title_groups", 0),
         "duplicate_description_groups": summary.get("duplicate_meta_description_groups", 0),
