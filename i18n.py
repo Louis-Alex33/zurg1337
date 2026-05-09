@@ -261,8 +261,10 @@ class I18n:
     def gettext(self, message: str) -> str:
         if self.lang == "fr":
             return message
+        if not message:
+            return message
         translated = self.translations.gettext(message)
-        if translated != message:
+        if translated and translated != message:
             return translated
         return EN_FALLBACKS.get(message, message)
 

@@ -151,11 +151,25 @@ def translate_period_label(value: object, lang: str) -> str:
 
 def translate_estimated_gain_value(value: object, lang: str) -> str:
     text = str(value or "")
+    if not text:
+        return text
     _ = gsc_gettext(lang)
-    suffix = " clics potentiels"
-    if text.endswith(suffix):
-        return text[: -len(suffix)] + " " + _("clics potentiels")
-    return _(text)
+    suffix_potentiels = " clics potentiels"
+    if text.endswith(suffix_potentiels):
+        return text[: -len(suffix_potentiels)] + " " + _("clics potentiels")
+    suffix_supp = " clics/mois supplémentaires"
+    if suffix_supp in text:
+        if lang != "fr":
+            return text.replace(suffix_supp, " additional clicks/month")
+        return text
+    suffix_non_captes = " clics non captés"
+    if text.endswith(suffix_non_captes):
+        if lang != "fr":
+            prefix = text[: -len(suffix_non_captes)]
+            return prefix + " uncaptured clicks"
+        return text
+    translated = _(text)
+    return translated if translated else text
 
 
 def client_display_value(value: object, lang: str = "fr") -> str:
