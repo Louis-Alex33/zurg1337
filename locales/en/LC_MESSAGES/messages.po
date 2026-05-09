@@ -752,6 +752,22 @@ msgstr "medium"
 msgid "faible"
 msgstr "low"
 
+#: gsc.py priority_display_label
+msgid "Priorité haute"
+msgstr "High priority"
+
+#: gsc.py priority_display_label
+msgid "Priorité moyenne"
+msgstr "Medium priority"
+
+#: gsc.py priority_display_label
+msgid "Priorité faible"
+msgstr "Low priority"
+
+#: gsc.py priority_display_label
+msgid "À arbitrer"
+msgstr "To assess"
+
 #: gsc.py:5309
 msgid "Origine du trafic"
 msgstr "Traffic origin"

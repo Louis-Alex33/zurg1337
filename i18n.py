@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import gettext
-from dataclasses import dataclass
+import json
+import time
 from pathlib import Path
 from typing import Callable
 
+from deep_translator import GoogleTranslator
+
 SUPPORTED_LANGUAGES = {"fr", "en"}
-DEFAULT_DOMAIN = "messages"
-LOCALE_DIR = Path(__file__).resolve().parent / "locales"
+CACHE_FILE = Path(__file__).resolve().parent / "translation_cache.json"
 
 
 def normalize_language(lang: str | None) -> str:
@@ -15,29 +16,50 @@ def normalize_language(lang: str | None) -> str:
     return value if value in SUPPORTED_LANGUAGES else "fr"
 
 
-@dataclass(frozen=True)
+def _load_cache() -> dict:
+    if CACHE_FILE.exists():
+        return json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+    return {}
+
+
+def _save_cache(cache: dict) -> None:
+    CACHE_FILE.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _translate(text: str, target_lang: str, cache: dict, save: bool = True) -> str:
+    if not text or not text.strip():
+        return text
+    if text in cache:
+        return cache[text]
+    try:
+        translated = GoogleTranslator(source="fr", target=target_lang).translate(text)
+        time.sleep(0.1)
+    except Exception:
+        return text
+    cache[text] = translated
+    if save:
+        _save_cache(cache)
+    return translated
+
+
 class I18n:
-    lang: str
-    translations: gettext.NullTranslations
+    def __init__(self, lang: str):
+        self.lang = lang
+        self._cache: dict = _load_cache() if lang != "fr" else {}
 
     def gettext(self, message: str) -> str:
         if self.lang == "fr":
             return message
-        if not message:
-            return message
-        return self.translations.gettext(message)
+        return _translate(message, self.lang, self._cache)
+
+    def flush(self) -> None:
+        if self.lang != "fr":
+            _save_cache(self._cache)
 
 
-def get_i18n(lang: str | None, domain: str = DEFAULT_DOMAIN) -> I18n:
-    active_lang = normalize_language(lang)
-    translations = gettext.translation(
-        domain,
-        localedir=str(LOCALE_DIR),
-        languages=[active_lang],
-        fallback=True,
-    )
-    return I18n(lang=active_lang, translations=translations)
+def get_i18n(lang: str | None) -> I18n:
+    return I18n(lang=normalize_language(lang))
 
 
-def get_text(lang: str | None, domain: str = DEFAULT_DOMAIN) -> Callable[[str], str]:
-    return get_i18n(lang, domain=domain).gettext
+def get_text(lang: str | None) -> Callable[[str], str]:
+    return get_i18n(lang).gettext

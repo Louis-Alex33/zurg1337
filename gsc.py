@@ -2011,7 +2011,7 @@ def build_report(
     priority_page_urls = {normalize_url_for_query_match(str(page.get("url", ""))) for page in priority_pages}
     snippet_pages = build_snippet_cards(merged_results, excluded_urls=priority_page_urls)[:10]
     snippet_count = len(snippet_pages)
-    quick_decisions = build_quick_decisions(priority_pages, snippet_pages, query_opportunities_count)
+    quick_decisions = build_quick_decisions(priority_pages, snippet_pages, query_opportunities_count, lang=active_lang)
 
     # Fourchette potentiel basse/haute (T5)
     gain_low_total = 0
@@ -2047,11 +2047,11 @@ def build_report(
         "mode": mode,
         "report_mode": detected_report_mode,
         "report_mode_label": report_mode_label(detected_report_mode),
-        "executive_summary": build_executive_summary(results, priority_count, snippet_count, bool(queries)),
+        "executive_summary": build_executive_summary(results, priority_count, snippet_count, bool(queries), lang=active_lang),
         "estimated_gain_value": estimated_gain_value,
         "estimated_gain_cover": estimated_gain_cover,
         "estimated_gain_note": "",
-        "monthly_priorities": build_monthly_priorities(results, queries),
+        "monthly_priorities": build_monthly_priorities(results, queries, lang=active_lang),
         "quick_decisions": quick_decisions,
         "metrics_source": {
             "Pages analysées": len(results),
@@ -2297,80 +2297,92 @@ def build_executive_summary(
     priority_count: int,
     snippet_count: int,
     has_queries: bool,
+    lang: str = "fr",
 ) -> str:
+    _ = gsc_gettext(lang)
     if not results:
-        return "L’export fourni ne contient pas assez de pages exploitables pour établir une priorisation fiable."
+        return _("L’export fourni ne contient pas assez de pages exploitables pour établir une priorisation fiable.")
     high_impression_low_ctr = sum(1 for item in results if item.impressions >= 100 and item.ctr < 0.02)
     near_top = sum(1 for item in results if 4 <= item.position <= 12 and item.impressions >= 50)
     if high_impression_low_ctr >= max(1, len(results) * 0.15):
-        base = (
+        base = _(
             "Le site dispose déjà de pages visibles dans Google, mais plusieurs pages génèrent beaucoup "
             "d’impressions sans obtenir un taux de clic satisfaisant. La priorité est donc d’améliorer "
             "les pages déjà exposées avant de produire davantage de contenus."
         )
     elif near_top:
-        base = (
+        base = _(
             "Le site possède des pages déjà placées près des premières positions. Le meilleur levier à court "
             "terme consiste à renforcer ces pages avec un contenu plus complet, de meilleurs liens internes "
             "et des réponses plus nettes aux intentions de recherche."
         )
     elif priority_count:
-        base = (
+        base = _(
             "L’export fait ressortir quelques opportunités ciblées plutôt qu’un problème généralisé. "
             "Le plan d’action doit rester sélectif pour concentrer l’effort sur les pages avec un potentiel mesurable."
         )
     else:
-        base = (
+        base = _(
             "Aucun signal critique ne ressort massivement de l’export. Le rapport sert surtout à identifier "
             "des ajustements progressifs et à poser une base de suivi dans Google Search Console."
         )
     query_note = (
-        " Les requêtes fournies permettent aussi d’affiner les angles éditoriaux et les questions à intégrer."
+        _(" Les requêtes fournies permettent aussi d’affiner les angles éditoriaux et les questions à intégrer.")
         if has_queries
-        else " L’absence de l’export Requêtes limite l’analyse fine de l’intention de recherche."
+        else _(" L’absence de l’export Requêtes limite l’analyse fine de l’intention de recherche.")
     )
+    _singular = _("résultat Google ressort")
+    _plural = _("résultats Google ressortent")
+    _candidates = _("comme candidats à une réécriture prioritaire")
     snippet_note = (
-        f" {format_count(snippet_count, 'résultat Google ressort', 'résultats Google ressortent')} comme candidats à une réécriture prioritaire."
+        f" {format_count(snippet_count, _singular, _plural)} {_candidates}."
         if snippet_count
         else ""
     )
     return base + query_note + snippet_note
 
 
-def build_monthly_priorities(results: list[GSCPageAnalysis], queries: list[GSCQueryData]) -> list[dict[str, str]]:
+def build_monthly_priorities(results: list[GSCPageAnalysis], queries: list[GSCQueryData], lang: str = "fr") -> list[dict[str, str]]:
+    _ = gsc_gettext(lang)
     snippet_count = sum(1 for item in results if is_snippet_opportunity(item))
     near_count = sum(1 for item in results if is_near_breakthrough(item) or 4 <= item.position <= 12)
     query_count = len([query for query in queries if query.impressions >= 50])
+    _s1 = _("page est déjà visible mais sous-cliquée")
+    _p1 = _("pages sont déjà visibles mais sous-cliquées")
+    _s2 = _("page est déjà en page 1 ou au début de la page 2")
+    _p2 = _("pages sont déjà en page 1 ou au début de la page 2")
+    _s3 = _("requête exploitable révèle une intention précise")
+    _p3 = _("requêtes exploitables révèlent des intentions précises")
     priorities = [
         {
-            "title": "Améliorer les résultats Google des pages à fortes impressions",
+            "title": _("Améliorer les résultats Google des pages à fortes impressions"),
             "why": (
-                f"{format_count(snippet_count, 'page est déjà visible mais sous-cliquée', 'pages sont déjà visibles mais sous-cliquées')}."
+                f"{format_count(snippet_count, _s1, _p1)}."
                 if snippet_count
-                else "Les pages visibles doivent donner une raison plus claire de cliquer."
+                else _("Les pages visibles doivent donner une raison plus claire de cliquer.")
             ),
-            "action": "Réécrire les titles, les meta descriptions et l’angle d’entrée des pages prioritaires.",
-            "impact": "Potentiel d’amélioration du taux de clic sans attendre une progression de position.",
+            "action": _("Réécrire les titles, les meta descriptions et l’angle d’entrée des pages prioritaires."),
+            "impact": _("Potentiel d’amélioration du taux de clic sans attendre une progression de position."),
         },
         {
-            "title": "Renforcer les pages proches du haut des résultats",
+            "title": _("Renforcer les pages proches du haut des résultats"),
             "why": (
-                f"{format_count(near_count, 'page est déjà en page 1 ou au début de la page 2', 'pages sont déjà en page 1 ou au début de la page 2')}."
+                f"{format_count(near_count, _s2, _p2)}."
                 if near_count
-                else "Les pages avec une base SEO existante sont souvent plus rentables à améliorer que des contenus neufs."
+                else _("Les pages avec une base SEO existante sont souvent plus rentables à améliorer que des contenus neufs.")
             ),
-            "action": "Enrichir le contenu, ajouter une FAQ, mettre à jour les informations et renforcer le maillage interne.",
-            "impact": "Gain potentiel plus rapide car les pages ont déjà une visibilité Google.",
+            "action": _("Enrichir le contenu, ajouter une FAQ, mettre à jour les informations et renforcer le maillage interne."),
+            "impact": _("Gain potentiel plus rapide car les pages ont déjà une visibilité Google."),
         },
         {
-            "title": "Exploiter les requêtes sous-utilisées",
+            "title": _("Exploiter les requêtes sous-utilisées"),
             "why": (
-                f"{format_count(query_count, 'requête exploitable révèle une intention précise', 'requêtes exploitables révèlent des intentions précises')}."
+                f"{format_count(query_count, _s3, _p3)}."
                 if queries
-                else "Cette piste sera à confirmer dès qu’un export Requêtes sera disponible."
+                else _("Cette piste sera à confirmer dès qu’un export Requêtes sera disponible.")
             ),
-            "action": "Ajouter des sections ciblées dans les pages existantes ou créer des contenus satellites lorsque l’intention est distincte.",
-            "impact": "Potentiel de trafic plus qualifié, à valider après mise en ligne et suivi GSC.",
+            "action": _("Ajouter des sections ciblées dans les pages existantes ou créer des contenus satellites lorsque l’intention est distincte."),
+            "impact": _("Potentiel de trafic plus qualifié, à valider après mise en ligne et suivi GSC."),
         },
     ]
     priorities.sort(
@@ -2386,7 +2398,9 @@ def build_quick_decisions(
     priority_pages: list[dict[str, object]],
     snippet_pages: list[dict[str, object]],
     query_opportunities_count: int,
+    lang: str = "fr",
 ) -> list[dict[str, object]]:
+    _ = gsc_gettext(lang)
     rows: list[dict[str, object]] = []
 
     # Trier les pages prioritaires par potentiel de clics DESC pour que la #1 soit
@@ -2404,12 +2418,12 @@ def build_quick_decisions(
         rows.append(
             {
                 "priority": "",
-                "action": "Traiter les pages à plus fort potentiel de clics",
+                "action": _("Traiter les pages à plus fort potentiel de clics"),
                 "pages": quick_pages_label(top_pages),
                 "page_urls": list(top_page_urls),
-                "impact": "Potentiel théorique prioritaire",
-                "effort": "moyen",
-                "why": "Elles concentrent le plus de clics récupérables parmi les pages du top 10.",
+                "impact": _("Potentiel théorique prioritaire"),
+                "effort": _("moyen"),
+                "why": _("Elles concentrent le plus de clics récupérables parmi les pages du top 10."),
             }
         )
     if snippet_pages:
@@ -2417,35 +2431,35 @@ def build_quick_decisions(
         rows.append(
             {
                 "priority": "",
-                "action": "Réécrire les résultats Google sous-cliqués",
+                "action": _("Réécrire les résultats Google sous-cliqués"),
                 "pages": quick_pages_label(snippet_pages[:3]),
                 "page_urls": list(snippet_urls),
-                "impact": "Taux de clic à améliorer",
-                "effort": "faible",
-                "why": "Ces pages sont déjà affichées dans Google mais leur CTR est en dessous de la médiane.",
+                "impact": _("Taux de clic à améliorer"),
+                "effort": _("faible"),
+                "why": _("Ces pages sont déjà affichées dans Google mais leur CTR est en dessous de la médiane."),
             }
         )
     if query_opportunities_count:
         rows.append(
             {
                 "priority": "",
-                "action": "Exploiter les requêtes sous-utilisées",
-                "pages": f"{format_number(query_opportunities_count)} requêtes à trier",
+                "action": _("Exploiter les requêtes sous-utilisées"),
+                "pages": f"{format_number(query_opportunities_count)} {_('requêtes à trier')}",
                 "page_urls": [],
-                "impact": "Intentions mieux couvertes",
-                "effort": "moyen",
-                "why": "Les requêtes GSC montrent les angles réellement demandés par les utilisateurs.",
+                "impact": _("Intentions mieux couvertes"),
+                "effort": _("moyen"),
+                "why": _("Les requêtes GSC montrent les angles réellement demandés par les utilisateurs."),
             }
         )
     rows.append(
         {
             "priority": "",
-            "action": "Valider les arbitrages avant production",
+            "action": _("Valider les arbitrages avant production"),
             "pages": "Top 10 pages",
             "page_urls": [],
-            "impact": "Moins d'actions inutiles",
-            "effort": "faible",
-            "why": "Le rapport priorise GSC, sans remplacer un crawl technique complet.",
+            "impact": _("Moins d'actions inutiles"),
+            "effort": _("faible"),
+            "why": _("Le rapport priorise GSC, sans remplacer un crawl technique complet."),
         }
     )
     for index, row in enumerate(rows[:4], start=1):
@@ -2990,7 +3004,7 @@ def detect_serp_anomaly(position: float, ctr: float) -> str | None:
     return None
 
 
-def page_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
+def page_to_report_dict(item: GSCPageAnalysis, lang: str = "fr") -> dict[str, object]:
     actions = precise_actions_for_page(item)
     action_types = [action_label_from_type(item.action_type)] if item.action_type else action_types_for_page(actions)
     serp_flag = detect_serp_anomaly(item.position, item.ctr)
@@ -3027,9 +3041,9 @@ def page_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
         "actions": actions,
         "action_types": ",".join(css_action_type(value) for value in action_types),
         "action_type_labels": action_types,
-        "effort": effort_for_page(item),
-        "impact": impact_for_page(item),
-        "why": explain_reason(item),
+        "effort": effort_for_page(item, lang=lang),
+        "impact": impact_for_page(item, lang=lang),
+        "why": explain_reason(item, lang=lang),
         "overlap_queries": item.possible_overlap_queries[:4],
         "cannibalization": {
             "group_id": item.cannibalization_group_id,
@@ -3094,24 +3108,27 @@ def priority_css_class(item: GSCPageAnalysis) -> str:
     return "p3"
 
 
-def effort_for_page(item: GSCPageAnalysis) -> str:
+def effort_for_page(item: GSCPageAnalysis, lang: str = "fr") -> str:
+    _ = gsc_gettext(lang)
     if is_dead_gsc_page(item) or item.possible_overlap_queries:
-        return "Élevé"
+        return _("Élevé")
     if 4 <= item.position <= 10 and is_snippet_opportunity(item):
-        return "Faible"
+        return _("Faible")
     if item.position <= 20:
-        return "Moyen"
-    return "Moyen"
+        return _("Moyen")
+    return _("Moyen")
 
 
-def impact_for_page(item: GSCPageAnalysis) -> str:
+def impact_for_page(item: GSCPageAnalysis, lang: str = "fr") -> str:
+    _ = gsc_gettext(lang)
     if item.estimated_recoverable_clicks:
-        return f"jusqu’à {format_number(item.estimated_recoverable_clicks)} clics non captés"
+        _uncaptured = _("clics non captés")
+        return f"jusqu’à {format_number(item.estimated_recoverable_clicks)} {_uncaptured}"
     if is_snippet_opportunity(item):
-        return "Hausse potentielle du taux de clic"
+        return _("Hausse potentielle du taux de clic")
     if item.position <= 20:
-        return "Potentiel de progression SEO"
-    return "Impact à confirmer: le signal actuel reste limité."
+        return _("Potentiel de progression SEO")
+    return _("Impact à confirmer: le signal actuel reste limité.")
 
 
 def precise_actions_for_page(item: GSCPageAnalysis) -> list[str]:
@@ -3171,7 +3188,7 @@ def probable_intent_from_keyword(keyword: str) -> str:
     return "Recherche d’information sur le sujet"
 
 
-def page_to_breakthrough_dict(item: GSCPageAnalysis) -> dict[str, object]:
+def page_to_breakthrough_dict(item: GSCPageAnalysis, lang: str = "fr") -> dict[str, object]:
     return {
         "url": item.url,
         "slug": display_page_label(item.url),
@@ -3179,8 +3196,8 @@ def page_to_breakthrough_dict(item: GSCPageAnalysis) -> dict[str, object]:
         "impressions": format_number(item.impressions),
         "clicks": format_number(item.clicks),
         "action": main_action_for_page(item),
-        "effort": effort_for_page(item),
-        "impact": impact_for_page(item),
+        "effort": effort_for_page(item, lang=lang),
+        "impact": impact_for_page(item, lang=lang),
     }
 
 
