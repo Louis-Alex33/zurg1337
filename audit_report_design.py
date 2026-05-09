@@ -161,6 +161,10 @@ REPORT_TEXT = {
         "points_found": "Points relevés",
         "no_detailed_url": "Aucune URL détaillée disponible.",
         "recommended_next_steps": "Prochaines étapes recommandées",
+        "explication_titre_generique": "Suggestion spécifique construite à partir de l'URL, du titre et de l'intention visible.",
+        "explication_description_generique": "Description proposée pour rendre l'extrait plus concret et exploitable.",
+        "explication_titre_local": "Titre resserré pour éviter la troncature dans Google.",
+        "explication_description_local": "Description reformulée pour garder un extrait clair et exploitable dans les résultats.",
     },
     "en": {
         "seo_report": "SEO REPORT",
@@ -302,6 +306,10 @@ REPORT_TEXT = {
         "points_found": "Findings",
         "no_detailed_url": "No detailed URL is available.",
         "recommended_next_steps": "Recommended Next Steps",
+        "explication_titre_generique": "Specific suggestion built from the URL, title and visible intent.",
+        "explication_description_generique": "Proposed description to make the snippet more concrete and actionable.",
+        "explication_titre_local": "Title trimmed to avoid truncation in Google.",
+        "explication_description_local": "Description rewritten to keep the snippet clear and actionable in search results.",
     },
 }
 
@@ -971,7 +979,7 @@ def prepare_audit_report_context(
     pages_prioritaires = normalize_priority_pages(data.get("pages_prioritaires") or top_pages, pages_by_url, lang=active_lang)
     urls_crawlees = normalize_crawled_urls(data.get("urls_crawlees") or pages)
     enrich_priority_pages_with_maillage(pages_prioritaires, urls_crawlees, domain, lang=active_lang)
-    urls_crawlees = generate_seo_suggestions_for_priority_pages(urls_crawlees, pages_prioritaires)
+    urls_crawlees = generate_seo_suggestions_for_priority_pages(urls_crawlees, pages_prioritaires, lang=active_lang)
     perf = build_perf_data(urls_crawlees)
     analyste_nom = str(data.get("analyste_nom") or DEFAULT_ANALYSTE_NOM).strip()
     analyste_titre = str(data.get("analyste_titre") or DEFAULT_ANALYSTE_TITRE).strip()
@@ -2223,7 +2231,7 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
         <span class="suggestion-texte-propose">{escape(title_suggested)}</span>
         <span class="suggestion-longueur-ok">{get_int(suggestion, "titre_longueur", len(title_suggested))} {escape(t("chars"))}</span>
       </div>
-      {render_suggestion_explanation(str(suggestion.get("explication_titre") or ""))}
+      {render_suggestion_explanation(str(suggestion.get("explication_titre") or ""), context)}
     </div>"""
         desc_block = ""
         if desc_suggested:
@@ -2254,7 +2262,7 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
         <span class="suggestion-texte-propose">{escape(desc_suggested)}</span>
         <span class="suggestion-longueur-ok">{get_int(suggestion, "description_longueur", len(desc_suggested))} {escape(t("chars"))}</span>
       </div>
-      {render_suggestion_explanation(str(suggestion.get("explication_description") or ""))}
+      {render_suggestion_explanation(str(suggestion.get("explication_description") or ""), context)}
     </div>"""
         if not title_block and not desc_block:
             continue
@@ -2320,8 +2328,22 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
   </section>"""
 
 
-def render_suggestion_explanation(value: str) -> str:
-    return f'<div class="suggestion-explication">{escape(value)}</div>' if value.strip() else ""
+_EXPLICATION_KEY_MAP = {
+    "Suggestion specifique construite a partir de l'URL, du titre et de l'intention visible.": "explication_titre_generique",
+    "Description proposee pour rendre l'extrait plus concret et exploitable.": "explication_description_generique",
+    "Titre resserré pour éviter la troncature dans Google.": "explication_titre_local",
+    "Description reformulée pour garder un extrait clair et exploitable dans les résultats.": "explication_description_local",
+}
+
+
+def render_suggestion_explanation(value: str, context: dict[str, Any] | None = None) -> str:
+    if not value.strip():
+        return ""
+    if context is not None:
+        key = _EXPLICATION_KEY_MAP.get(value.strip())
+        if key:
+            value = text_for(context, key)
+    return f'<div class="suggestion-explication">{escape(value)}</div>'
 
 
 def render_secondary_signals(context: dict[str, Any]) -> str:
@@ -3003,6 +3025,7 @@ def classify_maillage_class(nb_liens: int) -> str:
 def generate_seo_suggestions_for_priority_pages(
     urls_crawlees: list[dict[str, Any]],
     pages_prioritaires: list[dict[str, Any]],
+    lang: str = "fr",
 ) -> list[dict[str, Any]]:
     priority_keys = [canonical_url_key(str(page.get("url") or "")) for page in pages_prioritaires]
     priority_keys = [key for key in priority_keys if key]
@@ -3017,7 +3040,7 @@ def generate_seo_suggestions_for_priority_pages(
             candidates.append(page)
     if not candidates:
         return urls_crawlees
-    suggestions_source = generate_seo_suggestions(candidates[:10])
+    suggestions_source = generate_seo_suggestions(candidates[:10], lang=lang)
     suggestions_by_url = {
         canonical_url_key(str(page.get("url") or "")): as_dict(page.get("seo_suggestions"))
         for page in suggestions_source
@@ -3030,11 +3053,11 @@ def generate_seo_suggestions_for_priority_pages(
     return urls_crawlees
 
 
-def generate_seo_suggestions(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def generate_seo_suggestions(pages: list[dict[str, Any]], lang: str = "fr") -> list[dict[str, Any]]:
     pages_a_corriger = [page for page in pages if needs_title_fix(page) or needs_desc_fix(page)]
     if not pages_a_corriger:
         return pages
-    raw_suggestions = generate_seo_suggestions_with_anthropic(pages_a_corriger)
+    raw_suggestions = generate_seo_suggestions_with_anthropic(pages_a_corriger, lang=lang)
     suggestions_by_url = {str(suggestion.get("url") or ""): suggestion for suggestion in raw_suggestions}
     for page in pages:
         if not (needs_title_fix(page) or needs_desc_fix(page)):
@@ -3048,13 +3071,14 @@ def generate_seo_suggestions(pages: list[dict[str, Any]]) -> list[dict[str, Any]
     return pages
 
 
-def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]], lang: str = "fr") -> list[dict[str, Any]]:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return []
     try:
         import anthropic  # type: ignore[import-not-found]
     except ImportError:
         return []
+    is_en = sanitize_report_language(lang) == "en"
     pages_json = json.dumps(
         [
             {
@@ -3076,7 +3100,37 @@ def generate_seo_suggestions_with_anthropic(pages: list[dict[str, Any]]) -> list
         ensure_ascii=False,
         indent=2,
     )
-    prompt = f"""Tu es un expert SEO. Pour chaque page ci-dessous, génère un titre Google optimisé et une description Google optimisée.
+    if is_en:
+        prompt = f"""You are an SEO expert. For each page below, generate an optimized Google title and an optimized Google description.
+
+Strict rules:
+- Title: between 50 and 60 characters maximum
+- Description: between 140 and 155 characters
+- Language: same language as the current title
+- Tone: professional, engaging, faithful to the subject
+- Do not invent content that does not exist
+- If the current title is not missing or too long, leave "titre_suggere" empty and "titre_longueur" at 0
+- Never propose the same title as the current one
+- Do not pad a correct title with a generic suffix like ": key information"
+- Write explication_titre and explication_description in English
+
+Pages to fix:
+{pages_json}
+
+Reply ONLY with valid JSON, no markdown, no backticks, no comments:
+[
+  {{
+    "url": "...",
+    "titre_suggere": "...",
+    "titre_longueur": 0,
+    "description_suggeree": "...",
+    "description_longueur": 0,
+    "explication_titre": "...",
+    "explication_description": "..."
+  }}
+]"""
+    else:
+        prompt = f"""Tu es un expert SEO. Pour chaque page ci-dessous, génère un titre Google optimisé et une description Google optimisée.
 
 Règles strictes :
 - Titre : entre 50 et 60 caractères maximum
