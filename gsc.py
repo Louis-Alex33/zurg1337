@@ -9,7 +9,7 @@ import re
 import sys
 import unicodedata
 from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -2798,17 +2798,19 @@ def merge_url_variant_results(
         other_item = url_map.get(other)
         if canon_item is None or other_item is None:
             continue
-        # Fusionner les métriques dans l'item canonique
         merged = merge_variant_pair_metrics(
             {"clicks": canon_item.clicks, "impressions": canon_item.impressions, "position": canon_item.position},
             {"clicks": other_item.clicks, "impressions": other_item.impressions, "position": other_item.position},
         )
-        canon_item.clicks = int(merged["clicks"])
-        canon_item.impressions = int(merged["impressions"])
-        canon_item.position = float(merged["position"])
-        canon_item.ctr = float(merged["ctr"])
+        url_map[canonical] = replace(
+            canon_item,
+            clicks=int(merged["clicks"]),
+            impressions=int(merged["impressions"]),
+            position=float(merged["position"]),
+            ctr=float(merged["ctr"]),
+        )
         to_remove.add(other)
-    return [item for item in results if item.url not in to_remove]
+    return [url_map[item.url] for item in results if item.url not in to_remove]
 
 
 def build_url_variant_report_data(
