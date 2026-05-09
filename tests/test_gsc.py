@@ -729,6 +729,55 @@ class TruncateTitleTests(unittest.TestCase):
         last_word = title.rstrip(" ,;:—-").rsplit(" ", 1)[-1]
         self.assertGreater(len(last_word), 2, f"Ends on fragment: {title!r}")
 
+    def test_diversify_card_title_no_focus_suffix(self) -> None:
+        long_title = "Quand changer raquette padel : critères, avis et choix complets"
+        card: dict[str, object] = {"title_example": long_title, "meta_example": long_title, "main_query": "quand changer raquette padel"}
+        existing: dict[str, object] = {"title_example": long_title, "meta_example": long_title}
+        result = _diversify_snippet_card(card, [existing], GSCPageAnalysis(url="https://example.com/", clicks=0, impressions=0, ctr=0.0, position=5.0))
+        title = str(result["title_example"])
+        self.assertNotIn("— focus", title)
+
+    def test_diversify_card_title_max_60_chars(self) -> None:
+        long_title = "Quand changer raquette padel : critères, avis et choix complets pour bien décider"
+        card: dict[str, object] = {"title_example": long_title, "meta_example": long_title, "main_query": "quand changer raquette padel"}
+        existing: dict[str, object] = {"title_example": long_title, "meta_example": long_title}
+        result = _diversify_snippet_card(card, [existing], GSCPageAnalysis(url="https://example.com/", clicks=0, impressions=0, ctr=0.0, position=5.0))
+        title = str(result["title_example"])
+        self.assertLessEqual(len(title), 60)
+        last_char = title[-1] if title else ""
+        self.assertNotIn(last_char, " ,;:—-")
+
+
+class BusinessOpportunitiesStoplistTests(unittest.TestCase):
+    def _make_page(self, main_query: str, opportunity_score: int = 50) -> GSCPageAnalysis:
+        return GSCPageAnalysis(
+            url="https://example.com/page/",
+            impressions=500,
+            clicks=10,
+            position=8,
+            business_value="high",
+            opportunity_score=opportunity_score,
+            main_query=main_query,
+        )
+
+    def test_comparatif_query_excluded(self) -> None:
+        rows = build_business_opportunities([self._make_page("comparatif")])
+        self.assertEqual(rows, [], "Row with query='comparatif' must be excluded")
+
+    def test_all_stoplist_words_excluded(self) -> None:
+        from gsc import GENERIC_QUERY_STOPLIST
+        for word in GENERIC_QUERY_STOPLIST:
+            rows = build_business_opportunities([self._make_page(word)])
+            self.assertEqual(rows, [], f"Stoplist word '{word}' must be excluded")
+
+    def test_multi_word_query_not_excluded(self) -> None:
+        rows = build_business_opportunities([self._make_page("comparatif raquette padel")])
+        self.assertEqual(len(rows), 1, "Multi-word query should not be excluded")
+
+    def test_short_word_count_excluded(self) -> None:
+        rows = build_business_opportunities([self._make_page("je")])
+        self.assertEqual(rows, [], "Query with <2 words >2 chars must be excluded")
+
 
 if __name__ == "__main__":
     unittest.main()

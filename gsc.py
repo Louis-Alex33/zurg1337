@@ -2648,14 +2648,8 @@ def _diversify_snippet_card(card: dict[str, object], existing_cards: list[dict[s
         t_ratio = difflib.SequenceMatcher(None, title, str(existing.get("title_example", ""))).ratio()
         m_ratio = difflib.SequenceMatcher(None, meta, str(existing.get("meta_example", ""))).ratio()
         if t_ratio >= 0.85 or m_ratio >= 0.85:
-            query = str(card.get("main_query", "")) or display_page_label(str(card.get("url", "")))
             card = dict(card)
-            base_title = str(card.get("title_example", ""))
-            if query and len(query) <= 35:
-                suffix = f" — focus {query}"
-                card["title_example"] = _truncate_title(base_title, 65 - len(suffix)) + suffix
-            else:
-                card["title_example"] = _truncate_title(base_title, 65)
+            card["title_example"] = _truncate_title(str(card.get("title_example", "")), 60)
             break
     return card
 
@@ -2817,7 +2811,12 @@ def _slug_dedup_key(url: str) -> str:
 
 
 def build_business_opportunities(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
-    high_value = [item for item in results if item.business_value == "high" and not is_dead_gsc_page(item)]
+    def _generic(item: GSCPageAnalysis) -> bool:
+        q = (item.main_query or "").strip().lower()
+        if not q:
+            return False
+        return q in GENERIC_QUERY_STOPLIST or len([w for w in q.split() if len(w) > 2]) < 2
+    high_value = [item for item in results if item.business_value == "high" and not is_dead_gsc_page(item) and not _generic(item)]
     high_value.sort(key=lambda item: (item.opportunity_score, item.impressions, item.estimated_recoverable_clicks or 0), reverse=True)
     by_slug: dict[str, GSCPageAnalysis] = {}
     for item in high_value:
