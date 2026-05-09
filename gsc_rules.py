@@ -277,7 +277,11 @@ def title_case_snippet(value: str) -> str:
 
 
 _TRAILING_PUNCT_RE = re.compile(r"[,;:\-–—\s]+$")
-_TRAILING_COORD_RE = re.compile(r"\s+(et|ou|mais|donc|or|ni|car)$", re.I)
+# Conjonctions de coordination + pronoms/relatifs orphelins qui signalent une subordonnée tronquée
+_TRAILING_COORD_RE = re.compile(
+    r"\s+(et|ou|mais|donc|or|ni|car|pour|dont|que|qui|lesquels|lesquelles|elles|ils|elle|il|leur|leurs|y|en)$",
+    re.I,
+)
 
 def trim_to_length(value: str, max_length: int) -> str:
     """Coupe au dernier mot complet <= max_length.
@@ -653,18 +657,38 @@ def slug_prefix(url: str, depth: int = 1) -> str:
     return "-".join(tokens[-depth:]) if tokens else ""
 
 
+_SLUG_ONLY_CLUSTER_SUFFIXES: frozenset[str] = frozenset({
+    "joueur-padel",
+})
+
+
+def _cluster_sig(page: "GSCPageAnalysis") -> tuple[str, str, str]:
+    """Calcule la signature de cluster d'une page.
+
+    Pour les pages dont le slug suffix correspond à un groupe homogène connu
+    (ex : *-joueur-padel), on utilise uniquement ce suffix comme clé afin de
+    regrouper des pages dont action_type ou business_value peut varier (biographies,
+    fiches joueurs, etc.).  Pour les autres pages, la signature tripartite
+    (action_type, business_value, slug_suffix) assure une granularité fine.
+    """
+    suffix = slug_prefix(page.url, depth=2)
+    if suffix in _SLUG_ONLY_CLUSTER_SUFFIXES:
+        return ("", "", suffix)
+    return (str(page.action_type or ""), str(page.business_value or ""), suffix)
+
+
 def cap_top_priority_per_cluster(
-    pages: list[GSCPageAnalysis],
+    pages: list["GSCPageAnalysis"],
     max_per_cluster: int = MAX_PAGES_PER_CLUSTER,
-) -> list[GSCPageAnalysis]:
+) -> list["GSCPageAnalysis"]:
     """Limite à `max_per_cluster` le nombre de pages par cluster dans le top prioritaire (bug 2B-3).
 
-    Cluster défini par la signature (action_type, business_value, slug_prefix(depth=2)).
+    Cluster défini par _cluster_sig : signature complète sauf pour les groupes
+    homogènes connus (ex : *-joueur-padel) où seul le slug suffix suffit.
     Les pages excédentaires voient leur priorité descendue d'un cran (HIGH→MEDIUM, MEDIUM→LOW).
     Les pages DEAD ne sont pas affectées.
     Les pages les mieux scorées (opportunity_score) sont conservées en priorité haute.
     """
-    _PRIORITY_ORDER = {"HIGH": 3, "MEDIUM": 2, "LOW": 1, "DEAD": 0}
     _DOWNGRADE = {"HIGH": "MEDIUM", "MEDIUM": "LOW", "LOW": "LOW"}
 
     cluster_counts: dict[tuple[str, str, str], int] = {}
@@ -677,11 +701,7 @@ def cap_top_priority_per_cluster(
         if page.priority == "DEAD":
             result.append(page)
             continue
-        sig = (
-            str(page.action_type or ""),
-            str(page.business_value or ""),
-            slug_prefix(page.url, depth=2),
-        )
+        sig = _cluster_sig(page)
         count = cluster_counts.get(sig, 0)
         if count >= max_per_cluster:
             downgraded = dataclass_replace(page, priority=_DOWNGRADE.get(page.priority, page.priority))

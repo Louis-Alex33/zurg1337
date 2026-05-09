@@ -2149,12 +2149,21 @@ def build_action_plan_30_days(
     def _url(page: dict[str, object]) -> str:
         return str(page.get("url") or "")
 
-    # Semaine 1 : réécriture snippets
-    snippet_urls = [_url(p) for p in snippet_pages[:4] if _url(p)]
+    # Semaine 1 : réécriture snippets — prioriser les pages du top 10, compléter avec les autres snippets
+    priority_urls_set = {_url(p) for p in priority_pages if _url(p)}
+    snippet_in_top10 = [p for p in snippet_pages if _url(p) in priority_urls_set]
+    snippet_outside_top10 = [p for p in snippet_pages if _url(p) not in priority_urls_set]
+    # Top 10 d'abord, puis les autres jusqu'à 4 pages max
+    ordered_snippets = (snippet_in_top10 + snippet_outside_top10)[:4]
+    snippet_urls = [_url(p) for p in ordered_snippets if _url(p)]
     if snippet_urls:
         week1_pages = ", ".join(f"`{u}`" for u in snippet_urls)
+        source_note = (
+            " (pages issues du top 10 prioritaire)" if snippet_in_top10
+            else " (pages hors top 10 prioritaire — section Résultats Google)"
+        )
         week1_body = (
-            f"Réécriture des résultats Google (title + meta) des {len(snippet_urls)} pages identifiées. "
+            f"Réécriture des résultats Google (title + meta) des {len(snippet_urls)} pages identifiées{source_note}. "
             f"Pages concernées : {week1_pages}. Délai : 2-3 jours par snippet (validation incluse)."
         )
     else:
@@ -2468,6 +2477,10 @@ def build_priority_page_cards(results: list[GSCPageAnalysis]) -> list[dict[str, 
     seen_slugs: set[str] = set()
     cards: list[dict[str, object]] = []
     for item in candidates:
+        # Exclure les pages LOW du top 10 : le garde-fou position les a déclassées,
+        # elles ne génèrent pas de gain rapide et occupent un slot inutilement.
+        if item.priority == "LOW":
+            continue
         if item.priority not in {"HIGH", "MEDIUM"} and not item.estimated_recoverable_clicks:
             continue
         slug_key = _slug_dedup_key(item.url)
@@ -2552,7 +2565,9 @@ def _inject_distinctive_token(title: str, existing_title: str, main_query: str) 
         set(re.findall(r"[a-z0-9]+", topic_part.lower()))
         & set(re.findall(r"[a-z0-9]+", existing_topic.lower()))
     )
-    blocked = existing_words | value_words | shared_topic_words
+    # Exclure aussi les tokens déjà présents dans le topic du titre courant (évite P2000 → "p2000, niveau…")
+    current_topic_words = set(re.findall(r"[a-z0-9]+", topic_part.lower()))
+    blocked = existing_words | value_words | shared_topic_words | current_topic_words
     query_tokens = [w for w in re.findall(r"[a-z0-9]+", main_query.lower()) if w not in blocked and len(w) > 2]
     if not query_tokens:
         return _truncate_title(title, 60)
@@ -4665,6 +4680,8 @@ def priority_display_label(priority: str, fallback: str) -> str:
         return "Priorité haute"
     if priority == "p2":
         return "Priorité moyenne"
+    if priority == "p3":
+        return "Priorité faible"
     if priority == "dead":
         return "À arbitrer"
     return fallback or "Priorité faible"
