@@ -1015,6 +1015,7 @@ def prepare_audit_report_context(
         signal_principal=signal_principal,
         dates_a_verifier=get_int(data, "dates_a_verifier", get_int(summary, "dated_content_signals", len(dated_content))),
         pages_prioritaires=pages_prioritaires,
+        titres_hors_plage=get_int(data, "titres_hors_plage", get_int(summary, "out_of_range_titles", 0)),
         lang=active_lang,
     )
     dirigeant_overrides = as_dict(data.get("dirigeant"))
@@ -1103,6 +1104,16 @@ def prepare_audit_report_context(
     # High = many signals to fix = real business opportunity for the analyst.
     # Avoids "100/100 Opportunité" meaning "nothing to do" to a non-technical reader.
     context["seo_improvement_potential"] = max(0, 100 - int(context["seo_opportunity_score"]))
+    # Qualitative label: avoids the ambiguity of "0/100 marge de progression"
+    # which a non-technical reader interprets as "no room to improve" (the opposite of the truth).
+    _imp = context["seo_improvement_potential"]
+    is_ctx_en = sanitize_report_language(active_lang) == "en"
+    if _imp >= 60:
+        context["seo_improvement_label"] = "High margin for improvement" if is_ctx_en else "Marge de progression : élevée"
+    elif _imp >= 30:
+        context["seo_improvement_label"] = "Moderate margin for improvement" if is_ctx_en else "Marge de progression : modérée"
+    else:
+        context["seo_improvement_label"] = "Low margin for improvement" if is_ctx_en else "Marge de progression : faible"
     return context
 
 
@@ -1218,7 +1229,7 @@ def render_cover(context: dict[str, Any]) -> str:
         <div class="score-context">
           <span class="score-badge {score_class}">{int(context["technical_health_score"])}/100</span>
           <p>{escape("Technical health" if context_lang(context) == "en" else "Santé technique")}</p>
-          <p><strong>{int(context["seo_improvement_potential"])}/100</strong> {escape("Improvement potential" if context_lang(context) == "en" else "Potentiel d'amélioration")}</p>
+          <p>{escape(context["seo_improvement_label"])}</p>
           {render_recovery_cover_score(context)}
         </div>
       </div>
@@ -1271,6 +1282,18 @@ def render_page_footer(context: dict[str, Any]) -> str:
     )
 
 
+def _render_dirigeant_gsc_note(context: dict[str, Any]) -> str:
+    """For URL-only crawl reports, add a one-line GSC upsell note at the bottom of the dirigeant card."""
+    if context.get("report_type") not in {None, "crawl"}:
+        return ""
+    is_en = context_lang(context) == "en"
+    if is_en:
+        note = "This audit identifies structural signals visible from the URL; a GSC audit identifies priority pages based on real traffic."
+    else:
+        note = "Cet audit identifie les signaux structurels visibles depuis l'URL ; un audit GSC permet d'identifier les pages prioritaires en fonction du trafic réel."
+    return f'<p class="dirigeant-gsc-note">{escape(note)}</p>'
+
+
 def render_dirigeant_summary(context: dict[str, Any]) -> str:
     score = int(context["technical_health_score"])
     t = lambda key: text_for(context, key)
@@ -1282,7 +1305,7 @@ def render_dirigeant_summary(context: dict[str, Any]) -> str:
         <div class="dirigeant-score-bloc">
           <span class="dirigeant-score-value {score_color_class(score)}">{score}/100</span>
           <span class="dirigeant-score-label">{escape("technical health" if context_lang(context) == "en" else "sante technique")}</span>
-          <span class="dirigeant-score-label">{int(context["seo_improvement_potential"])}/100 {escape("improvement potential" if context_lang(context) == "en" else "potentiel d'amelioration")}</span>
+          <span class="dirigeant-score-label">{escape(context["seo_improvement_label"])}</span>
         </div>
         <div class="dirigeant-phrase">{escape(context["resume_dirigeant"])}</div>
       </div>
@@ -1303,6 +1326,7 @@ def render_dirigeant_summary(context: dict[str, Any]) -> str:
           <div class="dirigeant-col-text">{escape(context["recommandation_courte"])}</div>
         </div>
       </div>
+      {_render_dirigeant_gsc_note(context)}
     </div>
     {render_page_footer(context)}
   </section>"""
@@ -2215,6 +2239,17 @@ def build_page_performance_action(page: dict[str, Any], domain: str, lang: str =
     }
 
 
+def _is_suffix_only_suggestion(title_current: str, title_suggested: str) -> bool:
+    """Return True if the suggestion only removes a brand suffix (e.g., ' - Brand') with no other edit."""
+    if not title_current or not title_suggested:
+        return False
+    m = re.search(r"\s+[-|]\s+[^-|]{2,30}$", title_current)
+    if not m:
+        return False
+    without_suffix = title_current[:m.start()].strip()
+    return same_normalized_text(without_suffix, title_suggested) or title_suggested.startswith(without_suffix[:30])
+
+
 def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     pages = [page for page in context.get("urls_crawlees", []) if as_dict(page).get("seo_suggestions")]
     if not pages:
@@ -2225,6 +2260,8 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     manual_titles = 0
     manual_descs = 0
     grey_zone_titles = 0
+    suffix_only_count = 0
+    total_title_suggestions = 0
     # Compter les titres en zone grise (66-70 chars) sur toutes les pages crawlées
     for raw_p in context.get("urls_crawlees", []):
         if title_in_grey_zone(as_dict(raw_p)):
@@ -2246,6 +2283,11 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
                 manual_descs += 1
             continue
 
+        if title_suggested:
+            total_title_suggestions += 1
+            if _is_suffix_only_suggestion(title, title_suggested):
+                suffix_only_count += 1
+
         title_block = ""
         if title_suggested:
             title_bad = len(title) > TITLE_MAX_LEN
@@ -2264,6 +2306,24 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
                 if title
                 else ""
             )
+            # Detect when editorial content was also cut beyond the brand suffix.
+            # Pattern: " - Brand" or " | Brand" suffix at end of title.
+            # If removing the suffix alone would already fit, no warning needed.
+            # If title_suggested is shorter than title-minus-suffix, content was also truncated.
+            title_truncation_warning = ""
+            if title and title_suggested:
+                suffix_match = re.search(r"\s+[-|]\s+[^-|]{2,30}$", title)
+                if suffix_match:
+                    title_without_suffix = title[:suffix_match.start()].strip()
+                    if title_suggested and len(title_suggested) < len(title_without_suffix) - 5:
+                        if is_en:
+                            title_truncation_warning = '<p class="suggestion-truncation-warning">⚠ Content also truncated beyond the brand suffix — review before publishing.</p>'
+                        else:
+                            title_truncation_warning = '<p class="suggestion-truncation-warning">⚠ Contenu tronqué au-delà du suffixe de marque — à relire avant publication.</p>'
+            # Don't render the per-card explanation for suffix-only suggestions:
+            # if most titles follow this pattern we'll show a single factored note instead.
+            is_suffix_only = _is_suffix_only_suggestion(title, title_suggested)
+            per_card_expl = "" if is_suffix_only else render_suggestion_explanation(str(suggestion.get("explication_titre") or ""), context)
             title_block = f"""
     <div class="suggestion-bloc">
       <div class="suggestion-bloc-header">
@@ -2276,7 +2336,8 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
         <span class="suggestion-texte-propose">{escape(title_suggested)}</span>
         <span class="suggestion-longueur-ok">{get_int(suggestion, "titre_longueur", len(title_suggested))} {escape(t("chars"))}</span>
       </div>
-      {render_suggestion_explanation(str(suggestion.get("explication_titre") or ""), context)}
+      {per_card_expl}
+      {title_truncation_warning}
     </div>"""
         desc_block = ""
         if desc_suggested:
@@ -2326,6 +2387,27 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     {desc_block}
   </div>"""
         )
+
+    # Note factorisée quand la majorité des suggestions titre = retrait du suffixe de marque.
+    # Évite de répéter 14 fois la même explication générique dans chaque card.
+    suffix_pattern_note = ""
+    if total_title_suggestions > 0 and suffix_only_count >= max(2, total_title_suggestions * 0.5):
+        if is_en:
+            suffix_pattern_note = (
+                f'<p class="suggestions-pattern-note">'
+                f'Pattern identified: {suffix_only_count} of the {total_title_suggestions} title suggestion{"s" if total_title_suggestions != 1 else ""} '
+                f'consist{"s" if suffix_only_count == 1 else ""} of removing the brand suffix to stay under 65 characters. '
+                f'Validate manually before publishing — the shortened title must still convey the full editorial intent.'
+                f'</p>'
+            )
+        else:
+            suffix_pattern_note = (
+                f'<p class="suggestions-pattern-note">'
+                f'Opération identifiée : {suffix_only_count} des {total_title_suggestions} suggestion{"s" if total_title_suggestions != 1 else ""} de titre '
+                f'consistent à retirer le suffixe de marque pour rester sous 65 caractères. '
+                f'À valider manuellement avant publication — le titre raccourci doit conserver tout le sens éditorial.'
+                f'</p>'
+            )
 
     # Bannière neutre pour les suggestions non fiables
     manual_notice = ""
@@ -2386,6 +2468,7 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     <div class="section-label">{escape(t("optimizations"))}</div>
     <h2>{escape(t("titles_desc_to_fix"))}</h2>
     <p class="suggestions-intro">{escape(t("suggestions_intro"))}</p>
+    {suffix_pattern_note}
     {manual_notice}
     {''.join(cards)}
     {grey_zone_note}
@@ -3856,6 +3939,7 @@ def build_dirigeant_texts(
     signal_principal: str,
     dates_a_verifier: int,
     pages_prioritaires: list[dict[str, Any]],
+    titres_hors_plage: int = 0,
     lang: str = "fr",
 ) -> dict[str, str]:
     is_en = sanitize_report_language(lang) == "en"
@@ -3899,16 +3983,18 @@ def build_dirigeant_texts(
                 "Les corrections montrent des résultats sous 15 à 30 jours."
             )
     elif "titre" in signal_lower or "description" in signal_lower or "snippet" in signal_lower:
+        # Use the real total of out-of-range titles when available, not the priority_pages sample.
+        title_count = titres_hors_plage if titres_hors_plage > page_count else page_count
         if is_en:
             recommendation = (
-                f"Rework titles and descriptions ({page_count} {'page' if page_count == 1 else 'pages'} identified — "
-                f"estimated {min_hours}–{max_hours}h for {page_count} {'page' if page_count == 1 else 'pages'}). "
+                f"Rework titles and descriptions ({title_count} {'page' if title_count == 1 else 'pages'} identified — "
+                f"estimated {min_hours}–{max_hours}h for priority pages). "
                 "Click-through rate improvements typically appear within 30 days."
             )
         else:
             recommendation = (
-                f"Reprendre les titres et descriptions ({page_count} {'page identifiée' if page_count == 1 else 'pages identifiées'} — "
-                f"effort estimé {min_hours}–{max_hours}h pour {page_count} {'page' if page_count == 1 else 'pages'}). "
+                f"Reprendre les titres et descriptions ({title_count} {'page identifiée' if title_count == 1 else 'pages identifiées'} — "
+                f"effort estimé {min_hours}–{max_hours}h pour les pages prioritaires). "
                 "Les améliorations de taux de clic apparaissent généralement sous 30 jours."
             )
     elif priority_pages:
@@ -4014,7 +4100,7 @@ def plain_business_signal(signal: str, lang: str = "fr") -> str:
     if "proche" in text or "concurr" in text or "même intention" in text:
         return "several pages seem to cover the same topic" if is_en else "plusieurs pages semblent parler du même sujet"
     if "titre" in text or "description" in text:
-        return "some visible snippets need to be clarified" if is_en else "certains intitulés visibles doivent être clarifiés"
+        return "some titles exceed the length Google displays and are cut in search results" if is_en else "certains titres dépassent la longueur affichée par Google et sont coupés dans les résultats de recherche"
     if "noindex" in text or "canonical" in text or "robots" in text:
         return "some pages need to be checked before being promoted" if is_en else "certaines pages doivent être vérifiées avant d'être mises en avant"
     cleaned = signal.strip().rstrip(".")
@@ -4246,9 +4332,9 @@ def build_primary_signal(summary: dict[str, Any], signals: list[dict[str, Any]],
 
 _ACTION_MAPPING: dict[str, tuple[str, str, str, str, str, str]] = {
     # key: (label_fr, label_en, impact_fr, effort_fr, impact_en, effort_en)
-    "pages_lentes":      ("Investiguer la performance serveur",        "Investigate server performance",      "élevé", "moyen",  "high",     "medium"),
+    "pages_lentes":      ("Investiguer la performance serveur",        "Investigate server performance",      "élevé", "faible à moyen",  "high",     "low to medium"),
     "pages_erreur":      ("Corriger les erreurs HTTP",                  "Fix HTTP errors",                     "élevé", "faible", "high",     "low"),
-    "descriptions_vides":("Compléter les descriptions manquantes",     "Complete missing descriptions",        "moyen", "faible", "medium",   "low"),
+    "descriptions_vides":("Compléter les descriptions absentes ou trop courtes", "Complete absent or too-short descriptions", "moyen", "faible", "medium",   "low"),
     "canonicals":        ("Vérifier les canonicals",                    "Check canonicals",                    "moyen", "faible", "medium",   "low"),
     "titres_hors_plage": ("Réécrire les titres hors plage",             "Rewrite out-of-range titles",         "moyen", "faible", "medium",   "low"),
     "dates_obsoletes":   ("Mettre à jour les contenus datés",           "Update dated content",                "moyen", "moyen",  "medium",   "medium"),
@@ -4334,7 +4420,7 @@ def build_matrix(summary: dict[str, Any], top_pages: list[dict[str, Any]], lang:
     mapping = [
         ("noindex_pages", "Vérifier les pages noindex", "élevé", "faible", "haute"),
         ("canonical_to_other_url_pages", "Contrôler les canonicals", "élevé", "moyen", "haute"),
-        ("dated_content_signals", "Mettre à jour les contenus datés", "élevé", "moyen", "haute"),
+        ("dated_content_signals", "Mettre à jour les contenus datés", "modéré", "moyen", "modérée"),
         ("weak_internal_linking_pages", "Renforcer le maillage interne", "élevé", "faible", "haute"),
         ("thin_content_pages", "Enrichir les contenus légers", "modéré", "moyen", "modérée"),
         ("possible_content_overlap_pairs", "Clarifier les contenus proches", "élevé", "moyen", "haute"),
@@ -4344,7 +4430,7 @@ def build_matrix(summary: dict[str, Any], top_pages: list[dict[str, Any]], lang:
         mapping = [
             ("noindex_pages", "Check noindex pages", "high", "low", "high"),
             ("canonical_to_other_url_pages", "Check canonicals", "high", "medium", "high"),
-            ("dated_content_signals", "Update dated content", "high", "medium", "high"),
+            ("dated_content_signals", "Update dated content", "moderate", "medium", "moderate"),
             ("weak_internal_linking_pages", "Strengthen internal linking", "high", "low", "high"),
             ("thin_content_pages", "Enrich thin content", "moderate", "medium", "moderate"),
             ("possible_content_overlap_pairs", "Clarify overlapping content", "high", "medium", "high"),
