@@ -1099,6 +1099,10 @@ def prepare_audit_report_context(
     }
     context["gauge"] = score_gauge_values(score)
     context["actions_30j"] = build_conclusion_actions(context)
+    # seo_improvement_potential: inverted display of seo_opportunity_score.
+    # High = many signals to fix = real business opportunity for the analyst.
+    # Avoids "100/100 Opportunité" meaning "nothing to do" to a non-technical reader.
+    context["seo_improvement_potential"] = max(0, 100 - int(context["seo_opportunity_score"]))
     return context
 
 
@@ -1214,7 +1218,7 @@ def render_cover(context: dict[str, Any]) -> str:
         <div class="score-context">
           <span class="score-badge {score_class}">{int(context["technical_health_score"])}/100</span>
           <p>{escape("Technical health" if context_lang(context) == "en" else "Santé technique")}</p>
-          <p><strong>{int(context["seo_opportunity_score"])}/100</strong> {escape("SEO opportunity" if context_lang(context) == "en" else "Opportunité SEO")}</p>
+          <p><strong>{int(context["seo_improvement_potential"])}/100</strong> {escape("Improvement potential" if context_lang(context) == "en" else "Potentiel d'amélioration")}</p>
           {render_recovery_cover_score(context)}
         </div>
       </div>
@@ -1278,7 +1282,7 @@ def render_dirigeant_summary(context: dict[str, Any]) -> str:
         <div class="dirigeant-score-bloc">
           <span class="dirigeant-score-value {score_color_class(score)}">{score}/100</span>
           <span class="dirigeant-score-label">{escape("technical health" if context_lang(context) == "en" else "sante technique")}</span>
-          <span class="dirigeant-score-label">{int(context["seo_opportunity_score"])}/100 {escape("SEO opportunity" if context_lang(context) == "en" else "opportunite SEO")}</span>
+          <span class="dirigeant-score-label">{int(context["seo_improvement_potential"])}/100 {escape("improvement potential" if context_lang(context) == "en" else "potentiel d'amelioration")}</span>
         </div>
         <div class="dirigeant-phrase">{escape(context["resume_dirigeant"])}</div>
       </div>
@@ -1972,15 +1976,17 @@ def render_performance_section(context: dict[str, Any]) -> str:
     if not perf.get("pages_lentes"):
         return ""
     t = lambda key: text_for(context, key)
+    is_en = context_lang(context) == "en"
     temps_moyen = optional_float(perf.get("temps_moyen"))
     temps_max = optional_float(perf.get("temps_max"))
     pct_lentes = get_int(perf, "pct_lentes", 0)
     pct_class = "score-low" if pct_lentes > 50 else "score-mid" if pct_lentes > 20 else "score-high"
+    # Show only pages that actually exceed the 3s threshold — not a "top-10" mix.
     slow_pages = [as_dict(page) for page in perf.get("pages_lentes", []) if isinstance(page, dict)]
     action_cards = render_performance_action_cards(slow_pages[:4], str(context["domain"]), lang=context_lang(context))
     rows = []
-    for page in perf.get("top_10_lentes", []) if isinstance(perf.get("top_10_lentes"), list) else []:
-        item = as_dict(page)
+    for page in slow_pages:
+        item = page
         load_time = optional_float(item.get("load_time"))
         speed = classify_speed(load_time)
         speed_label = {
@@ -2000,7 +2006,7 @@ def render_performance_section(context: dict[str, Any]) -> str:
       <tr>
         <td class="perf-url">
           <a href="{escape(appendix_href(str(item.get("url") or "")))}" target="_blank" rel="noreferrer">
-            {escape(display_url_label(str(item.get("url") or ""), str(context["domain"]), empty_label="Home" if context_lang(context) == "en" else "Accueil"))}
+            {escape(display_url_label(str(item.get("url") or ""), str(context["domain"]), empty_label="Home" if is_en else "Accueil"))}
           </a>
         </td>
         <td>
@@ -2012,6 +2018,27 @@ def render_performance_section(context: dict[str, Any]) -> str:
         <td class="perf-redirects">{redirects_html}</td>
       </tr>"""
         )
+    n_slow = len(slow_pages)
+    table_title = (
+        (f"Pages over 3s ({n_slow})" if is_en else f"Pages dépassant 3s ({n_slow})")
+        if rows else ""
+    )
+    table_html = (
+        f"""
+    <p class="perf-table-title">{escape(table_title)}</p>
+    <table class="perf-table">
+      <thead>
+        <tr>
+          <th>{escape(t("page"))}</th>
+          <th>{escape(t("time"))}</th>
+          <th>{escape(t("level"))}</th>
+          <th>{escape(t("redirects"))}</th>
+        </tr>
+      </thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table>"""
+        if rows else ""
+    )
     return f"""
   <section class="report-page section-perf">
     <div class="section-label">{escape(t("performance"))}</div>
@@ -2036,17 +2063,7 @@ def render_performance_section(context: dict[str, Any]) -> str:
       </div>
     </div>
 
-    <table class="perf-table">
-      <thead>
-        <tr>
-          <th>{escape(t("page"))}</th>
-          <th>{escape(t("time"))}</th>
-          <th>{escape(t("level"))}</th>
-          <th>{escape(t("redirects"))}</th>
-        </tr>
-      </thead>
-      <tbody>{''.join(rows)}</tbody>
-    </table>
+    {table_html}
 
     {action_cards}
     {render_page_footer(context)}
@@ -2056,6 +2073,12 @@ def render_performance_section(context: dict[str, Any]) -> str:
 def render_performance_action_cards(pages: list[dict[str, Any]], domain: str, lang: str = "fr") -> str:
     if not pages:
         return ""
+    is_en = sanitize_report_language(lang) == "en"
+    n = len(pages)
+    if n == 1:
+        section_title = "Action on the slow page" if is_en else "Action sur la page lente"
+    else:
+        section_title = report_copy(lang, "slow_page_actions")
     cards = []
     for page in pages:
         action = build_page_performance_action(page, domain, lang=lang)
@@ -2072,7 +2095,7 @@ def render_performance_action_cards(pages: list[dict[str, Any]], domain: str, la
         )
     return f"""
     <div class="perf-actions">
-      <div class="perf-actions-title">{escape(report_copy(lang, "slow_page_actions"))}</div>
+      <div class="perf-actions-title">{escape(section_title)}</div>
       <div class="perf-actions-grid">
         {''.join(cards)}
       </div>
@@ -2341,9 +2364,22 @@ def render_seo_suggestions_section(context: dict[str, Any]) -> str:
     grey_zone_note = ""
     if grey_zone_titles:
         if is_en:
-            grey_zone_note = f'<p class="suggestions-grey-zone-note">{grey_zone_titles} title{"s" if grey_zone_titles != 1 else ""} between 66 and 70 characters — generally displayed correctly by Google, to watch but not a priority.</p>'
+            grey_zone_note = (
+                f'<p class="suggestions-grey-zone-note">'
+                f'{grey_zone_titles} title{"s" if grey_zone_titles != 1 else ""} between 66 and 70 characters: '
+                f'Google truncates at 65 characters in most snippets, but titles just over that limit are usually '
+                f'displayed in full. They are not listed as priorities above — flagged here for awareness only.'
+                f'</p>'
+            )
         else:
-            grey_zone_note = f'<p class="suggestions-grey-zone-note">{grey_zone_titles} titre{"s" if grey_zone_titles != 1 else ""} entre 66 et 70 caractères — généralement affichés correctement par Google, à surveiller mais pas prioritaires.</p>'
+            grey_zone_note = (
+                f'<p class="suggestions-grey-zone-note">'
+                f'{grey_zone_titles} titre{"s" if grey_zone_titles != 1 else ""} entre 66 et 70 caractères : '
+                f'le seuil de suggestion utilisé dans ce rapport est 65 caractères (largeur réelle du snippet Google). '
+                f'Les titres légèrement au-dessus sont généralement affichés en entier — non listés comme priorité, '
+                f'mentionnés ici pour information.'
+                f'</p>'
+            )
 
     return f"""
   <section class="report-page section-suggestions">
@@ -2433,6 +2469,7 @@ def render_signal_groups(signals: list[dict[str, Any]], domain: str = "", lang: 
 
 
 def render_date_table_cell(dates: list[Any], expected_type: str, lang: str = "fr") -> str:
+    seen_values: set[str] = set()
     badges = []
     for item in dates:
         if not isinstance(item, dict):
@@ -2441,7 +2478,9 @@ def render_date_table_cell(dates: list[Any], expected_type: str, lang: str = "fr
         if date_type != expected_type:
             continue
         for value in extract_year_values(str(item.get("valeur") or "date à vérifier")):
-            badges.append(f"<span class='date-badge date-badge--{expected_type} date-{expected_type}'>{escape(value)}</span>")
+            if value not in seen_values:
+                seen_values.add(value)
+                badges.append(f"<span class='date-badge date-badge--{expected_type} date-{expected_type}'>{escape(value)}</span>")
     return "".join(badges) or "<span class='dates-empty'>—</span>"
 
 
@@ -2608,6 +2647,39 @@ def render_followup_offers(context: dict[str, Any]) -> str:
     </div>"""
 
 
+def render_gsc_bridge_box(lang: str) -> str:
+    """Explicit 'what this audit cannot tell you' box — bridges URL-only crawl to GSC audit upsell."""
+    is_en = sanitize_report_language(lang) == "en"
+    if is_en:
+        title = "What this audit cannot tell you"
+        intro = "A URL-only crawl measures what's visible to a crawler. It cannot answer:"
+        items = [
+            "Which pages actually generate clicks and impressions in Google (requires Search Console).",
+            "Which 28 out-of-range titles are causing the most click losses — without traffic data, all titles look equal.",
+            "Whether a slow page is losing you visitors or ranks for nothing (Core Web Vitals in the field).",
+            "Which keywords your site already ranks for and where the real quick wins are.",
+        ]
+        cta = "A GSC-enhanced audit answers all of these. It's the next logical step once the structural signals are corrected."
+    else:
+        title = "Ce que cet audit ne peut pas vous dire"
+        intro = "Un crawl URL-only mesure ce qui est visible par un robot. Il ne peut pas répondre à :"
+        items = [
+            "Quelles pages génèrent réellement des clics et des impressions dans Google (nécessite Search Console).",
+            "Lesquels des 28 titres hors plage causent le plus de pertes de clics — sans données de trafic, toutes les pages se valent.",
+            "Si une page lente vous fait perdre des visiteurs ou ne se positionne sur rien (Core Web Vitals terrain).",
+            "Sur quels mots-clés votre site est déjà positionné et où se trouvent les vraies opportunités rapides.",
+        ]
+        cta = "Un audit avec GSC répond à toutes ces questions. C'est l'étape logique une fois les signaux structurels corrigés."
+    items_html = "".join(f"<li>{escape(item)}</li>" for item in items)
+    return f"""
+        <div class="gsc-bridge-box">
+          <strong>{escape(title)}</strong>
+          <p>{escape(intro)}</p>
+          <ul class="gsc-bridge-list">{items_html}</ul>
+          <p class="gsc-bridge-cta">{escape(cta)}</p>
+        </div>"""
+
+
 def render_method_about(context: dict[str, Any]) -> str:
     method = as_dict(context.get("methode"))
     t = lambda key: text_for(context, key)
@@ -2654,7 +2726,7 @@ def render_method_about(context: dict[str, Any]) -> str:
       <div class="methode-col">
         <h2>{escape(t("what_was_analyzed"))}</h2>
         <ul class="methode-list">
-          <li><span class="methode-bullet">→</span><span>{t("method_pages").format(pages=pages_visitees)}</span></li>
+          <li><span class="methode-bullet">→</span><span>{escape(crawl_summary)}</span></li>
           <li><span class="methode-bullet">→</span><span>{escape(t("method_http"))}</span></li>
           <li><span class="methode-bullet">→</span><span>{escape(t("method_titles"))}</span></li>
           <li><span class="methode-bullet">→</span><span>{escape(t("method_dates"))}</span></li>
@@ -2662,9 +2734,9 @@ def render_method_about(context: dict[str, Any]) -> str:
         </ul>
         <div class="methode-limites">
           <strong>{escape(t("analysis_limits"))}</strong>
-          <p>{escape(crawl_summary)}</p>
           <p>{escape("This URL-only report does not include Search Console, analytics, backlink data or field Core Web Vitals." if context_lang(context) == "en" else "Ce rapport URL-only ne couvre pas Search Console, analytics, les backlinks ni les Core Web Vitals terrain.")}</p>
         </div>
+        {render_gsc_bridge_box(context_lang(context))}
       </div>
       {analyste_card}
     </div>
@@ -3374,7 +3446,7 @@ def sanitize_seo_suggestion(page: dict[str, Any], suggestion: dict[str, Any]) ->
         ):
             # Pas de suggestion LLM valide : pas de fallback template, marquer "manuel"
             desc_suggested = ""
-        if desc_suggested and not meta_description_is_unsafe(desc_suggested):
+        if desc_suggested and not meta_description_is_unsafe(desc_suggested) and not _desc_is_mechanical_truncation(desc_suggested, desc_original):
             cleaned["description_suggeree"] = desc_suggested
             cleaned["description_longueur"] = len(desc_suggested)
             # Label dynamique selon que la description existait déjà ou non
@@ -3415,6 +3487,13 @@ def title_looks_truncated(value: str) -> bool:
         prev_word = re.sub(r"[^A-Za-zÀ-ÿ]+", "", words[-2]).casefold()
         if prev_word in _ORPHAN_TRIGGER_PREPS:
             return True
+    # Subtitle fragment: title uses " : " (colon separator) and the part after is very short
+    # (< 25 chars and ≤ 4 words), indicating the LLM produced an incomplete subtitle.
+    # Only applies to " : " — not " - " which appears in hyphenated words like "attire-t-il".
+    if " : " in cleaned:
+        after_colon = cleaned.split(" : ", 1)[1].strip()
+        if len(after_colon) < 25 and len(after_colon.split()) <= 4:
+            return True
     return False
 
 
@@ -3445,6 +3524,20 @@ def same_normalized_text(left: str, right: str) -> bool:
         return re.sub(r"\s+", " ", value).strip(" -|:").casefold()
 
     return bool(left or right) and normalize(left) == normalize(right)
+
+
+def _desc_is_mechanical_truncation(suggestion: str, original: str) -> bool:
+    """True if suggestion is just a verbatim prefix of the original description.
+
+    Detects the case where a suggestion is cut at the first sentence of the
+    existing description without any reformulation — zero added value.
+    """
+    if not suggestion or not original:
+        return False
+    norm_sug = re.sub(r"\s+", " ", suggestion).strip().casefold()
+    norm_orig = re.sub(r"\s+", " ", original).strip().casefold()
+    # If original starts with the suggestion text (allowing for punctuation trim), reject it.
+    return norm_orig.startswith(norm_sug[:min(len(norm_sug), 80)])
 
 
 def remove_title_suggestion(suggestion: dict[str, Any]) -> None:
@@ -6087,6 +6180,36 @@ def render_report_styles() -> str:
       letter-spacing: 0.06em;
       line-height: 1.2;
       text-transform: uppercase;
+    }
+    .premium-report .gsc-bridge-box {
+      margin-top: var(--space-md);
+      background: #f0f4ff;
+      border-left: 3px solid #4a6cf7;
+      border-radius: 8px;
+      padding: var(--space-md);
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      line-height: 1.6;
+    }
+    .premium-report .gsc-bridge-box strong {
+      display: block;
+      margin-bottom: var(--space-sm);
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #2a3fa0;
+    }
+    .premium-report .gsc-bridge-list {
+      margin: var(--space-sm) 0;
+      padding-left: 1.2em;
+    }
+    .premium-report .gsc-bridge-list li {
+      margin-bottom: 4px;
+    }
+    .premium-report .gsc-bridge-cta {
+      margin-top: var(--space-sm);
+      font-style: italic;
+      color: #2a3fa0;
     }
     .premium-report .analyste-card {
       display: flex;
