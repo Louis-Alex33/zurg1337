@@ -771,18 +771,19 @@ GSC_REPORT_STYLE = """
   .doc {
     max-width: 920px;
     margin: 0 auto;
-    padding: 40px 0 80px;
+    padding: 70px 0 80px;
     display: grid;
     gap: 26px;
   }
 
   .report-toolbar {
-    position: sticky;
+    position: fixed;
     top: 0;
-    z-index: 20;
-    max-width: 920px;
-    margin: 0 auto;
-    padding: 10px 30px;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    margin: 0;
+    padding: 10px max(18px, calc((100vw - 920px) / 2 + 30px));
     background: rgba(250, 249, 244, .96);
     border-bottom: 1px solid var(--line);
     display: flex;

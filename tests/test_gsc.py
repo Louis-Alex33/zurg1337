@@ -673,6 +673,38 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertIn("Summary Auto", report)
         self.assertNotIn("Sommaire", report)
 
+    def test_boutique_report_keeps_toolbar_controls(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            current_csv = root / "pages.csv"
+            output_csv = root / "report.csv"
+            output_html = root / "report.html"
+            current_csv.write_text(
+                "page,clicks,impressions,ctr,position\n"
+                "https://example.com/tournoi-padel-p1000/,17,2799,0.61%,11.19\n",
+                encoding="utf-8",
+            )
+
+            run_gsc_analysis(
+                current_csv=str(current_csv),
+                output_csv=str(output_csv),
+                output_html=str(output_html),
+                site_name="Example",
+                mode="executive",
+                lang="fr",
+            )
+
+            report = output_html.read_text(encoding="utf-8")
+
+        self.assertIn('class="report-toolbar no-print"', report)
+        self.assertIn('onclick="exportPDF()"', report)
+        self.assertIn("Exporter en PDF", report)
+        self.assertIn(">FR</a>", report)
+        self.assertIn(">EN</a>", report)
+        self.assertIn("Retour dashboard", report)
+        self.assertIn(".report-toolbar", report)
+        self.assertIn("position: fixed", report)
+
     def test_detect_cannibalization_groups_stays_cluster_specific(self) -> None:
         pages = [
             GSCPageData(url="https://example.com/tournoi-padel-p100/", impressions=1000, position=8),
