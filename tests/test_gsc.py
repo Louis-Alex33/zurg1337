@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from zipfile import ZipFile
 
 from gsc import (
@@ -638,6 +639,39 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertNotIn("Gain de trafic estimé", report)
         self.assertNotIn("medium · lead", report)
         self.assertEqual(validate_rendered_gsc_html(report, {"lang": "fr"}), [])
+
+    def test_boutique_english_report_uses_full_html_translation(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            current_csv = root / "pages.csv"
+            output_csv = root / "report.csv"
+            output_html = root / "report.html"
+            current_csv.write_text(
+                "page,clicks,impressions,ctr,position\n"
+                "https://example.com/tournoi-padel-p1000/,17,2799,0.61%,11.19\n",
+                encoding="utf-8",
+            )
+
+            def fake_translate(html_doc: str, target_lang: str) -> str:
+                self.assertEqual(target_lang, "en")
+                return html_doc.replace("Sommaire", "Summary Auto")
+
+            with patch("html_translate.translate_html", side_effect=fake_translate) as translate_html:
+                run_gsc_analysis(
+                    current_csv=str(current_csv),
+                    output_csv=str(output_csv),
+                    output_html=str(output_html),
+                    site_name="Example",
+                    mode="executive",
+                    lang="en",
+                )
+
+            report = output_html.read_text(encoding="utf-8")
+
+        translate_html.assert_called_once()
+        self.assertIn('<html lang="en">', report)
+        self.assertIn("Summary Auto", report)
+        self.assertNotIn("Sommaire", report)
 
     def test_detect_cannibalization_groups_stays_cluster_specific(self) -> None:
         pages = [

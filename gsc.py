@@ -3311,11 +3311,11 @@ def write_html(
         html_doc = render_gsc_report(report, lang=lang)
     else:
         html_doc = render_report(report)
-        if lang != "fr":
-            from html_translate import translate_html
-            print(f"[i18n] Translating HTML to {lang} ({len(html_doc)} chars)...", flush=True)
-            html_doc = translate_html(html_doc, lang)
-            print(f"[i18n] Done.", flush=True)
+    if sanitize_gsc_language(lang) != "fr":
+        from html_translate import translate_html
+        print(f"[i18n] Translating HTML to {lang} ({len(html_doc)} chars)...", flush=True)
+        html_doc = translate_html(html_doc, lang)
+        print("[i18n] Done.", flush=True)
     warn_gsc_quality(validate_rendered_gsc_html(html_doc, report), output_path)
     with output_file.open("w", encoding="utf-8") as handle:
         handle.write(html_doc)
