@@ -307,7 +307,7 @@ def _render_cover(report: dict, lang: str) -> str:
       </header>
       <div class="cover-body">
         <p class="cover-cat"><span>{_e(_("Opportunités SEO"))}</span><span class="dot">·</span><span>Google Search Console</span><span class="dot">·</span><span>{_e(period)}</span></p>
-        <h1 class="cover-title display" style="font-family: system-ui"><em>Faire cliquer</em><br>ce qui est <span class="ul">déjà</span><br>visible.</h1>
+        <h1 class="cover-title display" style="font-family: system-ui">{_e(site_name)}</h1>
         <p class="cover-tag">Une lecture stratégique de ce que Google affiche, et de l'écart entre l'impression et le clic — accompagnée de gestes concrets pour activer la marge.</p>
         <div class="cover-pull">
           <div class="pull-label">Potentiel détecté</div>

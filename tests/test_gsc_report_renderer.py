@@ -82,6 +82,12 @@ class RenderGscReportTests(unittest.TestCase):
         self.assertIn('class="page cover no-running"', result)
         self.assertIn("Opportunités SEO", result)
 
+    def test_cover_title_uses_site_name(self) -> None:
+        result = render_gsc_report(_minimal_report(site_name="eversportzone.com"))
+        self.assertIn('<h1 class="cover-title display" style="font-family: system-ui">eversportzone.com</h1>', result)
+        self.assertNotIn("Faire cliquer", result)
+        self.assertNotIn("ce qui est", result)
+
     def test_kpi_grid_rendered(self) -> None:
         result = render_gsc_report(_minimal_report())
         self.assertIn("kpi-grid", result)
