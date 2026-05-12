@@ -3305,12 +3305,17 @@ def write_html(
         language_paths=language_paths,
     )
     warn_gsc_quality(validate_gsc_report_quality(report), output_path)
-    html_doc = render_report(report)
-    if lang != "fr":
-        from html_translate import translate_html
-        print(f"[i18n] Translating HTML to {lang} ({len(html_doc)} chars)...", flush=True)
-        html_doc = translate_html(html_doc, lang)
-        print(f"[i18n] Done.", flush=True)
+    from config import GSC_REPORT_DESIGN
+    if report.get("mode") == "executive" and GSC_REPORT_DESIGN == "boutique":
+        from web_ui.gsc_report_renderer import render_gsc_report
+        html_doc = render_gsc_report(report, lang=lang)
+    else:
+        html_doc = render_report(report)
+        if lang != "fr":
+            from html_translate import translate_html
+            print(f"[i18n] Translating HTML to {lang} ({len(html_doc)} chars)...", flush=True)
+            html_doc = translate_html(html_doc, lang)
+            print(f"[i18n] Done.", flush=True)
     warn_gsc_quality(validate_rendered_gsc_html(html_doc, report), output_path)
     with output_file.open("w", encoding="utf-8") as handle:
         handle.write(html_doc)

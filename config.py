@@ -501,6 +501,8 @@ QUALIFY_MODE_CONFIGS = {
     ),
 }
 
+GSC_REPORT_DESIGN: str = "boutique"
+
 AUDIT_MODE_CONFIGS = {
     "audit_light": AuditModeConfig(),
     "audit_full": AuditModeConfig(
