@@ -3441,7 +3441,6 @@ def render_executive_report(report: dict[str, object]) -> str:
         url_variant_pairs=report.get("url_variant_pairs", []),  # type: ignore[arg-type]
     )
     annexes = render_annex_links(report.get("annex_files", []), active_lang)  # type: ignore[arg-type]
-    source_notes = "".join(f"<li>{html.escape(_(str(note)))}</li>" for note in report.get("source_notes", []))  # type: ignore[union-attr]
     mode_label = _(str(report.get("report_mode_label") or "Analyse de la période actuelle"))
     nav = "".join(
         f"<a href='#{anchor}'>{html.escape(_(label))}</a>"
@@ -3458,203 +3457,451 @@ def render_executive_report(report: dict[str, object]) -> str:
             ("methodologie", "Méthode"),
         ]
     )
+    site_name = html.escape(str(report.get("site_name") or _("Non précisé")))
+    period_label = html.escape(translate_period_label(report.get("period_label", ""), active_lang).removeprefix(_("Période analysée: ")))
+    generated_at = html.escape(str(report.get("generated_at") or ""))
+    report_num = html.escape(str(report.get("generated_at") or "")[:10] or "")
     document = f"""<!DOCTYPE html>
 <html lang="{html.escape(active_lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{html.escape(_(title))}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400;1,9..144,500;1,9..144,600&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {{
-      --bg:#F7F7F4; --surface:#FFFFFF; --ink:#171717; --muted:#666A70; --border:#E2E0D8;
-      --accent:#124E78; --accent-soft:#EAF3F8; --high:#9F1239; --medium:#A16207; --low:#166534;
+      --paper:#faf9f4; --paper-warm:#f3f0e6; --paper-outer:#e7e3d6;
+      --ink:#0c0f14; --ink-soft:#2a2f3a; --ink-mid:#4b5260; --muted:#7a7e89; --muted-soft:#a8a89e;
+      --line:#e0dcce; --line-strong:#c9c4b1; --rule:#1a1d24;
+      --accent:#1f3a8a; --accent-soft:#e6ecf7;
+      --hot:#b45309; --hot-soft:#f7ecdb;
+      --gain:#166534; --gain-soft:#dcefe1;
+      --danger:#991b1b; --danger-soft:#f4dcdc;
+      --warn:#92400e; --warn-soft:#f5e4cc;
+      --shadow-card:0 1px 1px rgba(12,15,20,.04),0 20px 50px -20px rgba(12,15,20,.10);
+      --serif:"Fraunces","Iowan Old Style","Hoefler Text",Georgia,serif;
+      --sans:"Inter",ui-sans-serif,system-ui,sans-serif;
+      --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
     }}
-    * {{ box-sizing:border-box; }}
-    body {{ margin:0; background:var(--bg); color:var(--ink); font:13px/1.58 Georgia, "Times New Roman", serif; }}
-    h1,h2,h3,.kpi-label,.kpi-value,.cover-meta-label,.cover-meta-value,.priority-number,.priority-badge,.metric,.data-label,nav,.btn-export {{ font-family:"Helvetica Neue", Arial, sans-serif; letter-spacing:0; }}
-    h1 {{ font-size:48px; line-height:1.05; margin:0 0 18px; }}
-    h2 {{ font-size:22px; margin:0 0 8px; }}
-    h3 {{ font-size:15px; margin:0 0 10px; }}
-    a {{ color:var(--accent); overflow-wrap:anywhere; }}
-    .report-container {{ max-width:880px; margin:0 auto; padding:0 30px 54px; }}
-    .cover-page {{ min-height:100vh; margin:0 -30px; padding:62px 48px; color:#fff; background:#124E78; display:flex; flex-direction:column; justify-content:space-between; break-after:page; page-break-after:always; }}
-    .cover-label,.cover-footer {{ opacity:.78; font:700 12px/1.4 "Helvetica Neue", Arial, sans-serif; text-transform:uppercase; }}
-    .cover-subtitle {{ max-width:560px; font-size:18px; opacity:.86; margin:0 0 34px; }}
-    .mode-badge {{ display:inline-block; padding:6px 12px; border:1px solid rgba(255,255,255,.35); border-radius:999px; font:700 12px/1 "Helvetica Neue", Arial, sans-serif; margin-bottom:22px; }}
-    .cover-meta {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; border-top:1px solid rgba(255,255,255,.24); padding-top:26px; }}
-    .cover-meta-label {{ display:block; opacity:.65; font-size:11px; text-transform:uppercase; margin-bottom:5px; }}
-    .cover-meta-value {{ font-weight:700; overflow-wrap:anywhere; }}
-    .btn-export {{ background:#fff; color:var(--accent); border:0; border-radius:8px; padding:10px 14px; font-weight:700; cursor:pointer; margin-top:24px; }}
-    .report-toolbar {{ position:sticky; top:0; z-index:20; max-width:880px; margin:0 auto; padding:10px 30px; background:rgba(247,247,244,.96); border-bottom:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap; }}
-    .report-toolbar-button {{ appearance:none; border:1px solid var(--border); background:var(--surface); color:var(--ink); border-radius:8px; padding:8px 11px; font:700 12px/1 "Helvetica Neue", Arial, sans-serif; text-decoration:none; cursor:pointer; }}
-    .language-toggle.is-active {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
-    .language-toggle-group {{ display:inline-flex; gap:6px; }}
-    nav {{ position:sticky; top:52px; background:rgba(247,247,244,.96); border-bottom:1px solid var(--border); padding:12px 0; display:flex; gap:8px; flex-wrap:wrap; z-index:3; }}
-    nav a {{ color:var(--ink); text-decoration:none; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-weight:700; font-size:12px; }}
-    .source-box,.report-section {{ margin-top:34px; padding-top:26px; border-top:2px solid var(--accent); }}
-    .source-box {{ background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:0 8px 8px 0; padding:15px 18px; }}
-    .source-list {{ margin:0; padding-left:18px; color:var(--muted); }}
-    .section-header {{ margin-bottom:18px; }}
-    .section-intro,.reliability-note,.page-constat,.why {{ color:var(--muted); }}
-    .kpi-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:18px 0; }}
-    .kpi-card,.page-card,.snippet-card,.appendix-card,.query-card {{ background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px; break-inside:avoid; page-break-inside:avoid; margin-bottom:14px; }}
-    .kpi-label,.metric-label,.data-label,.mini-label,.constat-label,.actions-label {{ display:block; color:var(--muted); font-size:10px; font-weight:800; text-transform:uppercase; margin-bottom:4px; }}
-    .kpi-value {{ font-size:24px; font-weight:800; }}
-    .executive-summary {{ background:var(--accent-soft); border-left:4px solid var(--accent); border-radius:0 8px 8px 0; padding:16px 18px; }}
-    .estimate-box {{ margin-top:18px; background:#FFF7ED; color:#1F2937; border:1px solid #FDBA74; border-left:4px solid #D97706; border-radius:0 8px 8px 0; padding:14px 16px; }}
-    .estimate-box strong {{ display:block; font:800 18px/1.2 "Helvetica Neue", Arial, sans-serif; margin-bottom:5px; }}
-    .estimate-box p {{ margin:0; color:#4B5563; }}
-    .priorities-list {{ display:flex; flex-direction:column; gap:0; }}
-    .priority-item {{ display:flex; gap:20px; padding:18px 0; border-bottom:1px solid var(--border); break-inside:avoid; }}
-    .priority-number {{ min-width:54px; color:#8DB4C9; font-size:42px; font-weight:900; line-height:1; }}
-    .priority-meta {{ display:flex; flex-direction:column; gap:5px; color:var(--muted); }}
-    .page-card-header,.card-head {{ display:flex; justify-content:space-between; gap:14px; align-items:flex-start; margin-bottom:12px; }}
-    .page-slug {{ display:block; font:700 14px/1.3 "Helvetica Neue", Arial, sans-serif; overflow-wrap:anywhere; }}
-    .page-url {{ display:block; font-size:11px; margin-top:3px; }}
-    .priority-badge {{ white-space:nowrap; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:800; }}
-    .priority-badge--high {{ color:var(--high); background:#FFF1F2; border:1px solid #FECDD3; }}
-    .priority-badge--medium {{ color:var(--medium); background:#FEFCE8; border:1px solid #FDE68A; }}
-    .priority-badge--low,.priority-badge--dead {{ color:var(--low); background:#F0FDF4; border:1px solid #BBF7D0; }}
-    .page-metrics,.data-grid {{ display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:0; border:1px solid #ECEAE4; border-radius:8px; overflow:hidden; margin:12px 0; }}
-    .metric,.data-item {{ padding:10px; background:#FAFAF8; border-right:1px solid #ECEAE4; min-width:0; }}
-    .metric:last-child,.data-item:last-child {{ border-right:0; }}
-    .metric-value,.data-value {{ display:block; overflow-wrap:anywhere; font-weight:700; }}
-    .position-bar {{ display:flex; align-items:center; gap:10px; margin:-4px 0 14px; }}
-    .position-bar-label {{ color:var(--muted); font:800 10px/1.2 "Helvetica Neue", Arial, sans-serif; text-transform:uppercase; min-width:150px; }}
-    .position-bar-track {{ flex:1; height:7px; background:var(--border); border-radius:999px; overflow:hidden; }}
-    .position-bar-fill {{ height:100%; border-radius:999px; transition:width 600ms ease; }}
-    .position-bar-value {{ color:var(--muted); font:800 12px/1 "Helvetica Neue", Arial, sans-serif; min-width:30px; text-align:right; }}
-    .actions-list,.actions {{ margin:0; padding-left:18px; }}
-    .actions-list li,.actions li {{ margin-bottom:5px; }}
-    .insight-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; border-top:1px solid var(--border); margin-top:12px; padding-top:12px; }}
-    .chip-row {{ display:flex; flex-wrap:wrap; gap:6px; }}
-    .type-tag,.chip {{ display:inline-block; border-radius:999px; padding:3px 8px; background:var(--accent-soft); color:var(--accent); font:700 11px/1.3 "Helvetica Neue", Arial, sans-serif; }}
-    .filter-bar,.summary-links {{ display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 16px; }}
-    .filter-group {{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; }}
-    .filter-label {{ color:var(--muted); font:800 10px/1 "Helvetica Neue", Arial, sans-serif; text-transform:uppercase; margin-right:2px; }}
-    .filter-btn,.summary-link {{ appearance:none; border:1px solid var(--border); background:var(--surface); color:var(--ink); border-radius:8px; padding:7px 10px; font:700 12px/1 "Helvetica Neue", Arial, sans-serif; text-decoration:none; cursor:pointer; }}
-    .filter-btn.is-active {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
-    .is-filtered-out {{ display:none!important; }}
-    .business-note {{ margin:10px 0 0; color:var(--muted); }}
-    .annex-list,.annex-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
-    .annex-item {{ background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; font-family:"Helvetica Neue", Arial, sans-serif; display:flex; flex-direction:column; gap:4px; }}
-    .annex-name {{ font-weight:700; font-size:12px; }}
-    .annex-category {{ font-size:10px; font-weight:700; text-transform:uppercase; color:var(--accent); }}
-    .annex-desc {{ font-size:11px; color:var(--muted); }}
-    .compact-table {{ width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; font-family:"Helvetica Neue", Arial, sans-serif; font-size:11px; }}
-    .compact-table th,.compact-table td {{ border-bottom:1px solid var(--border); padding:7px 8px; text-align:left; vertical-align:top; }}
-    .compact-table th {{ background:var(--accent-soft); color:var(--accent); font-size:10px; text-transform:uppercase; }}
-    .compact-table tr:last-child td {{ border-bottom:0; }}
-    .compact-table .url-cell {{ overflow-wrap:anywhere; max-width:220px; }}
-    .empty-state {{ background:var(--surface); border:1px dashed var(--border); border-radius:8px; padding:14px; color:var(--muted); }}
-    .print-footer {{ display:none; }}
-    .target-metric-box {{ margin-top:10px; padding:10px 12px; background:#F0FDF4; border:1px solid #BBF7D0; border-left:3px solid #16a34a; border-radius:0 6px 6px 0; font-size:11.5px; color:#166534; }}
-    .target-metric-label {{ display:block; font:800 10px/1 "Helvetica Neue",Arial,sans-serif; text-transform:uppercase; margin-bottom:4px; color:#16a34a; }}
-    .serp-warning {{ margin-top:10px; padding:10px 12px; background:#FFF7ED; border:1px solid #FDBA74; border-left:3px solid #d97706; border-radius:0 6px 6px 0; font-size:11.5px; color:#92400e; }}
-    .serp-warning-label {{ display:block; font:800 10px/1 "Helvetica Neue",Arial,sans-serif; text-transform:uppercase; margin-bottom:4px; color:#b45309; }}
-    .plan-week {{ margin-bottom:14px; break-inside:avoid; }}
-    .plan-week-head {{ font:700 13px/1.3 "Helvetica Neue",Arial,sans-serif; margin-bottom:5px; }}
-    .plan-week-focus {{ display:inline-block; padding:2px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font:700 10px/1.4 "Helvetica Neue",Arial,sans-serif; margin-left:8px; text-transform:uppercase; }}
-    @media print {{
-      @page {{ size:A4; margin:14mm 13mm; }}
-      @page :first {{ margin-bottom:0; }}
-      nav,.btn-export,.no-print,.filter-bar,.summary-links {{ display:none!important; }}
-      .print-footer {{ display:block; position:fixed; left:13mm; right:13mm; bottom:6mm; color:#6B7280; font:700 9px/1.2 "Helvetica Neue", Arial, sans-serif; text-align:center; }}
-      .cover-footer {{ display:none!important; }}
-      body {{ background:#fff; font-size:11.5px; }}
-      .report-container {{ max-width:none; padding:0; }}
-      .cover-page {{ margin:0; min-height:267mm; background:#124E78!important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
-      .report-section {{ break-before:auto; page-break-before:auto; }}
-      .position-bar-fill {{ width:var(--print-position-width, 100%)!important; }}
-      .page-card,.snippet-card,.appendix-card,.query-card,.priority-item {{ break-inside:avoid; page-break-inside:avoid; }}
-      .compact-table tr {{ break-inside:avoid; page-break-inside:avoid; }}
-      .kpi-grid {{ grid-template-columns:repeat(3,minmax(0,1fr)); }}
-      h1 {{ font-size:42px; }}
+    *{{box-sizing:border-box;}}
+    html,body{{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#efece1 0%,transparent 60%),var(--paper-outer);color:var(--ink-soft);font-family:var(--sans);font-size:13.5px;line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-feature-settings:"ss01","cv11","tnum";}}
+    a{{color:var(--accent);overflow-wrap:anywhere;}}
+    .doc{{max-width:920px;margin:0 auto;padding:40px 0 80px;display:grid;gap:26px;}}
+    .page{{background:var(--paper);border-radius:4px;box-shadow:var(--shadow-card);padding:64px 74px 88px;position:relative;min-height:1180px;display:grid;gap:28px;align-content:start;overflow:hidden;}}
+    .runhead{{position:absolute;top:30px;left:74px;right:74px;display:flex;justify-content:space-between;align-items:baseline;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:16px;font-weight:600;}}
+    .runhead .mark{{color:var(--ink);letter-spacing:.16em;font-weight:700;}}
+    .pagenum{{position:absolute;bottom:30px;left:74px;right:74px;display:flex;justify-content:space-between;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);padding-top:14px;border-top:1px solid var(--line);font-weight:600;}}
+    .pagenum .num{{color:var(--ink);font-family:var(--serif);font-style:italic;text-transform:none;letter-spacing:-.01em;font-size:12px;}}
+    .page.no-running .runhead,.page.no-running .pagenum{{display:none;}}
+    .display{{font-family:var(--serif);font-weight:400;letter-spacing:-.02em;color:var(--ink);}}
+    .smallcaps{{text-transform:uppercase;letter-spacing:.16em;font-weight:700;font-size:11px;color:var(--muted);}}
+    .eyebrow{{margin:0;text-transform:uppercase;letter-spacing:.18em;font-size:10.5px;font-weight:700;color:var(--muted);}}
+    .eyebrow .num{{color:var(--ink);font-family:var(--serif);font-style:italic;margin-right:10px;text-transform:none;letter-spacing:-.01em;font-weight:500;font-size:13px;}}
+    .section-title{{margin:0;font-family:var(--serif);font-weight:400;font-size:38px;line-height:1.08;letter-spacing:-.02em;color:var(--ink);}}
+    .section-title em{{font-weight:400;font-style:italic;color:var(--ink);}}
+    .section-title-sm{{margin:0;font-family:var(--serif);font-weight:400;font-size:22px;line-height:1.15;letter-spacing:-.015em;color:var(--ink);}}
+    .lede{{margin:0;color:var(--ink-mid);font-size:15px;line-height:1.65;max-width:56ch;text-wrap:pretty;}}
+    .rule{{height:1px;background:var(--line);}}
+    .rule-strong{{height:1px;background:var(--rule);}}
+    .rule-short{{width:56px;height:2px;background:var(--ink);}}
+    .tnum{{font-variant-numeric:tabular-nums;}}
+    .url-mono{{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);background:var(--paper-warm);padding:2px 6px;border-radius:3px;word-break:break-all;}}
+    /* Cover */
+    .page.cover{{padding:0;background:var(--paper);display:grid;grid-template-rows:auto 1fr auto;min-height:1280px;background-image:linear-gradient(180deg,transparent 0%,transparent 60%,var(--paper-warm) 100%);}}
+    .cover-mast{{padding:36px 64px 24px;display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--rule);}}
+    .wordmark{{font-family:var(--serif);font-weight:500;font-size:17px;letter-spacing:-.01em;color:var(--ink);display:flex;align-items:baseline;gap:6px;}}
+    .wordmark em{{font-style:italic;font-weight:400;color:var(--ink-mid);}}
+    .wordmark .glyph{{display:inline-block;width:22px;height:22px;border:1.5px solid var(--ink);transform:rotate(-12deg);margin-right:12px;position:relative;top:4px;}}
+    .wordmark .glyph::after{{content:"";position:absolute;inset:4px;background:var(--ink);transform:rotate(12deg);}}
+    .ref-block{{text-align:right;font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--muted);line-height:1.6;}}
+    .ref-block strong{{color:var(--ink);font-weight:600;}}
+    .cover-body{{padding:80px 64px 40px;display:grid;grid-template-columns:1fr;gap:36px;align-content:end;}}
+    .cover-cat{{margin:0;text-transform:uppercase;letter-spacing:.22em;font-size:11px;font-weight:700;color:var(--ink);}}
+    .cover-cat .dot{{color:var(--muted);margin:0 10px;}}
+    .cover-title{{margin:0;font-family:var(--serif);font-weight:300;font-size:88px;line-height:0.96;letter-spacing:-.03em;color:var(--ink);max-width:16ch;word-break:break-word;}}
+    .cover-tag{{margin:0;font-family:var(--serif);font-style:italic;font-weight:400;font-size:22px;line-height:1.35;color:var(--ink-mid);max-width:36ch;letter-spacing:-.01em;}}
+    .cover-pull{{margin-top:8px;padding:24px 0 0;border-top:1px solid var(--rule);display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:28px;}}
+    .pull-label{{font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:700;max-width:12ch;line-height:1.4;}}
+    .pull-number{{font-family:var(--serif);font-weight:300;font-size:64px;line-height:1;letter-spacing:-.03em;color:var(--ink);font-variant-numeric:tabular-nums;}}
+    .pull-number .dash{{color:var(--hot);margin:0 6px;font-style:italic;}}
+    .pull-unit{{text-align:right;color:var(--muted);font-size:12px;max-width:18ch;line-height:1.4;}}
+    .cover-foot{{padding:22px 64px 36px;background:var(--paper-warm);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}}
+    .cover-foot div{{display:grid;gap:4px;}}
+    .cover-foot .lbl{{text-transform:uppercase;letter-spacing:.16em;font-size:9.5px;font-weight:700;color:var(--muted);}}
+    .cover-foot strong{{font-family:var(--serif);font-weight:400;font-style:italic;color:var(--ink);font-size:15px;letter-spacing:-.005em;}}
+    /* Toolbar / nav */
+    .report-toolbar{{position:sticky;top:0;z-index:20;max-width:920px;margin:0 auto;padding:10px 30px;background:rgba(250,249,244,.96);border-bottom:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}}
+    .report-toolbar-button{{appearance:none;border:1px solid var(--line-strong);background:var(--paper);color:var(--ink-soft);border-radius:4px;padding:7px 12px;font:600 11.5px/1 var(--sans);text-decoration:none;cursor:pointer;letter-spacing:.02em;}}
+    .report-toolbar-button:hover{{background:var(--paper-warm);}}
+    .language-toggle.is-active{{background:var(--ink);border-color:var(--ink);color:var(--paper);}}
+    .language-toggle-group{{display:inline-flex;gap:6px;}}
+    nav.gsc-nav{{position:sticky;top:52px;background:rgba(250,249,244,.96);border-bottom:1px solid var(--line);padding:10px 74px;display:flex;gap:8px;flex-wrap:wrap;z-index:10;max-width:920px;margin:0 auto;}}
+    nav.gsc-nav a{{color:var(--ink-mid);text-decoration:none;font:600 11px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;padding:5px 10px;border-radius:3px;border:1px solid transparent;}}
+    nav.gsc-nav a:hover{{border-color:var(--line);background:var(--paper-warm);color:var(--ink);}}
+    /* Sections */
+    .report-section{{margin-top:0;padding-top:0;border-top:none;}}
+    .section-header{{margin-bottom:22px;display:grid;gap:8px;}}
+    .section-header h2{{margin:0;font-family:var(--serif);font-weight:400;font-size:32px;line-height:1.1;letter-spacing:-.02em;color:var(--ink);}}
+    .section-header h2 em{{font-style:italic;}}
+    .section-intro{{margin:0;color:var(--ink-mid);font-size:13.5px;line-height:1.6;}}
+    .reliability-note,.page-constat,.why{{color:var(--ink-mid);}}
+    /* Source box */
+    .source-box{{padding:16px 22px;background:var(--paper-warm);border-left:3px solid var(--line-strong);font-size:12px;color:var(--ink-mid);}}
+    .source-list{{margin:0;padding-left:18px;}}
+    /* KPI grid */
+    .kpi-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid var(--rule);margin:18px 0;}}
+    .kpi-card{{padding:18px 16px 16px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);break-inside:avoid;page-break-inside:avoid;}}
+    .kpi-card:nth-child(3n){{border-right:none;}}
+    .kpi-label{{display:block;color:var(--muted);font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;margin-bottom:6px;}}
+    .kpi-value{{font-family:var(--serif);font-weight:400;font-size:30px;line-height:1;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums;}}
+    .kpi-value.is-hot{{color:var(--hot);font-style:italic;}}
+    .kpi-value.is-accent{{color:var(--accent);}}
+    /* Executive summary */
+    .executive-summary{{padding:18px 22px;border-left:3px solid var(--accent);background:var(--accent-soft);font-size:14px;line-height:1.65;color:var(--ink-soft);}}
+    /* Estimate box */
+    .estimate-box{{padding:18px 22px;background:var(--hot-soft);border-left:3px solid var(--hot);font-size:13.5px;}}
+    .estimate-box strong{{display:block;font-family:var(--serif);font-weight:400;font-size:24px;letter-spacing:-.02em;color:var(--ink);margin-bottom:6px;line-height:1.1;}}
+    .estimate-box p{{margin:0;color:var(--ink-mid);}}
+    /* Priority ladder */
+    .priorities-list{{display:grid;gap:0;border-top:1px solid var(--rule);}}
+    .priority-item{{display:grid;grid-template-columns:32px 1fr auto;gap:18px;align-items:baseline;padding:18px 0;border-bottom:1px solid var(--line);break-inside:avoid;}}
+    .priority-number{{font-family:var(--serif);font-style:italic;font-size:22px;color:var(--muted);letter-spacing:-.01em;}}
+    .priority-item:first-child .priority-number{{color:var(--hot);font-weight:500;}}
+    .priority-meta{{display:grid;gap:5px;color:var(--ink-mid);font-size:12.5px;}}
+    .priority-meta strong{{display:block;color:var(--ink);font-family:var(--serif);font-weight:500;font-size:16px;letter-spacing:-.005em;}}
+    /* Page cards */
+    .page-card{{background:var(--paper);border-top:1px solid var(--rule);padding:22px 0 24px;display:grid;grid-template-columns:28px 1fr;gap:22px;break-inside:avoid;page-break-inside:avoid;margin-bottom:0;}}
+    .snippet-card,.appendix-card,.query-card{{background:var(--paper);border-top:1px solid var(--line);padding:18px 0;break-inside:avoid;page-break-inside:avoid;margin-bottom:0;}}
+    .page-card-rank{{font-family:var(--serif);font-style:italic;font-size:26px;color:var(--muted);line-height:1;letter-spacing:-.02em;padding-top:2px;}}
+    .page-card.is-top .page-card-rank{{color:var(--hot);}}
+    .page-card-main{{display:grid;gap:14px;}}
+    .page-card-header,.card-head{{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:start;margin-bottom:0;}}
+    .page-slug{{display:block;font-family:var(--serif);font-weight:500;font-size:18px;letter-spacing:-.01em;color:var(--ink);line-height:1.2;overflow-wrap:anywhere;}}
+    .page-url{{display:block;font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:.02em;text-decoration:none;}}
+    .priority-badge{{white-space:nowrap;border-radius:999px;padding:4px 12px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;}}
+    .priority-badge--high{{color:var(--danger);background:var(--danger-soft);border:1px solid var(--danger-soft);}}
+    .priority-badge--medium{{color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-soft);}}
+    .priority-badge--low,.priority-badge--dead{{color:var(--gain);background:var(--gain-soft);border:1px solid var(--gain-soft);}}
+    .page-metrics,.data-grid{{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:12px 0;}}
+    .metric,.data-item{{padding:12px 14px 12px 0;border-right:1px solid var(--line);display:grid;gap:2px;min-width:0;}}
+    .metric:nth-child(n+2),.data-item:nth-child(n+2){{padding-left:14px;}}
+    .metric:last-child,.data-item:last-child{{border-right:0;padding-right:0;}}
+    .metric-label,.data-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;margin-bottom:0;}}
+    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:22px;letter-spacing:-.02em;color:var(--ink);line-height:1.1;font-variant-numeric:tabular-nums;display:block;overflow-wrap:anywhere;}}
+    .metric.delta .metric-value{{color:var(--hot);font-style:italic;}}
+    .mini-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;}}
+    .constat-label,.actions-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;margin-bottom:4px;}}
+    /* Position bar */
+    .position-bar{{display:flex;align-items:center;gap:10px;margin:-2px 0 14px;}}
+    .position-bar-label{{color:var(--muted);font:700 9.5px/1.2 var(--sans);text-transform:uppercase;letter-spacing:.14em;min-width:140px;}}
+    .position-bar-track{{flex:1;height:6px;background:var(--line);border-radius:999px;overflow:hidden;}}
+    .position-bar-fill{{height:100%;border-radius:999px;background:var(--ink);transition:width 600ms ease;}}
+    .position-bar-value{{color:var(--muted);font:600 11px/1 var(--mono);min-width:30px;text-align:right;}}
+    .actions-list,.actions{{margin:0;padding-left:18px;}}
+    .actions-list li,.actions li{{margin-bottom:5px;color:var(--ink-soft);}}
+    .insight-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;border-top:1px solid var(--line);margin-top:12px;padding-top:12px;}}
+    /* Tags / chips */
+    .tag{{display:inline-block;padding:3px 10px;border-radius:999px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;color:var(--ink);border:1px solid var(--line-strong);background:transparent;white-space:nowrap;}}
+    .tag.hot{{background:var(--hot);color:#fff;border-color:var(--hot);}}
+    .tag.danger{{background:var(--danger);color:#fff;border-color:var(--danger);}}
+    .tag.warn{{background:var(--warn-soft);color:var(--warn);border-color:var(--warn-soft);}}
+    .tag.gain{{background:var(--gain-soft);color:var(--gain);border-color:var(--gain-soft);}}
+    .chip-row{{display:flex;flex-wrap:wrap;gap:6px;}}
+    .type-tag,.chip{{display:inline-block;border-radius:999px;padding:3px 10px;background:var(--accent-soft);color:var(--accent);font:700 10.5px/1.3 var(--sans);text-transform:uppercase;letter-spacing:.1em;}}
+    /* Action chips */
+    .action-chip{{display:inline-block;padding:3px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;border-radius:999px;white-space:nowrap;font-family:var(--sans);}}
+    .action-chip.rewrite{{background:var(--hot-soft);color:var(--warn);}}
+    .action-chip.expand{{background:var(--accent-soft);color:var(--accent);}}
+    .action-chip.link{{background:var(--gain-soft);color:var(--gain);}}
+    .action-chip.new{{background:var(--paper-warm);color:var(--ink-mid);border:1px solid var(--line-strong);}}
+    .action-chip.faq{{background:var(--warn-soft);color:var(--warn);}}
+    /* Filter bar */
+    .filter-bar,.summary-links{{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0;}}
+    .filter-group{{display:flex;align-items:center;flex-wrap:wrap;gap:6px;}}
+    .filter-label{{color:var(--muted);font:700 9.5px/1 var(--sans);text-transform:uppercase;letter-spacing:.14em;margin-right:2px;}}
+    .filter-btn,.summary-link{{appearance:none;border:1px solid var(--line-strong);background:var(--paper);color:var(--ink-mid);border-radius:3px;padding:5px 10px;font:600 11px/1 var(--sans);letter-spacing:.04em;text-decoration:none;cursor:pointer;}}
+    .filter-btn.is-active{{background:var(--ink);border-color:var(--ink);color:var(--paper);}}
+    .filter-btn:hover{{background:var(--paper-warm);}}
+    .is-filtered-out{{display:none!important;}}
+    /* CTR track */
+    .ctr-row{{margin-top:4px;display:grid;gap:6px;}}
+    .ctr-row-stat{{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;}}
+    .ctr-row-stat b{{color:var(--ink);font-family:var(--serif);font-size:14px;font-weight:500;letter-spacing:-.01em;}}
+    .ctr-track{{position:relative;height:8px;background:var(--line);border-radius:999px;overflow:hidden;}}
+    .ctr-band{{position:absolute;top:0;bottom:0;background:var(--gain-soft);border-left:1px solid var(--gain);border-right:1px solid var(--gain);}}
+    .ctr-now{{position:absolute;top:0;bottom:0;left:0;background:var(--ink);border-radius:999px;}}
+    .ctr-axis{{display:flex;justify-content:space-between;font-size:10px;color:var(--muted-soft);font-variant-numeric:tabular-nums;margin-top:2px;font-family:var(--mono);}}
+    .gain-line{{margin-top:8px;font-family:var(--serif);font-size:14px;font-style:italic;color:var(--gain);letter-spacing:-.005em;}}
+    .gain-line b{{font-style:normal;font-weight:500;}}
+    /* Note block */
+    .note-block{{margin-top:6px;padding:10px 14px;border-left:2px solid var(--hot);background:var(--hot-soft);color:var(--warn);font-size:12px;line-height:1.55;}}
+    .note-block b{{color:var(--ink);}}
+    /* SERP mockup */
+    .serp-pair{{display:grid;grid-template-columns:1fr 24px 1fr;gap:18px;align-items:stretch;margin:8px 0 0;}}
+    .serp{{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px 18px 18px;display:grid;gap:4px;position:relative;}}
+    .serp.after{{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-soft);}}
+    .serp-stamp{{position:absolute;top:-10px;left:14px;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;font-weight:700;background:var(--paper);color:var(--muted);padding:0 8px;}}
+    .serp.after .serp-stamp{{color:var(--accent);}}
+    .serp-favicon{{display:flex;align-items:center;gap:8px;margin-bottom:4px;}}
+    .serp-favicon .dot{{width:22px;height:22px;border-radius:50%;background:var(--paper-warm);border:1px solid var(--line);}}
+    .serp-favicon .domain{{display:grid;line-height:1.25;}}
+    .serp-favicon .domain .site{{font-size:12.5px;color:#202124;font-weight:500;}}
+    .serp-favicon .domain .url{{font-size:11px;color:#4d5156;font-family:var(--mono);}}
+    .serp-title{{font-family:Arial,sans-serif;color:#1a0dab;font-size:17px;font-weight:400;line-height:1.3;letter-spacing:-.005em;margin:4px 0 2px;}}
+    .serp.after .serp-title{{font-weight:500;}}
+    .serp-desc{{font-family:Arial,sans-serif;color:#4d5156;font-size:12.5px;line-height:1.45;margin:0;}}
+    .serp-desc mark{{background:#fef3c7;color:inherit;padding:0 1px;}}
+    .serp-arrow{{display:grid;place-items:center;color:var(--muted);font-family:var(--serif);font-style:italic;font-size:16px;}}
+    .serp-notes{{margin-top:14px;padding:14px 18px;background:var(--paper-warm);border-radius:4px;display:grid;grid-template-columns:1fr 1fr;gap:18px;}}
+    .serp-notes .col{{display:grid;gap:4px;}}
+    .serp-notes h5{{margin:0;font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;}}
+    .serp-notes p{{margin:0;font-size:12.5px;color:var(--ink-soft);line-height:1.55;}}
+    .serp-notes p b{{color:var(--ink);}}
+    .snippet-block{{margin-top:8px;padding-top:22px;border-top:1px solid var(--rule);}}
+    .snippet-block:first-of-type{{border-top:0;padding-top:0;}}
+    .snippet-title-row{{display:flex;justify-content:space-between;align-items:baseline;gap:18px;margin-bottom:4px;}}
+    .snippet-title-row h4{{margin:0;font-family:var(--serif);font-weight:500;font-size:18px;letter-spacing:-.01em;color:var(--ink);}}
+    .snippet-meta{{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;}}
+    .snippet-meta b{{color:var(--ink);font-weight:600;}}
+    /* Tables */
+    .table-card{{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);margin-top:8px;}}
+    .table-card table{{width:100%;border-collapse:collapse;font-size:12px;}}
+    .table-card thead th{{text-align:left;text-transform:uppercase;letter-spacing:.12em;font-size:9.5px;font-weight:700;color:var(--muted);padding:12px 8px 12px 0;border-bottom:1px solid var(--rule);}}
+    .table-card thead th.r{{text-align:right;}}
+    .table-card td{{padding:12px 8px 12px 0;vertical-align:top;border-bottom:1px solid var(--line);color:var(--ink-soft);line-height:1.55;}}
+    .table-card td.r{{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600;font-family:var(--serif);font-size:13.5px;letter-spacing:-.01em;}}
+    .table-card td.r em{{font-style:italic;color:var(--hot);}}
+    .table-card tr:last-child td{{border-bottom:0;}}
+    .table-card td .qrow{{display:grid;gap:3px;}}
+    .table-card td .qprimary{{color:var(--ink);font-weight:500;}}
+    .table-card td .qsecondary{{color:var(--muted);font-size:11.5px;}}
+    .table-card td .urlcell{{font-family:var(--mono);font-size:11.5px;color:var(--ink);word-break:break-all;}}
+    .table-card td .urlcell em{{color:var(--muted);font-style:normal;}}
+    /* Compact table (fallback) */
+    .compact-table{{width:100%;border-collapse:collapse;background:var(--paper);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);font-size:11.5px;}}
+    .compact-table th,.compact-table td{{border-bottom:1px solid var(--line);padding:10px 8px;text-align:left;vertical-align:top;}}
+    .compact-table th{{background:var(--paper-warm);color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;font-weight:700;border-bottom:1px solid var(--rule);}}
+    .compact-table tr:last-child td{{border-bottom:0;}}
+    .compact-table .url-cell{{overflow-wrap:anywhere;max-width:220px;font-family:var(--mono);font-size:11px;}}
+    /* Cluster cards */
+    .cluster-section{{display:grid;gap:16px;}}
+    .cluster-card{{border-top:1px solid var(--rule);padding:22px 0 0;display:grid;gap:16px;}}
+    .cluster-head{{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start;}}
+    .cluster-head h3{{margin:0;font-family:var(--serif);font-weight:500;font-size:19px;letter-spacing:-.01em;color:var(--ink);}}
+    .cluster-head .id{{display:block;font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:.05em;}}
+    .cluster-grid{{display:grid;grid-template-columns:1fr 1.1fr;gap:28px;}}
+    .cluster-grid h4{{margin:0 0 10px;font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;}}
+    .query-chips{{display:flex;flex-wrap:wrap;gap:6px;}}
+    .query-chips .chip{{display:inline-block;padding:4px 10px;background:var(--paper-warm);color:var(--ink-soft);border-radius:3px;font-size:11.5px;border:1px solid var(--line);}}
+    .url-list{{margin:0;padding:0;list-style:none;display:grid;gap:6px;}}
+    .url-list li{{display:grid;grid-template-columns:18px 1fr;gap:8px;color:var(--ink-soft);font-family:var(--mono);font-size:11.5px;word-break:break-all;align-items:baseline;}}
+    .url-list li::before{{content:"—";color:var(--muted);font-family:var(--serif);font-style:italic;}}
+    .cluster-action{{padding:14px 16px;background:var(--paper-warm);border-left:2px solid var(--ink);font-family:var(--serif);font-style:italic;font-size:14px;color:var(--ink-soft);line-height:1.55;}}
+    .cluster-action b{{font-style:normal;font-weight:600;color:var(--ink);}}
+    /* Variant pairs */
+    .variant-row{{border-top:1px solid var(--line);padding:16px 0;display:grid;grid-template-columns:1fr 28px 1fr 180px;gap:16px;align-items:center;}}
+    .variant-row:first-of-type{{border-top:1px solid var(--rule);}}
+    .variant-row:last-of-type{{border-bottom:1px solid var(--rule);}}
+    .variant-url-cell{{font-family:var(--mono);font-size:11.5px;color:var(--ink);word-break:break-all;line-height:1.55;}}
+    .variant-url-cell .badge{{display:block;font-family:var(--sans);font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;margin-bottom:4px;}}
+    .variant-url-cell.canonical .badge{{color:var(--accent);}}
+    .variant-arrow{{text-align:center;color:var(--muted);font-family:var(--serif);font-style:italic;font-size:22px;}}
+    .variant-meta{{display:grid;grid-template-columns:repeat(3,1fr);text-align:right;gap:8px;}}
+    .variant-meta dt{{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:700;margin:0 0 2px;}}
+    .variant-meta dd{{margin:0;font-family:var(--serif);font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums;font-size:14px;letter-spacing:-.01em;}}
+    /* 30-day plan */
+    .plan-grid{{display:grid;grid-template-columns:100px 1fr;gap:0;border-top:1px solid var(--rule);}}
+    .plan-week{{border-bottom:1px solid var(--line);display:contents;}}
+    .plan-week:last-child .plan-when,.plan-week:last-child .plan-body{{border-bottom:1px solid var(--rule);}}
+    .plan-when,.plan-body{{padding:22px 0;border-bottom:1px solid var(--line);}}
+    .plan-when{{padding-right:24px;display:grid;gap:4px;align-content:start;}}
+    .plan-when .num{{font-family:var(--serif);font-style:italic;font-size:32px;line-height:1;letter-spacing:-.02em;color:var(--hot);}}
+    .plan-when .label{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.16em;font-weight:700;}}
+    .plan-body{{padding-left:24px;border-left:1px solid var(--line);display:grid;gap:8px;}}
+    .plan-body h3{{margin:0;font-family:var(--serif);font-weight:500;font-size:18px;letter-spacing:-.01em;color:var(--ink);}}
+    .plan-body p{{margin:0;color:var(--ink-mid);font-size:13px;line-height:1.6;}}
+    .plan-body .deliverables{{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}}
+    .plan-body .deliverables span{{font-family:var(--mono);font-size:10.5px;padding:2px 8px;background:var(--paper-warm);border:1px solid var(--line);border-radius:3px;color:var(--ink);letter-spacing:.02em;}}
+    /* Legacy plan-week for old non-grid variant */
+    .plan-week-head{{font:700 13px/1.3 var(--sans);margin-bottom:5px;color:var(--ink);}}
+    .plan-week-focus{{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font:700 10px/1.4 var(--sans);margin-left:8px;text-transform:uppercase;letter-spacing:.08em;}}
+    /* Misc */
+    .business-note{{margin:10px 0 0;color:var(--ink-mid);font-size:13px;}}
+    .annex-list,.annex-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}}
+    .annex-item{{background:var(--paper-warm);border:1px solid var(--line);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:4px;}}
+    .annex-name{{font-weight:700;font-size:12px;color:var(--ink);}}
+    .annex-category{{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);}}
+    .annex-desc{{font-size:11px;color:var(--muted);}}
+    .empty-state{{padding:18px 22px;border:1px dashed var(--line-strong);color:var(--muted);font-size:13px;}}
+    .target-metric-box{{margin-top:10px;padding:10px 14px;background:var(--gain-soft);border-left:2px solid var(--gain);font-size:11.5px;color:var(--gain);}}
+    .target-metric-label{{display:block;font:700 9.5px/1 var(--sans);text-transform:uppercase;letter-spacing:.14em;margin-bottom:4px;}}
+    .serp-warning{{margin-top:10px;padding:10px 14px;background:var(--hot-soft);border-left:2px solid var(--hot);font-size:11.5px;color:var(--warn);}}
+    .serp-warning-label{{display:block;font:700 9.5px/1 var(--sans);text-transform:uppercase;letter-spacing:.14em;margin-bottom:4px;}}
+    /* Closing */
+    .closing{{margin-top:18px;padding:28px 32px;background:var(--ink);color:rgba(255,255,255,.85);display:grid;grid-template-columns:1fr auto;gap:28px;align-items:center;}}
+    .closing h3{{margin:0 0 6px;font-family:var(--serif);font-weight:400;font-style:italic;font-size:22px;color:#fff;letter-spacing:-.01em;}}
+    .closing p{{margin:0;color:rgba(255,255,255,.75);font-size:13px;line-height:1.6;max-width:50ch;}}
+    .closing .closing-mark{{text-align:right;font-family:var(--serif);color:rgba(255,255,255,.8);font-style:italic;font-size:13px;}}
+    .closing .closing-mark strong{{display:block;color:#fff;font-size:16px;font-weight:500;letter-spacing:-.005em;margin-bottom:4px;}}
+    /* Print */
+    .print-footer{{display:none;}}
+    .no-print{{}}
+    @page{{size:A4;margin:0;}}
+    @media print{{
+      html,body{{background:var(--paper);}}
+      .doc{{padding:0;gap:0;max-width:none;}}
+      .page{{box-shadow:none;border-radius:0;padding:22mm 22mm 24mm;min-height:auto;page-break-after:always;break-after:page;}}
+      .page.cover{{padding:0;}}
+      .page:last-child{{page-break-after:auto;break-after:auto;}}
+      .runhead{{left:22mm;right:22mm;top:12mm;}}
+      .pagenum{{left:22mm;right:22mm;bottom:12mm;}}
+      *{{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+      nav.gsc-nav,.no-print,.filter-bar,.summary-links{{display:none!important;}}
+      .report-toolbar{{display:none!important;}}
+      .print-footer{{display:block;position:fixed;left:13mm;right:13mm;bottom:6mm;color:var(--muted);font:600 9px/1.2 var(--sans);text-align:center;}}
+      .position-bar-fill{{width:var(--print-position-width,100%)!important;}}
+      .page-card,.snippet-card,.appendix-card,.query-card,.priority-item{{break-inside:avoid;page-break-inside:avoid;}}
+      .compact-table tr{{break-inside:avoid;page-break-inside:avoid;}}
+      .kpi-grid{{grid-template-columns:repeat(3,minmax(0,1fr));}}
     }}
-    @media (max-width:760px) {{
-      .cover-meta,.kpi-grid,.insight-grid,.annex-list,.annex-grid {{ grid-template-columns:1fr; }}
-      .page-metrics,.data-grid {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
-      .page-card-header,.priority-item {{ flex-direction:column; }}
+    @media(max-width:760px){{
+      .page{{padding:32px 24px 48px;min-height:auto;}}
+      .cover-mast,.cover-body,.cover-foot{{padding-left:24px;padding-right:24px;}}
+      .kpi-grid,.annex-list,.annex-grid{{grid-template-columns:1fr;}}
+      .page-metrics,.data-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}
+      .serp-pair{{grid-template-columns:1fr;}}
+      .serp-arrow{{display:none;}}
+      .cluster-grid,.cover-foot{{grid-template-columns:1fr 1fr;}}
+      .variant-row{{grid-template-columns:1fr;}}
+      nav.gsc-nav{{padding:10px 24px;}}
     }}
   </style>
 </head>
 <body>
   {toolbar}
-  <main class="report-container">
-    <section class="cover-page">
-      <div>
-        <div class="cover-label">{html.escape(_("Rapport SEO · Google Search Console"))}</div>
-        <span class="mode-badge">{html.escape(mode_label)}</span>
-        <h1>{html.escape(_("Rapport d’opportunités SEO GSC"))}</h1>
-        <p class="cover-subtitle">{html.escape(_("Basé sur les données Google Search Console exportées."))}</p>
-        <div class="cover-meta">
-          <div><span class="cover-meta-label">{html.escape(_("Domaine"))}</span><span class="cover-meta-value">{html.escape(str(report.get("site_name") or _("Non précisé")))}</span></div>
-          <div><span class="cover-meta-label">{html.escape(_("Période analysée"))}</span><span class="cover-meta-value">{html.escape(translate_period_label(report.get("period_label", ""), active_lang).removeprefix(_("Période analysée: ")))}</span></div>
-          <div><span class="cover-meta-label">{html.escape(_("Date de génération"))}</span><span class="cover-meta-value">{html.escape(str(report.get("generated_at") or ""))}</span></div>
+  <nav class="gsc-nav no-print" aria-label="{html.escape(_("Navigation du rapport"))}">{nav}</nav>
+  <div class="doc">
+    <section class="page cover no-running">
+      <header class="cover-mast">
+        <div class="wordmark">
+          <span class="glyph"></span>
+          <span>Prospect <em>Machine</em></span>
         </div>
+        <div class="ref-block">
+          <strong>{html.escape(_("RAPPORT N°"))} {report_num}</strong><br>
+          {html.escape(mode_label)}<br>
+          {html.escape(_("Préparé pour"))} {site_name}
+        </div>
+      </header>
+      <div class="cover-body">
+        <p class="cover-cat">
+          <span>{html.escape(_("Opportunités SEO"))}</span>
+          <span class="dot">·</span>
+          <span>{html.escape(_("Google Search Console"))}</span>
+          <span class="dot">·</span>
+          <span>{period_label}</span>
+        </p>
+        <h1 class="cover-title display">{site_name}</h1>
+        <p class="cover-tag">{html.escape(_("Rapport d’opportunités SEO — analyse des pages à fort potentiel de clic non capté."))}</p>
         {estimate_box}
-        <button onclick="exportPDF()" class="btn-export no-print">{html.escape(_("Exporter en PDF"))}</button>
       </div>
-      <div class="cover-footer">{html.escape(_("Rapport d'opportunités GSC"))} · {html.escape(str(report.get("generated_at") or ""))}</div>
+      <footer class="cover-foot">
+        <div><span class="lbl">{html.escape(_("Client"))}</span><strong>{site_name}</strong></div>
+        <div><span class="lbl">{html.escape(_("Période d’analyse"))}</span><strong>{period_label}</strong></div>
+        <div><span class="lbl">{html.escape(_("Émis le"))}</span><strong>{generated_at}</strong></div>
+        <div><span class="lbl">{html.escape(_("Préparé par"))}</span><strong>Prospect Machine</strong></div>
+      </footer>
     </section>
-    <section class="source-box"><ul class="source-list">{source_notes}</ul></section>
-    <nav aria-label="{html.escape(_("Navigation du rapport"))}">{nav}</nav>
-    <section class="report-section" id="synthese">
-      <div class="section-header"><h2>{html.escape(_("Synthèse exécutive"))}</h2><p class="section-intro">{html.escape(_("Les chiffres et décisions à retenir avant l’exécution."))}</p></div>
-      <section class="kpi-grid">{kpis}</section>
-      {estimate_box}
+    <section class="page">
+      <div class="runhead"><span class="mark">Prospect Machine</span><span>{html.escape(_("Synthèse exécutive"))}</span></div>
+      <div class="section-header">
+        <p class="eyebrow"><span class="num">I.</span> {html.escape(_("Synthèse"))}</p>
+        <h2 class="section-title">{html.escape(_("Les chiffres qui comptent."))}</h2>
+        <p class="lede">{html.escape(_("Les chiffres et décisions à retenir avant l’exécution."))}</p>
+      </div>
+      <section class="kpi-grid" id="synthese">{kpis}</section>
       <div class="executive-summary"><p>{html.escape(_(str(report.get("executive_summary", ""))))}</p></div>
       {render_summary_links(active_lang)}
+      <div class="pagenum"><span class="mark">{site_name}</span><span class="num"><em>p.</em> 02</span></div>
     </section>
-    {render_quick_decision_section(report.get("quick_decisions", []), active_lang)}
-    <section class="report-section" id="priorites"><div class="section-header"><h2>{html.escape(_("Les 3 priorités du mois"))}</h2></div>{priorities}</section>
-    <section class="report-section" id="pages-prioritaires"><div class="section-header"><h2>{html.escape(_(str(len(report.get("priority_pages") or [])) + " pages prioritaires"))}</h2><p class="section-intro">{html.escape(_("Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business."))}</p></div>{render_filter_bar("pages-prioritaires", active_lang)}{priority_cards}</section>
-    <section class="report-section" id="requetes"><div class="section-header"><h2>{html.escape(_("Top opportunités requêtes par URL cible"))}</h2><p class="section-intro">{html.escape(_("Regroupées par URL cible et action. Les requêtes brutes complètes sont dans queries_full_export.csv."))}</p></div>{queries}</section>
+    <section class="page">
+      <div class="runhead"><span class="mark">Prospect Machine</span><span>{html.escape(_("Décision rapide"))}</span></div>
+      <div class="section-header" id="decision-rapide">
+        <p class="eyebrow"><span class="num">II.</span> {html.escape(_("Décision rapide"))}</p>
+        <h2 class="section-title">{html.escape(_("Les 3 priorités du mois."))}</h2>
+      </div>
+      {priorities}
+      <div class="pagenum"><span class="mark">{site_name}</span><span class="num"><em>p.</em> 03</span></div>
+    </section>
+    <section class="page" id="pages-prioritaires">
+      <div class="runhead"><span class="mark">Prospect Machine</span><span>{html.escape(_("Pages prioritaires"))}</span></div>
+      <div class="section-header">
+        <p class="eyebrow"><span class="num">III.</span> {html.escape(_("Pages prioritaires"))}</p>
+        <h2 class="section-title">{html.escape(_(str(len(report.get("priority_pages") or [])) + " pages prioritaires."))}</h2>
+        <p class="lede">{html.escape(_("Maximum 10 pages dans le PDF principal, classées par potentiel SEO et valeur business."))}</p>
+      </div>
+      {render_filter_bar("pages-prioritaires", active_lang)}
+      {priority_cards}
+      <div class="pagenum"><span class="mark">{site_name}</span><span class="num"><em>p.</em> 04</span></div>
+    </section>
+    <section class="page" id="requetes">
+      <div class="runhead"><span class="mark">Prospect Machine</span><span>{html.escape(_("Requêtes exploitables"))}</span></div>
+      <div class="section-header">
+        <p class="eyebrow"><span class="num">IV.</span> {html.escape(_("Requêtes exploitables"))}</p>
+        <h2 class="section-title">{html.escape(_("Top opportunités requêtes."))}</h2>
+        <p class="lede">{html.escape(_("Regroupées par URL cible et action. Les requêtes brutes complètes sont dans queries_full_export.csv."))}</p>
+      </div>
+      {queries}
+      <div class="pagenum"><span class="mark">{site_name}</span><span class="num"><em>p.</em> 05</span></div>
+    </section>
     {snippets}
     {cannibalization}
-    <section class="report-section" id="business"><div class="section-header"><h2>{html.escape(_("Opportunités business"))}</h2><p class="section-intro">{html.escape(_("Pages à forte valeur business : équipement, comparatifs, tests, affiliation, prospects ou produits numériques."))}</p></div>{business}</section>
+    <section class="page" id="business">
+      <div class="runhead"><span class="mark">Prospect Machine</span><span>{html.escape(_("Opportunités business"))}</span></div>
+      <div class="section-header">
+        <p class="eyebrow"><span class="num">VI.</span> {html.escape(_("Opportunités business"))}</p>
+        <h2 class="section-title">{html.escape(_("Pages à intention business."))}</h2>
+        <p class="lede">{html.escape(_("Pages à forte valeur business : équipement, comparatifs, tests, affiliation, prospects ou produits numériques."))}</p>
+      </div>
+      {business}
+      <div class="pagenum"><span class="mark">{site_name}</span><span class="num"><em>p.</em> 07</span></div>
+    </section>
     {render_action_plan_section(active_lang, report.get("action_plan_30_days") or None)}
     {render_methodology_section(str(report.get("report_mode") or "current_period_only"), active_lang)}
     {annexes}
-  </main>
+  </div>
   <script>
     function exportPDF() {{
       const original = document.title;
-      document.title = 'GSC_Opportunity_Report_' + new Date().toISOString().slice(0,10);
+      document.title = ‘GSC_Opportunity_Report_’ + new Date().toISOString().slice(0,10);
       window.print();
       document.title = original;
     }}
-    document.addEventListener('DOMContentLoaded', function() {{
-      document.querySelectorAll('.position-bar-fill').forEach(function(bar, index) {{
-        bar.style.transitionDelay = (index * 80) + 'ms';
+    document.addEventListener(‘DOMContentLoaded’, function() {{
+      document.querySelectorAll(‘.position-bar-fill’).forEach(function(bar, index) {{
+        bar.style.transitionDelay = (index * 80) + ‘ms’;
         requestAnimationFrame(function() {{
-          bar.style.width = (bar.dataset.positionWidth || '0') + '%';
+          bar.style.width = (bar.dataset.positionWidth || ‘0’) + ‘%’;
         }});
       }});
-      document.querySelectorAll('.filter-btn[data-filter-kind="priority"]').forEach(function(button) {{
-        button.addEventListener('click', function() {{
-          const section = document.getElementById(button.dataset.section || '');
+      document.querySelectorAll(‘.filter-btn[data-filter-kind="priority"]’).forEach(function(button) {{
+        button.addEventListener(‘click’, function() {{
+          const section = document.getElementById(button.dataset.section || ‘’);
           if (!section) return;
-          const value = button.dataset.filterValue || 'all';
-          section.querySelectorAll('.filter-btn[data-filter-kind="priority"]').forEach(function(peer) {{
-            peer.classList.toggle('is-active', peer === button);
+          const value = button.dataset.filterValue || ‘all’;
+          section.querySelectorAll(‘.filter-btn[data-filter-kind="priority"]’).forEach(function(peer) {{
+            peer.classList.toggle(‘is-active’, peer === button);
           }});
-          section.querySelectorAll('.page-card, .snippet-card').forEach(function(card) {{
-            card.classList.toggle('is-filtered-out', value !== 'all' && card.dataset.priority !== value);
+          section.querySelectorAll(‘.page-card, .snippet-card’).forEach(function(card) {{
+            card.classList.toggle(‘is-filtered-out’, value !== ‘all’ && card.dataset.priority !== value);
           }});
-        }});
-      }});
-      document.querySelectorAll('#synthese a[href^="#"]').forEach(function(link) {{
-        link.addEventListener('click', function(event) {{
-          const target = document.querySelector(link.getAttribute('href'));
-          if (!target) return;
-          event.preventDefault();
-          target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
         }});
       }});
     }});
   </script>
-  <div class="print-footer">{html.escape(_("Rapport d’opportunités SEO GSC"))} · {html.escape(str(report.get("generated_at") or ""))}</div>
+  <div class="print-footer">{html.escape(_("Rapport d’opportunités GSC"))} · {site_name} · {generated_at}</div>
 </body>
 </html>"""
     return document
@@ -3700,51 +3947,345 @@ def render_report(report: dict[str, object]) -> str:
         active_lang,
     )
 
+    site_name_r = html.escape(str(report.get("site_name") or _("Non précisé")))
+    period_label_r = html.escape(translate_period_label(report.get("period_label", ""), active_lang).removeprefix(_("Période analysée: ")))
+    generated_at_r = html.escape(str(report.get("generated_at") or ""))
+    report_num_r = html.escape(str(report.get("generated_at") or "")[:10] or "")
     document = f"""<!DOCTYPE html>
 <html lang="{html.escape(active_lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{html.escape(_(title))}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400;1,9..144,500;1,9..144,600&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {{
-      --color-bg: #FAFAF8;
-      --color-surface: #FFFFFF;
-      --color-border: #E8E5DE;
-      --color-border-light: #F0EDE6;
-      --color-text-primary: #1A1A18;
-      --color-text-secondary: #6B6B68;
-      --color-text-muted: #9B9B98;
-      --color-accent: #1E40AF;
-      --color-accent-light: #EFF3FF;
-      --color-accent-mid: #BFCBF5;
-      --color-high: #991B1B;
-      --color-high-bg: #FEF2F2;
-      --color-high-border: #FECACA;
-      --color-medium: #92400E;
-      --color-medium-bg: #FFFBEB;
-      --color-medium-border: #FDE68A;
-      --color-low: #065F46;
-      --color-low-bg: #F0FDF4;
-      --color-low-border: #A7F3D0;
-      --color-positive: #059669;
-      --color-positive-bg: #ECFDF5;
-      --color-warning: #D97706;
+      --paper:#faf9f4; --paper-warm:#f3f0e6; --paper-outer:#e7e3d6;
+      --ink:#0c0f14; --ink-soft:#2a2f3a; --ink-mid:#4b5260; --muted:#7a7e89; --muted-soft:#a8a89e;
+      --line:#e0dcce; --line-strong:#c9c4b1; --rule:#1a1d24;
+      --accent:#1f3a8a; --accent-soft:#e6ecf7;
+      --hot:#b45309; --hot-soft:#f7ecdb;
+      --gain:#166534; --gain-soft:#dcefe1;
+      --danger:#991b1b; --danger-soft:#f4dcdc;
+      --warn:#92400e; --warn-soft:#f5e4cc;
+      --shadow-card:0 1px 1px rgba(12,15,20,.04),0 20px 50px -20px rgba(12,15,20,.10);
+      --serif:"Fraunces","Iowan Old Style","Hoefler Text",Georgia,serif;
+      --sans:"Inter",ui-sans-serif,system-ui,sans-serif;
+      --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+      --color-bg:var(--paper-outer); --color-surface:var(--paper); --color-border:var(--line);
+      --color-text-primary:var(--ink); --color-text-secondary:var(--ink-mid); --color-text-muted:var(--muted);
+      --color-accent:var(--accent); --color-accent-light:var(--accent-soft);
+      --color-high:var(--danger); --color-high-bg:var(--danger-soft); --color-high-border:var(--danger-soft);
+      --color-medium:var(--warn); --color-medium-bg:var(--warn-soft); --color-medium-border:var(--warn-soft);
+      --color-low:var(--gain); --color-low-bg:var(--gain-soft); --color-low-border:var(--gain-soft);
+      --color-positive:var(--gain); --color-positive-bg:var(--gain-soft); --color-warning:var(--hot);
     }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      padding: 0;
-      background: var(--color-bg);
-      color: var(--color-text-primary);
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: 13px;
-      line-height: 1.7;
+    *{{box-sizing:border-box;}}
+    html,body{{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#efece1 0%,transparent 60%),var(--paper-outer);color:var(--ink-soft);font-family:var(--sans);font-size:13.5px;line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}}
+    a{{color:var(--accent);overflow-wrap:anywhere;}}
+    .doc{{max-width:920px;margin:0 auto;padding:40px 0 80px;display:grid;gap:26px;}}
+    .page{{background:var(--paper);border-radius:4px;box-shadow:var(--shadow-card);padding:64px 74px 88px;position:relative;min-height:1180px;display:grid;gap:28px;align-content:start;overflow:hidden;}}
+    .runhead{{position:absolute;top:30px;left:74px;right:74px;display:flex;justify-content:space-between;align-items:baseline;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:16px;font-weight:600;}}
+    .runhead .mark{{color:var(--ink);letter-spacing:.16em;font-weight:700;}}
+    .pagenum{{position:absolute;bottom:30px;left:74px;right:74px;display:flex;justify-content:space-between;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);padding-top:14px;border-top:1px solid var(--line);font-weight:600;}}
+    .pagenum .num{{color:var(--ink);font-family:var(--serif);font-style:italic;text-transform:none;letter-spacing:-.01em;font-size:12px;}}
+    .page.no-running .runhead,.page.no-running .pagenum{{display:none;}}
+    .eyebrow{{margin:0;text-transform:uppercase;letter-spacing:.18em;font-size:10.5px;font-weight:700;color:var(--muted);}}
+    .eyebrow .num{{color:var(--ink);font-family:var(--serif);font-style:italic;margin-right:10px;text-transform:none;letter-spacing:-.01em;font-weight:500;font-size:13px;}}
+    .section-title{{margin:0;font-family:var(--serif);font-weight:400;font-size:32px;line-height:1.1;letter-spacing:-.02em;color:var(--ink);}}
+    .section-title em{{font-style:italic;}}
+    .lede{{margin:0;color:var(--ink-mid);font-size:14px;line-height:1.65;}}
+    .rule-short{{width:56px;height:2px;background:var(--ink);}}
+    .url-mono{{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);background:var(--paper-warm);padding:2px 6px;border-radius:3px;word-break:break-all;}}
+    /* Cover */
+    .page.cover{{padding:0;background:var(--paper);display:grid;grid-template-rows:auto 1fr auto;min-height:1280px;background-image:linear-gradient(180deg,transparent 0%,transparent 60%,var(--paper-warm) 100%);}}
+    .cover-mast{{padding:36px 64px 24px;display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--rule);}}
+    .wordmark{{font-family:var(--serif);font-weight:500;font-size:17px;letter-spacing:-.01em;color:var(--ink);display:flex;align-items:baseline;gap:6px;}}
+    .wordmark em{{font-style:italic;font-weight:400;color:var(--ink-mid);}}
+    .wordmark .glyph{{display:inline-block;width:22px;height:22px;border:1.5px solid var(--ink);transform:rotate(-12deg);margin-right:12px;position:relative;top:4px;}}
+    .wordmark .glyph::after{{content:"";position:absolute;inset:4px;background:var(--ink);transform:rotate(12deg);}}
+    .ref-block{{text-align:right;font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--muted);line-height:1.6;}}
+    .ref-block strong{{color:var(--ink);font-weight:600;}}
+    .cover-body{{padding:80px 64px 40px;display:grid;grid-template-columns:1fr;gap:36px;align-content:end;}}
+    .cover-cat{{margin:0;text-transform:uppercase;letter-spacing:.22em;font-size:11px;font-weight:700;color:var(--ink);}}
+    .cover-cat .dot{{color:var(--muted);margin:0 10px;}}
+    .cover-title{{margin:0;font-family:var(--serif);font-weight:300;font-size:88px;line-height:.96;letter-spacing:-.03em;color:var(--ink);max-width:16ch;word-break:break-word;}}
+    .cover-tag{{margin:0;font-family:var(--serif);font-style:italic;font-weight:400;font-size:22px;line-height:1.35;color:var(--ink-mid);max-width:36ch;letter-spacing:-.01em;}}
+    .cover-pull{{margin-top:8px;padding:24px 0 0;border-top:1px solid var(--rule);display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:28px;}}
+    .pull-label{{font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:700;max-width:12ch;line-height:1.4;}}
+    .pull-number{{font-family:var(--serif);font-weight:300;font-size:64px;line-height:1;letter-spacing:-.03em;color:var(--ink);font-variant-numeric:tabular-nums;}}
+    .pull-number .dash{{color:var(--hot);margin:0 6px;font-style:italic;}}
+    .pull-unit{{text-align:right;color:var(--muted);font-size:12px;max-width:18ch;line-height:1.4;}}
+    .cover-foot{{padding:22px 64px 36px;background:var(--paper-warm);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}}
+    .cover-foot div{{display:grid;gap:4px;}}
+    .cover-foot .lbl{{text-transform:uppercase;letter-spacing:.16em;font-size:9.5px;font-weight:700;color:var(--muted);}}
+    .cover-foot strong{{font-family:var(--serif);font-weight:400;font-style:italic;color:var(--ink);font-size:15px;letter-spacing:-.005em;}}
+    /* Toolbar / nav */
+    .report-toolbar{{position:sticky;top:0;z-index:20;max-width:920px;margin:0 auto;padding:10px 30px;background:rgba(250,249,244,.96);border-bottom:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}}
+    .report-toolbar-button{{appearance:none;border:1px solid var(--line-strong);background:var(--paper);color:var(--ink-soft);border-radius:4px;padding:7px 12px;font:600 11.5px/1 var(--sans);text-decoration:none;cursor:pointer;}}
+    .language-toggle.is-active{{background:var(--ink);border-color:var(--ink);color:var(--paper);}}
+    .language-toggle-group{{display:inline-flex;gap:6px;}}
+    nav.gsc-nav{{position:sticky;top:52px;background:rgba(250,249,244,.96);border-bottom:1px solid var(--line);padding:10px 74px;display:flex;gap:8px;flex-wrap:wrap;z-index:10;max-width:920px;margin:0 auto;}}
+    nav.gsc-nav a{{color:var(--ink-mid);text-decoration:none;font:600 11px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;padding:5px 10px;border-radius:3px;border:1px solid transparent;}}
+    nav.gsc-nav a:hover{{border-color:var(--line);background:var(--paper-warm);color:var(--ink);}}
+    /* Sections */
+    .report-section,.report-panel,.source-box{{margin-top:0;padding-top:0;border-top:none;}}
+    .section-header{{margin-bottom:22px;display:grid;gap:8px;}}
+    .section-header h2{{margin:0;font-family:var(--serif);font-weight:400;font-size:28px;line-height:1.1;letter-spacing:-.02em;color:var(--ink);}}
+    .section-intro{{margin:0;color:var(--ink-mid);font-size:13.5px;line-height:1.6;}}
+    .section-tag{{display:inline-block;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);background:var(--accent-soft);padding:3px 10px;border-radius:3px;margin-bottom:8px;}}
+    .source-box{{padding:16px 22px;background:var(--paper-warm);border-left:3px solid var(--line-strong);font-size:12px;color:var(--ink-mid);}}
+    .source-list{{margin:0;padding-left:18px;}}
+    /* KPI grid */
+    .kpi-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid var(--rule);margin:18px 0;}}
+    .kpi-card{{padding:18px 16px 16px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);break-inside:avoid;}}
+    .kpi-card:nth-child(3n){{border-right:none;}}
+    .kpi-card--warning{{background:var(--warn-soft);}}
+    .kpi-card--positive{{background:var(--gain-soft);}}
+    .kpi-card--accent{{background:var(--accent-soft);}}
+    .kpi-label{{display:block;color:var(--muted);font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;margin-bottom:6px;}}
+    .kpi-value{{font-family:var(--serif);font-weight:400;font-size:28px;line-height:1;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums;}}
+    .kpi-note{{font-size:11px;color:var(--muted);margin-top:3px;}}
+    /* Executive summary */
+    .executive-summary{{padding:18px 22px;border-left:3px solid var(--accent);background:var(--accent-soft);font-size:14px;line-height:1.65;color:var(--ink-soft);}}
+    .executive-summary p{{margin:0;}}
+    /* Estimate box */
+    .estimate-box{{padding:18px 22px;background:var(--hot-soft);border-left:3px solid var(--hot);font-size:13.5px;}}
+    .estimate-box strong{{display:block;font-family:var(--serif);font-weight:400;font-size:22px;letter-spacing:-.02em;color:var(--ink);margin-bottom:6px;line-height:1.1;}}
+    .estimate-box p{{margin:0;color:var(--ink-mid);}}
+    /* Priority list */
+    .priorities-list,.priority-list,.cards-grid,.data-card-list{{display:grid;gap:0;border-top:1px solid var(--rule);}}
+    .priority-item{{display:grid;grid-template-columns:32px 1fr;gap:18px;align-items:start;padding:18px 0;border-bottom:1px solid var(--line);break-inside:avoid;}}
+    .priority-number{{font-family:var(--serif);font-style:italic;font-size:22px;color:var(--muted);letter-spacing:-.01em;padding-top:2px;}}
+    .priority-body{{display:grid;gap:6px;}}
+    .priority-body h3{{margin:0;font-family:var(--serif);font-weight:500;font-size:17px;letter-spacing:-.01em;color:var(--ink);}}
+    .priority-meta{{display:grid;gap:4px;font-size:12.5px;color:var(--ink-mid);}}
+    .priority-why,.priority-action,.priority-impact{{font-size:12.5px;color:var(--ink-mid);}}
+    /* Page cards */
+    .page-card,.snippet-card,.appendix-card,.query-card,.origin-card,.chart-card{{background:var(--paper);border-top:1px solid var(--rule);padding:22px 0 24px;break-inside:avoid;page-break-inside:avoid;margin-bottom:0;position:relative;overflow:visible;border-radius:0;border:none;border-top:1px solid var(--rule);}}
+    .page-card::before,.snippet-card::before{{display:none;}}
+    .page-card--high .page-card-rank,.page-card--high .page-slug{{color:var(--danger);}}
+    .page-card--medium .page-card-rank{{color:var(--warn);}}
+    .page-card-header,.card-head{{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:start;margin-bottom:14px;}}
+    .page-slug{{display:block;font-family:var(--serif);font-weight:500;font-size:18px;letter-spacing:-.01em;color:var(--ink);line-height:1.2;overflow-wrap:anywhere;}}
+    .page-url,.url-full{{display:block;font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:.02em;text-decoration:none;overflow-wrap:anywhere;word-break:break-word;}}
+    .priority-badge,.badge{{white-space:nowrap;border-radius:999px;padding:4px 12px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;flex-shrink:0;}}
+    .priority-badge--high,.badge-p1{{color:var(--danger);background:var(--danger-soft);border:1px solid var(--danger-soft);}}
+    .priority-badge--medium,.badge-p2{{color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-soft);}}
+    .priority-badge--low,.priority-badge--dead,.badge-p3,.badge-dead{{color:var(--gain);background:var(--gain-soft);border:1px solid var(--gain-soft);}}
+    .page-metrics,.metric-row,.data-grid{{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:12px 0;background:transparent;border-radius:0;overflow:visible;}}
+    .metric,.data-item{{padding:12px 14px 12px 0;border-right:1px solid var(--line);display:grid;gap:2px;min-width:0;flex:none;background:transparent;}}
+    .metric:nth-child(n+2),.data-item:nth-child(n+2){{padding-left:14px;}}
+    .metric:last-child,.data-item:last-child{{border-right:0;padding-right:0;}}
+    .metric-label,.data-label,.mini-label,.constat-label,.actions-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;margin-bottom:0;}}
+    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:22px;letter-spacing:-.02em;color:var(--ink);line-height:1.1;font-variant-numeric:tabular-nums;display:block;overflow-wrap:anywhere;}}
+    .metric--warning .metric-value{{color:var(--hot);font-style:italic;}}
+    .metric--positive .metric-value{{color:var(--gain);}}
+    .position-bar{{display:flex;align-items:center;gap:10px;margin:-2px 0 14px;}}
+    .position-bar-label,.bar-label{{color:var(--muted);font:700 9.5px/1.2 var(--sans);text-transform:uppercase;letter-spacing:.14em;min-width:140px;width:auto;}}
+    .position-bar-track{{flex:1;height:6px;background:var(--line);border-radius:999px;overflow:hidden;}}
+    .position-bar-fill{{height:100%;border-radius:999px;background:var(--ink);transition:width 600ms ease;}}
+    .position-bar-value,.bar-value{{color:var(--muted);font:600 11px/1 var(--mono);min-width:30px;text-align:right;width:auto;}}
+    .actions-list,.actions{{margin:0;padding-left:18px;}}
+    .actions-list li,.actions li{{margin-bottom:5px;color:var(--ink-soft);}}
+    .insight,.insight-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;border-top:1px solid var(--line);margin-top:12px;padding-top:12px;}}
+    .chip-row{{display:flex;flex-wrap:wrap;gap:6px;}}
+    .type-tag,.chip{{display:inline-block;border-radius:999px;padding:3px 10px;background:var(--accent-soft);color:var(--accent);font:700 10.5px/1.3 var(--sans);text-transform:uppercase;letter-spacing:.1em;}}
+    .action-chip{{display:inline-block;padding:3px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;border-radius:999px;white-space:nowrap;font-family:var(--sans);}}
+    .action-chip.rewrite{{background:var(--hot-soft);color:var(--warn);}}
+    .action-chip.expand{{background:var(--accent-soft);color:var(--accent);}}
+    .action-chip.link{{background:var(--gain-soft);color:var(--gain);}}
+    .action-chip.new{{background:var(--paper-warm);color:var(--ink-mid);border:1px solid var(--line-strong);}}
+    .action-chip.faq{{background:var(--warn-soft);color:var(--warn);}}
+    .filter-bar,.summary-links{{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0;}}
+    .filter-group{{display:flex;align-items:center;flex-wrap:wrap;gap:6px;}}
+    .filter-label{{color:var(--muted);font:700 9.5px/1 var(--sans);text-transform:uppercase;letter-spacing:.14em;}}
+    .filter-btn,.summary-link{{appearance:none;border:1px solid var(--line-strong);background:var(--paper);color:var(--ink-mid);border-radius:3px;padding:5px 10px;font:600 11px/1 var(--sans);letter-spacing:.04em;text-decoration:none;cursor:pointer;}}
+    .filter-btn.is-active{{background:var(--ink);border-color:var(--ink);color:var(--paper);}}
+    .is-filtered-out{{display:none!important;}}
+    .ctr-track{{position:relative;height:8px;background:var(--line);border-radius:999px;overflow:hidden;}}
+    .ctr-band{{position:absolute;top:0;bottom:0;background:var(--gain-soft);border-left:1px solid var(--gain);border-right:1px solid var(--gain);}}
+    .ctr-now{{position:absolute;top:0;bottom:0;left:0;background:var(--ink);border-radius:999px;}}
+    .serp-pair{{display:grid;grid-template-columns:1fr 24px 1fr;gap:18px;align-items:stretch;margin:8px 0 0;}}
+    .serp{{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px 18px 18px;display:grid;gap:4px;position:relative;}}
+    .serp.after{{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-soft);}}
+    .serp-stamp{{position:absolute;top:-10px;left:14px;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;font-weight:700;background:var(--paper);color:var(--muted);padding:0 8px;}}
+    .serp.after .serp-stamp{{color:var(--accent);}}
+    .serp-title{{font-family:Arial,sans-serif;color:#1a0dab;font-size:17px;font-weight:400;line-height:1.3;margin:4px 0 2px;}}
+    .serp.after .serp-title{{font-weight:500;}}
+    .serp-desc{{font-family:Arial,sans-serif;color:#4d5156;font-size:12.5px;line-height:1.45;margin:0;}}
+    .serp-desc mark{{background:#fef3c7;color:inherit;padding:0 1px;}}
+    .serp-arrow{{display:grid;place-items:center;color:var(--muted);font-family:var(--serif);font-style:italic;font-size:16px;}}
+    .note-block{{margin-top:6px;padding:10px 14px;border-left:2px solid var(--hot);background:var(--hot-soft);color:var(--warn);font-size:12px;line-height:1.55;}}
+    .compact-table{{width:100%;border-collapse:collapse;background:var(--paper);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);font-size:11.5px;}}
+    .compact-table th,.compact-table td{{border-bottom:1px solid var(--line);padding:10px 8px;text-align:left;vertical-align:top;}}
+    .compact-table th{{background:var(--paper-warm);color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;font-weight:700;border-bottom:1px solid var(--rule);}}
+    .compact-table tr:last-child td{{border-bottom:0;}}
+    .compact-table .url-cell{{overflow-wrap:anywhere;font-family:var(--mono);font-size:11px;}}
+    .table-card{{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);margin-top:8px;}}
+    .table-card table{{width:100%;border-collapse:collapse;font-size:12px;}}
+    .table-card thead th{{text-align:left;text-transform:uppercase;letter-spacing:.12em;font-size:9.5px;font-weight:700;color:var(--muted);padding:12px 8px 12px 0;border-bottom:1px solid var(--rule);}}
+    .table-card td{{padding:12px 8px 12px 0;vertical-align:top;border-bottom:1px solid var(--line);color:var(--ink-soft);line-height:1.55;}}
+    .table-card td.r{{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600;font-family:var(--serif);font-size:13.5px;letter-spacing:-.01em;}}
+    .table-card td.r em{{font-style:italic;color:var(--hot);}}
+    .table-card tr:last-child td{{border-bottom:0;}}
+    .annex-list,.annex-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}}
+    .annex-item{{background:var(--paper-warm);border:1px solid var(--line);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:4px;}}
+    .annex-name{{font-weight:700;font-size:12px;color:var(--ink);}}
+    .annex-category{{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);}}
+    .annex-desc{{font-size:11px;color:var(--muted);}}
+    .target-metric-box{{margin-top:10px;padding:10px 14px;background:var(--gain-soft);border-left:2px solid var(--gain);font-size:11.5px;color:var(--gain);}}
+    .target-metric-label{{display:block;font:700 9.5px/1 var(--sans);text-transform:uppercase;letter-spacing:.14em;margin-bottom:4px;}}
+    .serp-warning{{margin-top:10px;padding:10px 14px;background:var(--hot-soft);border-left:2px solid var(--hot);font-size:11.5px;color:var(--warn);}}
+    .serp-warning-label{{display:block;font:700 9.5px/1 var(--sans);text-transform:uppercase;letter-spacing:.14em;margin-bottom:4px;}}
+    .plan-grid{{display:grid;grid-template-columns:100px 1fr;gap:0;border-top:1px solid var(--rule);}}
+    .plan-week{{border-bottom:1px solid var(--line);display:contents;}}
+    .plan-week:last-child .plan-when,.plan-week:last-child .plan-body{{border-bottom:1px solid var(--rule);}}
+    .plan-when,.plan-body{{padding:22px 0;border-bottom:1px solid var(--line);}}
+    .plan-when{{padding-right:24px;display:grid;gap:4px;align-content:start;}}
+    .plan-when .num{{font-family:var(--serif);font-style:italic;font-size:32px;line-height:1;letter-spacing:-.02em;color:var(--hot);}}
+    .plan-when .label{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.16em;font-weight:700;}}
+    .plan-body{{padding-left:24px;border-left:1px solid var(--line);display:grid;gap:8px;}}
+    .plan-body h3{{margin:0;font-family:var(--serif);font-weight:500;font-size:18px;letter-spacing:-.01em;color:var(--ink);}}
+    .plan-body p{{margin:0;color:var(--ink-mid);font-size:13px;line-height:1.6;}}
+    .plan-week-head{{font:700 13px/1.3 var(--sans);margin-bottom:5px;color:var(--ink);}}
+    .plan-week-focus{{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font:700 10px/1.4 var(--sans);margin-left:8px;text-transform:uppercase;letter-spacing:.08em;}}
+    .empty-state{{padding:18px 22px;border:1px dashed var(--line-strong);color:var(--muted);font-size:13px;}}
+    .reliability-note,.page-constat,.why,.footer-note{{color:var(--ink-mid);font-size:12.5px;margin-top:10px;}}
+    .business-note{{margin:10px 0 0;color:var(--ink-mid);font-size:13px;}}
+    .print-footer{{display:none;}}
+    .cluster-section{{display:grid;gap:16px;}}
+    .cluster-card{{border-top:1px solid var(--rule);padding:22px 0 0;display:grid;gap:16px;}}
+    .cluster-head{{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start;}}
+    .cluster-head h3{{margin:0;font-family:var(--serif);font-weight:500;font-size:19px;letter-spacing:-.01em;color:var(--ink);}}
+    .cluster-grid{{display:grid;grid-template-columns:1fr 1.1fr;gap:28px;}}
+    .query-chips{{display:flex;flex-wrap:wrap;gap:6px;}}
+    .query-chips .chip{{display:inline-block;padding:4px 10px;background:var(--paper-warm);color:var(--ink-soft);border-radius:3px;font-size:11.5px;border:1px solid var(--line);}}
+    .url-list{{margin:0;padding:0;list-style:none;display:grid;gap:6px;}}
+    .url-list li{{display:grid;grid-template-columns:18px 1fr;gap:8px;color:var(--ink-soft);font-family:var(--mono);font-size:11.5px;word-break:break-all;}}
+    .url-list li::before{{content:"—";color:var(--muted);font-family:var(--serif);font-style:italic;}}
+    .cluster-action{{padding:14px 16px;background:var(--paper-warm);border-left:2px solid var(--ink);font-family:var(--serif);font-style:italic;font-size:14px;color:var(--ink-soft);line-height:1.55;}}
+    .variant-row{{border-top:1px solid var(--line);padding:16px 0;display:grid;grid-template-columns:1fr 28px 1fr 180px;gap:16px;align-items:center;}}
+    .variant-row:first-of-type{{border-top:1px solid var(--rule);}}
+    .variant-row:last-of-type{{border-bottom:1px solid var(--rule);}}
+    .variant-url-cell{{font-family:var(--mono);font-size:11.5px;color:var(--ink);word-break:break-all;}}
+    .variant-arrow{{text-align:center;color:var(--muted);font-family:var(--serif);font-style:italic;font-size:22px;}}
+    @media print{{
+      html,body{{background:var(--paper);}}
+      .doc{{padding:0;gap:0;max-width:none;}}
+      .page{{box-shadow:none;border-radius:0;padding:22mm 22mm 24mm;min-height:auto;page-break-after:always;break-after:page;}}
+      .page.cover{{padding:0;}}
+      .page:last-child{{page-break-after:auto;break-after:auto;}}
+      *{{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+      nav.gsc-nav,.no-print,.filter-bar,.summary-links,.report-toolbar{{display:none!important;}}
+      .print-footer{{display:block;position:fixed;left:13mm;right:13mm;bottom:6mm;color:var(--muted);font:600 9px/1.2 var(--sans);text-align:center;}}
+      .position-bar-fill{{width:var(--print-position-width,100%)!important;}}
+      .page-card,.snippet-card,.appendix-card,.query-card,.priority-item{{break-inside:avoid;page-break-inside:avoid;}}
+      .compact-table tr{{break-inside:avoid;page-break-inside:avoid;}}
+      .kpi-grid{{grid-template-columns:repeat(3,minmax(0,1fr));}}
     }}
-    .report-container {{
-      max-width: 860px;
-      margin: 0 auto;
-      padding: 0 32px 64px;
+    @media(max-width:760px){{
+      .page{{padding:32px 24px 48px;min-height:auto;}}
+      .cover-mast,.cover-body,.cover-foot{{padding-left:24px;padding-right:24px;}}
+      .kpi-grid,.annex-list,.annex-grid,.insight{{grid-template-columns:1fr;}}
+      .page-metrics,.metric-row,.data-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}
+      .serp-pair{{grid-template-columns:1fr;}}
+      .serp-arrow{{display:none;}}
+      .cover-foot{{grid-template-columns:1fr 1fr;}}
+      nav.gsc-nav{{padding:10px 24px;}}
+    }}
+  </style>
+</head>
+<body>
+  {toolbar}
+  <nav class="gsc-nav no-print" aria-label="{html.escape(_("Navigation du rapport"))}">{nav}</nav>
+  <div class="doc">
+    <section class="page cover no-running">
+      <header class="cover-mast">
+        <div class="wordmark">
+          <span class="glyph"></span>
+          <span>Prospect <em>Machine</em></span>
+        </div>
+        <div class="ref-block">
+          <strong>{html.escape(_("RAPPORT N°"))} {report_num_r}</strong><br>
+          {html.escape(_("Audit SEO GSC"))}<br>
+          {html.escape(_("Préparé pour"))} {site_name_r}
+        </div>
+      </header>
+      <div class="cover-body">
+        <p class="cover-cat">
+          <span>{html.escape(_("Opportunités SEO"))}</span>
+          <span class="dot">·</span>
+          <span>{html.escape(_("Google Search Console"))}</span>
+          <span class="dot">·</span>
+          <span>{period_label_r}</span>
+        </p>
+        <h1 class="cover-title">{site_name_r}</h1>
+        <p class="cover-tag">{html.escape(_("Rapport d'opportunités SEO — analyse des pages à fort potentiel de clic non capté."))}</p>
+        {estimate_box}
+      </div>
+      <footer class="cover-foot">
+        <div><span class="lbl">{html.escape(_("Client"))}</span><strong>{site_name_r}</strong></div>
+        <div><span class="lbl">{html.escape(_("Période d'analyse"))}</span><strong>{period_label_r}</strong></div>
+        <div><span class="lbl">{html.escape(_("Émis le"))}</span><strong>{generated_at_r}</strong></div>
+        <div><span class="lbl">{html.escape(_("Préparé par"))}</span><strong>Prospect Machine</strong></div>
+      </footer>
+    </section>
+    <section class="page" id="synthese">
+      <div class="runhead"><span class="mark">Prospect Machine</span><span>{html.escape(_("Synthèse exécutive"))}</span></div>
+      <div class="section-header">
+        <p class="eyebrow"><span class="num">I.</span> {html.escape(_("Synthèse"))}</p>
+        <h2 class="section-title">{html.escape(_("Les chiffres qui comptent."))}</h2>
+        <p class="lede">{html.escape(_("Les indicateurs à retenir avant d'entrer dans le détail."))}</p>
+      </div>
+      <section class="kpi-grid">{kpis}</section>
+      {estimate_box}
+      <div class="executive-summary"><p>{html.escape(_(str(report.get("executive_summary", ""))))}</p></div>
+      {render_summary_links(active_lang)}
+      <div class="pagenum"><span class="mark">{site_name_r}</span><span class="num"><em>p.</em> 02</span></div>
+    </section>
+    {render_quick_decision_section(report.get("quick_decisions", []), active_lang)}
+    <section class="page" id="priorites">
+      <div class="runhead"><span class="mark">Prospect Machine</span><span>{html.escape(_("Priorités du mois"))}</span></div>
+      <div class="section-header">
+        <p class="eyebrow"><span class="num">II.</span> {html.escape(_("Priorités"))}</p>
+        <h2 class="section-title">{html.escape(_("Les 3 priorités du mois."))}</h2>
+        <p class="lede">{html.escape(_("Un plan d'action volontairement court pour décider vite."))}</p>
+      </div>
+      {priorities}
+      <div class="pagenum"><span class="mark">{site_name_r}</span><span class="num"><em>p.</em> 03</span></div>
+    </section>
+    <section class="page" id="pages-prioritaires">
+      <div class="runhead"><span class="mark">Prospect Machine</span><span>{html.escape(_("Pages prioritaires"))}</span></div>
+      <div class="section-header">
+        <p class="eyebrow"><span class="num">III.</span> {html.escape(_("Pages prioritaires"))}</p>
+        <h2 class="section-title">{html.escape(_("Top pages à traiter en premier."))}</h2>
+        <p class="lede">{html.escape(_("Les pages avec le meilleur rapport visibilité, effort et potentiel."))}</p>
+      </div>
+      {render_filter_bar("pages-prioritaires", active_lang)}
+      {priority_cards}
+      <p class="reliability-note">{html.escape(_("Le potentiel théorique détecté est un ordre de grandeur, pas une promesse. À confirmer après mise en ligne et suivi dans Google Search Console."))}</p>
+      <div class="pagenum"><span class="mark">{site_name_r}</span><span class="num"><em>p.</em> 04</span></div>
+    </section>
+    <section class="page" id="requetes">
+      <div class="runhead"><span class="mark">Prospect Machine</span><span>{html.escape(_("Requêtes exploitables"))}</span></div>
+      <div class="section-header">
+        <p class="eyebrow"><span class="num">IV.</span> {html.escape(_("Requêtes exploitables"))}</p>
+        <h2 class="section-title">{html.escape(_("Exploitation des requêtes."))}</h2>
+        <p class="lede">{html.escape(_("Une sélection limitée aux requêtes utiles pour orienter les titles, FAQ et contenus."))}</p>
+      </div>
+      {query_sections}
+      <div class="pagenum"><span class="mark">{site_name_r}</span><span class="num"><em>p.</em> 05</span></div>
+    </section>
+    {snippets}
+    {breakthrough}
+    {traffic_section}
+    {origin_section}
+    {render_methodology_section(lang=active_lang)}
+    {appendices}
+  </div>
     }}
     a {{ color: var(--color-accent); overflow-wrap: anywhere; word-break: break-word; }}
     h1, h2, h3, h4, p {{ margin-top: 0; }}
