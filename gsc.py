@@ -3572,7 +3572,8 @@ def render_executive_report(report: dict[str, object]) -> str:
     .priority-meta{{display:grid;gap:5px;color:var(--ink-mid);font-size:12.5px;}}
     .priority-meta strong{{display:block;color:var(--ink);font-family:var(--serif);font-weight:500;font-size:16px;letter-spacing:-.005em;}}
     /* Page cards */
-    .page-card{{background:var(--paper);border-top:1px solid var(--rule);padding:22px 0 24px;display:grid;grid-template-columns:28px 1fr;gap:22px;break-inside:avoid;page-break-inside:avoid;margin-bottom:0;}}
+    .page-card{{background:var(--paper);border-top:1px solid var(--rule);padding:22px 0 24px;display:block;break-inside:avoid;page-break-inside:avoid;margin-bottom:0;}}
+    .page-card.has-rank{{display:grid;grid-template-columns:28px 1fr;gap:22px;}}
     .snippet-card,.appendix-card,.query-card{{background:var(--paper);border-top:1px solid var(--line);padding:18px 0;break-inside:avoid;page-break-inside:avoid;margin-bottom:0;}}
     .page-card-rank{{font-family:var(--serif);font-style:italic;font-size:26px;color:var(--muted);line-height:1;letter-spacing:-.02em;padding-top:2px;}}
     .page-card.is-top .page-card-rank{{color:var(--hot);}}
