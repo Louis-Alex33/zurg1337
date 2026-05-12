@@ -3584,12 +3584,12 @@ def render_executive_report(report: dict[str, object]) -> str:
     .priority-badge--high{{color:var(--danger);background:var(--danger-soft);border:1px solid var(--danger-soft);}}
     .priority-badge--medium{{color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-soft);}}
     .priority-badge--low,.priority-badge--dead{{color:var(--gain);background:var(--gain-soft);border:1px solid var(--gain-soft);}}
-    .page-metrics,.data-grid{{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:12px 0;}}
+    .page-metrics,.data-grid{{display:grid;grid-template-columns:repeat(5,minmax(80px,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:12px 0;}}
     .metric,.data-item{{padding:12px 14px 12px 0;border-right:1px solid var(--line);display:grid;gap:2px;min-width:0;}}
     .metric:nth-child(n+2),.data-item:nth-child(n+2){{padding-left:14px;}}
     .metric:last-child,.data-item:last-child{{border-right:0;padding-right:0;}}
     .metric-label,.data-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;margin-bottom:0;}}
-    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:22px;letter-spacing:-.02em;color:var(--ink);line-height:1.1;font-variant-numeric:tabular-nums;display:block;overflow-wrap:anywhere;}}
+    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:22px;letter-spacing:-.02em;color:var(--ink);line-height:1.1;font-variant-numeric:tabular-nums;display:block;overflow-wrap:break-word;word-break:break-word;}}
     .metric.delta .metric-value{{color:var(--hot);font-style:italic;}}
     .mini-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;}}
     .constat-label,.actions-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;margin-bottom:4px;}}
@@ -4075,12 +4075,12 @@ def render_report(report: dict[str, object]) -> str:
     .priority-badge--high,.badge-p1{{color:var(--danger);background:var(--danger-soft);border:1px solid var(--danger-soft);}}
     .priority-badge--medium,.badge-p2{{color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-soft);}}
     .priority-badge--low,.priority-badge--dead,.badge-p3,.badge-dead{{color:var(--gain);background:var(--gain-soft);border:1px solid var(--gain-soft);}}
-    .page-metrics,.metric-row,.data-grid{{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:12px 0;background:transparent;border-radius:0;overflow:visible;}}
+    .page-metrics,.metric-row,.data-grid{{display:grid;grid-template-columns:repeat(5,minmax(80px,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:12px 0;background:transparent;border-radius:0;overflow:visible;}}
     .metric,.data-item{{padding:12px 14px 12px 0;border-right:1px solid var(--line);display:grid;gap:2px;min-width:0;flex:none;background:transparent;}}
     .metric:nth-child(n+2),.data-item:nth-child(n+2){{padding-left:14px;}}
     .metric:last-child,.data-item:last-child{{border-right:0;padding-right:0;}}
     .metric-label,.data-label,.mini-label,.constat-label,.actions-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;margin-bottom:0;}}
-    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:22px;letter-spacing:-.02em;color:var(--ink);line-height:1.1;font-variant-numeric:tabular-nums;display:block;overflow-wrap:anywhere;}}
+    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:22px;letter-spacing:-.02em;color:var(--ink);line-height:1.1;font-variant-numeric:tabular-nums;display:block;overflow-wrap:break-word;word-break:break-word;}}
     .metric--warning .metric-value{{color:var(--hot);font-style:italic;}}
     .metric--positive .metric-value{{color:var(--gain);}}
     .position-bar{{display:flex;align-items:center;gap:10px;margin:-2px 0 14px;}}
@@ -4836,7 +4836,7 @@ def render_report(report: dict[str, object]) -> str:
     .query-card h3, .appendix-card h3 {{ margin: 0 0 10px; color: var(--color-text-primary); }}
     .data-grid {{
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(80px, 1fr));
       gap: 0;
       border: 1px solid var(--color-border-light);
       border-radius: 8px;
@@ -4847,6 +4847,7 @@ def render_report(report: dict[str, object]) -> str:
       padding: 10px 12px;
       border-right: 1px solid var(--color-border-light);
       background: var(--color-bg);
+      min-width: 0;
     }}
     .data-item:last-child {{ border-right: none; }}
     .data-label {{
@@ -4862,7 +4863,9 @@ def render_report(report: dict[str, object]) -> str:
       display: block;
       font-size: 13px;
       color: var(--color-text-primary);
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      white-space: normal;
     }}
     .reliability-note {{
       color: var(--color-text-muted);
