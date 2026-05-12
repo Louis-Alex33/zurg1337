@@ -10,7 +10,7 @@ import math
 import re
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 _HERE = Path(__file__).resolve().parent.parent
 if str(_HERE) not in sys.path:
@@ -147,24 +147,25 @@ def _has_gain_estimate(report: dict) -> bool:
 
 def _render_toolbar(report: dict) -> str:
     active_lang = sanitize_gsc_language(str(report.get("lang") or "fr"))
-    _ = gsc_gettext(active_lang)
     language_paths = report.get("language_paths")
     paths = language_paths if isinstance(language_paths, dict) else {}
     buttons = []
     for lang, label in (("fr", "FR"), ("en", "EN")):
         target = str(paths.get(lang) or report.get("html_output_path") or "")
-        href = _e(Path(target).name) if target else "#"
+        href = f"/files?path={quote(target)}" if target else "#"
         active_class = " is-active" if lang == active_lang else ""
         aria_current = ' aria-current="true"' if lang == active_lang else ""
         buttons.append(
             f'<a class="report-toolbar-button language-toggle{active_class}" '
             f'href="{href}"{aria_current}>{label}</a>'
         )
+    export_label = "Export PDF" if active_lang == "en" else "Exporter en PDF"
+    dashboard_label = "Back to dashboard" if active_lang == "en" else "Retour dashboard"
     return (
         '<div class="report-toolbar no-print">'
-        f'<button class="report-toolbar-button" type="button" onclick="exportPDF()">{_e(_("Exporter en PDF"))}</button>'
+        f'<button class="report-toolbar-button" type="button" onclick="exportPDF()">{_e(export_label)}</button>'
         f'<span class="language-toggle-group">{"".join(buttons)}</span>'
-        f'<a class="report-toolbar-button" href="./">{_e(_("Retour dashboard"))}</a>'
+        f'<a class="report-toolbar-button" href="/">{_e(dashboard_label)}</a>'
         "</div>"
     )
 
@@ -861,8 +862,14 @@ def render_gsc_report(report: dict, *, lang: str = "fr") -> str:
   <style>{GSC_REPORT_STYLE}</style>
 </head>
 <body style="font-family: Inter">
+  {_render_toolbar(report)}
   <div class="doc">
     {''.join(sections)}
   </div>
+  <script>
+    function exportPDF() {{
+      window.print();
+    }}
+  </script>
 </body>
 </html>"""

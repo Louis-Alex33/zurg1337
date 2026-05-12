@@ -776,6 +776,42 @@ GSC_REPORT_STYLE = """
     gap: 26px;
   }
 
+  .report-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 10px 30px;
+    background: rgba(250, 249, 244, .96);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .report-toolbar-button {
+    appearance: none;
+    border: 1px solid var(--line-strong);
+    background: var(--paper);
+    color: var(--ink-soft);
+    border-radius: 4px;
+    padding: 7px 12px;
+    font: 600 11.5px/1 var(--sans);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .report-toolbar-button:hover { background: var(--paper-warm); }
+  .language-toggle.is-active {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--paper);
+  }
+  .language-toggle-group {
+    display: inline-flex;
+    gap: 6px;
+  }
+
   .page {
     background: var(--paper);
     border-radius: 4px;
@@ -2007,6 +2043,7 @@ GSC_REPORT_STYLE = """
   @page { size: A4; margin: 0; }
   @media print {
     html, body { background: var(--paper); }
+    .no-print { display: none !important; }
     .doc { padding: 0; gap: 0; max-width: none; }
     .page {
       box-shadow: none;
