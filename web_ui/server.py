@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ipaddress
+import html
+import re
 import threading
 from email.parser import BytesParser
 from email.policy import default
@@ -11,6 +13,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from utils import CLIError
 
 from .fs_ops import delete_managed_file, reset_pipeline_outputs, resolve_local_file, save_uploaded_gsc_file
+from . import _root_dir
 from .jobs import (
     clear_finished_jobs,
     create_job,
@@ -24,6 +27,82 @@ from .jobs import (
 from .rendering import render_audit_html_as_toggleable_report, render_dashboard, render_file_page, render_job_page
 
 MAX_POST_BODY_BYTES = 52_428_800
+
+
+def ensure_gsc_report_toolbar(file_path, html_doc: str) -> str:  # type: ignore[no-untyped-def]
+    if "Google Search Console" not in html_doc or "Prospect Machine" not in html_doc or 'class="doc"' not in html_doc:
+        return html_doc
+
+    active_lang = "en" if re.search(r'<html[^>]+lang=["\']en["\']', html_doc, flags=re.I) or file_path.name.endswith(".en.html") else "fr"
+    toolbar = render_served_gsc_toolbar(file_path, active_lang)
+    style = """
+<style id="served-gsc-toolbar-style">
+  body { padding-top: 52px; }
+  .report-toolbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    margin: 0; padding: 10px max(18px, calc((100vw - 920px) / 2 + 30px));
+    background: rgba(250, 249, 244, .96); border-bottom: 1px solid #e0dcce;
+    display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+  }
+  .report-toolbar-button {
+    appearance: none; border: 1px solid #c9c4b1; background: #faf9f4; color: #2a2f3a;
+    border-radius: 4px; padding: 7px 12px; font: 600 11.5px/1 Inter, system-ui, sans-serif;
+    text-decoration: none; cursor: pointer;
+  }
+  .language-toggle.is-active { background: #0c0f14; border-color: #0c0f14; color: #faf9f4; }
+  .language-toggle-group { display: inline-flex; gap: 6px; }
+  @media print { body { padding-top: 0; } .no-print { display: none !important; } }
+</style>
+"""
+
+    if "report-toolbar" in html_doc:
+        if "served-gsc-toolbar-style" in html_doc:
+            return html_doc
+        return html_doc.replace("</head>", style + "\n</head>", 1)
+
+    updated = html_doc.replace("</head>", style + "\n</head>", 1)
+    if "function exportPDF" not in updated:
+        updated = updated.replace(
+            "</body>",
+            "<script>function exportPDF() { window.print(); }</script>\n</body>",
+            1,
+        )
+    if "<body" in updated:
+        return re.sub(r"(<body[^>]*>)", r"\1\n  " + toolbar, updated, count=1, flags=re.I)
+    return toolbar + updated
+
+
+def render_served_gsc_toolbar(file_path, active_lang: str) -> str:  # type: ignore[no-untyped-def]
+    root_dir = _root_dir()
+    try:
+        relative = str(file_path.relative_to(root_dir))
+    except ValueError:
+        relative = str(file_path)
+
+    if relative.endswith(".en.html"):
+        fr_target = relative[: -len(".en.html")] + ".html"
+        en_target = relative
+    else:
+        fr_target = relative
+        en_target = relative[: -len(".html")] + ".en.html" if relative.endswith(".html") else relative
+
+    export_label = "Export PDF" if active_lang == "en" else "Exporter en PDF"
+    dashboard_label = "Back to dashboard" if active_lang == "en" else "Retour dashboard"
+    buttons = []
+    for button_lang, label, target in (("fr", "FR", fr_target), ("en", "EN", en_target)):
+        active_class = " is-active" if button_lang == active_lang else ""
+        aria_current = ' aria-current="true"' if button_lang == active_lang else ""
+        buttons.append(
+            f'<a class="report-toolbar-button language-toggle{active_class}" '
+            f'href="/files?path={quote(target)}"{aria_current}>{label}</a>'
+        )
+    return (
+        '<div class="report-toolbar no-print">'
+        f'<button class="report-toolbar-button" type="button" onclick="exportPDF()">{html.escape(export_label)}</button>'
+        f'<span class="language-toggle-group">{"".join(buttons)}</span>'
+        f'<a class="report-toolbar-button" href="/">{html.escape(dashboard_label)}</a>'
+        "</div>"
+    )
 
 
 def launch_ui(host: str = "127.0.0.1", port: int = 8787) -> None:
@@ -214,7 +293,7 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
             if audit_report is not None:
                 self._send_html(audit_report)
                 return
-            self._send_html(file_path.read_text("utf-8", errors="ignore"))
+            self._send_html(ensure_gsc_report_toolbar(file_path, file_path.read_text("utf-8", errors="ignore")))
             return
         self._send_html(render_file_page(file_path, variant=variant, lang=lang))
 

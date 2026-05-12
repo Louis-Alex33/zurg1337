@@ -562,6 +562,36 @@ class WebUITests(unittest.TestCase):
         self.assertIn("lang=en", page)
         self.assertNotIn("old static report", page)
 
+    def test_served_legacy_gsc_html_gets_toolbar_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            report_path = root / "reports" / "gsc_report.html"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            legacy_html = """
+            <html lang="fr">
+            <head><title>GSC</title></head>
+            <body><div class="doc">Prospect Machine · Google Search Console</div></body>
+            </html>
+            """
+
+            import web_ui
+            from web_ui.server import ensure_gsc_report_toolbar
+
+            original_root = web_ui.ROOT_DIR
+            try:
+                web_ui.ROOT_DIR = root.resolve()
+                page = ensure_gsc_report_toolbar(report_path.resolve(), legacy_html)
+            finally:
+                web_ui.ROOT_DIR = original_root
+
+        self.assertIn('class="report-toolbar no-print"', page)
+        self.assertIn("Exporter en PDF", page)
+        self.assertIn(">FR</a>", page)
+        self.assertIn(">EN</a>", page)
+        self.assertIn("Retour dashboard", page)
+        self.assertIn("served-gsc-toolbar-style", page)
+        self.assertIn("function exportPDF()", page)
+
     def test_render_file_page_for_audit_json_supports_portfolio_variant(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
