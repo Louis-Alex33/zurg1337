@@ -3877,8 +3877,10 @@ def render_executive_report(report: dict[str, object]) -> str:
     function exportPDF() {{
       const original = document.title;
       document.title = ‘GSC_Opportunity_Report_’ + new Date().toISOString().slice(0,10);
-      window.print();
-      document.title = original;
+      document.fonts.ready.then(function() {{
+        window.print();
+        document.title = original;
+      }});
     }}
     document.addEventListener(‘DOMContentLoaded’, function() {{
       document.querySelectorAll(‘.position-bar-fill’).forEach(function(bar, index) {{
@@ -5027,8 +5029,10 @@ def render_report(report: dict[str, object]) -> str:
     function exportPDF() {{
       const original = document.title;
       document.title = 'Rapport_SEO_' + new Date().toISOString().slice(0,10);
-      window.print();
-      document.title = original;
+      document.fonts.ready.then(function() {{
+        window.print();
+        document.title = original;
+      }});
     }}
     document.addEventListener('DOMContentLoaded', function() {{
       document.querySelectorAll('.position-bar-fill').forEach(function(bar, index) {{

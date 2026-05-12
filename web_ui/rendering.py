@@ -2208,7 +2208,7 @@ def page_shell(title: str, content: str) -> str:
       printWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Pré-audit SEO public</title>' + styles + '</head><body>' + report.outerHTML + '</body></html>');
       printWindow.document.close();
       printWindow.focus();
-      setTimeout(() => printWindow.print(), 300);
+      printWindow.document.fonts.ready.then(() => printWindow.print());
     }}
 
     function filterCsvTable(input) {{

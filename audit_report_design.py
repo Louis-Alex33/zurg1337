@@ -4845,7 +4845,7 @@ def render_report_script() -> str:
     printWindow.document.close();
     document.body.classList.remove('print-with-annexe');
     printWindow.focus();
-    setTimeout(() => printWindow.print(), 300);
+    printWindow.document.fonts.ready.then(() => printWindow.print());
   }
 
   function toggleAnnexe() {
