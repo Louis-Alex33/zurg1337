@@ -3589,7 +3589,7 @@ def render_executive_report(report: dict[str, object]) -> str:
     .metric:nth-child(n+2),.data-item:nth-child(n+2){{padding-left:14px;}}
     .metric:last-child,.data-item:last-child{{border-right:0;padding-right:0;}}
     .metric-label,.data-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;margin-bottom:0;}}
-    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:22px;letter-spacing:-.02em;color:var(--ink);line-height:1.1;font-variant-numeric:tabular-nums;display:block;overflow-wrap:break-word;word-break:break-word;}}
+    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:13px;letter-spacing:-.01em;color:var(--ink);line-height:1.4;font-variant-numeric:tabular-nums;display:block;overflow-wrap:break-word;word-break:break-word;}}
     .metric.delta .metric-value{{color:var(--hot);font-style:italic;}}
     .mini-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;}}
     .constat-label,.actions-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;margin-bottom:4px;}}
@@ -4080,7 +4080,7 @@ def render_report(report: dict[str, object]) -> str:
     .metric:nth-child(n+2),.data-item:nth-child(n+2){{padding-left:14px;}}
     .metric:last-child,.data-item:last-child{{border-right:0;padding-right:0;}}
     .metric-label,.data-label,.mini-label,.constat-label,.actions-label{{font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700;display:block;margin-bottom:0;}}
-    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:22px;letter-spacing:-.02em;color:var(--ink);line-height:1.1;font-variant-numeric:tabular-nums;display:block;overflow-wrap:break-word;word-break:break-word;}}
+    .metric-value,.data-value{{font-family:var(--serif);font-weight:400;font-size:13px;letter-spacing:-.01em;color:var(--ink);line-height:1.4;font-variant-numeric:tabular-nums;display:block;overflow-wrap:break-word;word-break:break-word;}}
     .metric--warning .metric-value{{color:var(--hot);font-style:italic;}}
     .metric--positive .metric-value{{color:var(--gain);}}
     .position-bar{{display:flex;align-items:center;gap:10px;margin:-2px 0 14px;}}
