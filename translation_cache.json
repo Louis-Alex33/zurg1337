@@ -1372,5 +1372,7 @@
   "Sans export précédent, il ne diagnostique pas une baisse.": "Without a previous export, it does not diagnose a drop.",
   "Prochain rapport — dans 4 semaines.": "Next report — in 4 weeks.",
   "Relancer GSC avec un export de comparaison pour vérifier les effets page par page.": "Relaunch GSC with a comparison export to check the effects page by page.",
-  "contact@prospect-machine.fr": "contact@prospect-machine.fr"
+  "contact@prospect-machine.fr": "contact@prospect-machine.fr",
+  "Résultat actuel non exporté": "Current result not exported",
+  "À vérifier dans Google avant mise en ligne.": "Check in Google before publishing."
 }
