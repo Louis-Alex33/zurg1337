@@ -1182,6 +1182,21 @@ GSC_REPORT_STYLE = """
   .colophon .divider { background: var(--line-strong); }
 
   /* ───────────── LETTRE ───────────── */
+  .letter-page {
+    grid-template-rows: auto auto 1fr auto;
+    align-content: stretch;
+  }
+  .letter-page header,
+  .letter-page .lede,
+  .letter-page .letter-body,
+  .letter-page .letter-sign {
+    width: 100%;
+    max-width: none;
+  }
+  .letter-page .rule-short {
+    width: 100%;
+    height: 1px;
+  }
   .letter-body {
     display: grid;
     grid-template-columns: 1fr;
@@ -1209,6 +1224,14 @@ GSC_REPORT_STYLE = """
     color: var(--ink);
   }
   .letter-body p em { font-style: italic; color: var(--ink-mid); }
+  .letter-page .letter-body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 34px;
+    align-content: start;
+  }
+  .letter-page .letter-body p:first-child {
+    grid-column: 1 / -1;
+  }
   .letter-sign {
     margin-top: 18px;
     display: grid;

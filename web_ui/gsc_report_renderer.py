@@ -419,7 +419,7 @@ def _render_letter(report: dict, site_name: str) -> str:
     query_count = _kpi_metric(report, "Requêtes exploitables", format_number(_source_metric(report, "Requêtes exploitables")))
     generated_at = str(report.get("generated_at") or "")
     return f"""
-    <section class="page">
+    <section class="page letter-page">
       {_runhead("II. Lettre d'analyse")}
       <header>
         <p class="eyebrow"><span class="num">II.</span> Lettre d'analyse</p>
