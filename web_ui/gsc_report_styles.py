@@ -1001,7 +1001,7 @@ GSC_REPORT_STYLE = """
     display: grid;
     grid-template-columns: 1fr;
     gap: 36px;
-    align-content: end;
+    align-content: center;
     justify-items: center;
     text-align: center;
   }
