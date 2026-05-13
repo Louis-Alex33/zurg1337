@@ -518,12 +518,18 @@ def _scatter_point(page: dict) -> dict[str, object]:
     ctr = _pct(_metric(page, "CTR", "Taux de clic"))
     position = _num(_metric(page, "Position"), 20.0)
     expected = ctr_median(position)
+    expected_low = expected * 0.65
+    expected_high = ctr_p75(position)
     return {
         "label": _short_label(page),
+        "url": compact_url_for_display(str(page.get("url") or "")),
         "position": position,
         "ctr": ctr,
+        "expected_low": expected_low,
+        "expected_high": expected_high,
         "impressions": impressions,
         "clicks": clicks,
+        "gain": _gain_label(_metric(page, "Gain estimé", "Potentiel")),
         "hot": impressions >= 50 and ctr < expected * 0.75,
     }
 
@@ -531,7 +537,20 @@ def _scatter_point(page: dict) -> dict[str, object]:
 def _render_scatter(report: dict, site_name: str, *, page_no: int = 5) -> str:
     pages = [_scatter_point(p) for p in list(report.get("priority_pages") or [])[:10]]
     if not pages:
-        pages = [{"label": "Aucune page", "position": 20.0, "ctr": 0.0, "impressions": 1, "clicks": 0, "hot": False}]
+        pages = [
+            {
+                "label": "Aucune page",
+                "url": "",
+                "position": 20.0,
+                "ctr": 0.0,
+                "expected_low": ctr_median(20.0) * 0.65,
+                "expected_high": ctr_p75(20.0),
+                "impressions": 1,
+                "clicks": 0,
+                "gain": "+0",
+                "hot": False,
+            }
+        ]
     axis_min_pos = 0.0
     axis_max_pos = 25.0
     axis_max = 0.04
@@ -549,7 +568,7 @@ def _render_scatter(report: dict, site_name: str, *, page_no: int = 5) -> str:
     high_line = " ".join(f"{x:.1f},{y:.1f}" for x, y in high)
     low_line = " ".join(f"{x:.1f},{y:.1f}" for x, y in low)
     point_markup = []
-    point_legend = []
+    impacted_cards = []
     hottest = next((p for p in sorted(pages, key=lambda p: int(p["impressions"]), reverse=True) if p["hot"]), None)
     for index, p in enumerate(pages, start=1):
         x, y = xy(float(p["position"]), float(p["ctr"]))
@@ -559,8 +578,33 @@ def _render_scatter(report: dict, site_name: str, *, page_no: int = 5) -> str:
             point_markup.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="14" fill="var(--hot)" opacity=".12"></circle>')
         point_markup.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}"></circle>')
         point_markup.append(f'<text x="{x:.1f}" y="{y + 3.4:.1f}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" font-weight="700" fill="#fff">{index}</text>')
-        point_legend.append(
-            f'<li><span>{index}</span><b>{_e(p["label"])}</b><em>{format_percent(float(p["ctr"]))} · pos. {float(p["position"]):.1f}</em></li>'
+        status = "Sous la fourchette" if p["hot"] else "Dans la norme"
+        card_class = "impact-card is-hot" if p["hot"] else "impact-card"
+        gain = str(p["gain"])
+        gain_html = (
+            f'<span class="impact-gain">{_e(gain)} clics/mois</span>'
+            if gain and gain != "+0"
+            else '<span class="impact-gain muted">gain à confirmer</span>'
+        )
+        impacted_cards.append(
+            f"""
+          <article class="{card_class}">
+            <div class="impact-card-head">
+              <span class="impact-rank">{index}</span>
+              <div>
+                <h4>{_e(p["label"])}</h4>
+                <p>{_e(p["url"])}</p>
+              </div>
+            </div>
+            <div class="impact-card-facts">
+              <span><b>{format_percent(float(p["ctr"]))}</b> CTR actuel</span>
+              <span>{format_percent(float(p["expected_low"]))} — {format_percent(float(p["expected_high"]))} attendu</span>
+              <span>pos. <b>{float(p["position"]):.1f}</b></span>
+              <span><b>{format_number(int(p["impressions"]))}</b> impr.</span>
+            </div>
+            <div class="impact-card-foot"><span>{_e(status)}</span>{gain_html}</div>
+          </article>
+"""
         )
     hot_count = sum(1 for p in pages if p["hot"])
     return f"""
@@ -588,7 +632,7 @@ def _render_scatter(report: dict, site_name: str, *, page_no: int = 5) -> str:
           <text x="330" y="350" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="var(--muted)">Position moyenne Google</text>
           <text x="18" y="170" transform="rotate(-90 18 170)" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="var(--muted)">CTR</text>
         </svg>
-        <ol class="chart-point-list">{''.join(point_legend)}</ol>
+        <div class="chart-impact-grid">{''.join(impacted_cards)}</div>
         </div>
         <p class="chart-source">Fourchette attendue : CTR médian à P75 par position, consolidé depuis benchmarks publics AWR, Sistrix et Backlinko. À lire comme repère indicatif, pas comme norme sectorielle absolue.</p>
         <div class="chart-foot">

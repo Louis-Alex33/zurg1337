@@ -1384,34 +1384,43 @@ GSC_REPORT_STYLE = """
   .chart-cap .leg .swatch.bg { background: transparent; border: 1px solid var(--muted-soft); }
   .chart-cap .leg .swatch.band { background: var(--accent-soft); border-radius: 2px; }
 
-  .chart-svg { width: 100%; height: auto; display: block; }
+  .chart-svg {
+    width: 100%;
+    height: 238px;
+    display: block;
+  }
   .chart-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 178px;
-    gap: 18px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
     align-items: start;
   }
-  .chart-point-list {
-    margin: 30px 0 0;
-    padding: 0;
-    list-style: none;
+  .chart-impact-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+  .impact-card {
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,.34);
+    padding: 8px 10px;
     display: grid;
     gap: 7px;
-    border-left: 1px solid var(--line);
-    padding-left: 14px;
+    min-width: 0;
   }
-  .chart-point-list li {
+  .impact-card.is-hot {
+    border-color: rgba(180,83,9,.28);
+    background: rgba(180,83,9,.045);
+  }
+  .impact-card-head {
     display: grid;
-    grid-template-columns: 18px 1fr;
-    gap: 7px;
-    align-items: baseline;
-    font-size: 10.8px;
-    line-height: 1.25;
-    color: var(--ink-mid);
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
   }
-  .chart-point-list li span {
-    width: 16px;
-    height: 16px;
+  .impact-rank {
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     display: inline-grid;
     place-items: center;
@@ -1421,21 +1430,66 @@ GSC_REPORT_STYLE = """
     font-size: 9px;
     font-weight: 700;
   }
-  .chart-point-list li b {
-    display: block;
+  .impact-card.is-hot .impact-rank { background: var(--hot); }
+  .impact-card h4 {
+    margin: 0;
     color: var(--ink);
     font-weight: 600;
+    font-size: 11.8px;
+    line-height: 1.14;
     overflow-wrap: anywhere;
   }
-  .chart-point-list li em {
-    display: block;
+  .impact-card p {
+    margin: 2px 0 0;
     color: var(--muted);
-    font-style: normal;
     font-family: var(--mono);
-    font-size: 9.5px;
+    font-size: 8.2px;
+    line-height: 1.18;
+    overflow-wrap: anywhere;
+  }
+  .impact-card-facts {
+    border-top: 1px solid var(--line);
+    padding-top: 5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 9px;
+    color: var(--ink-mid);
+    font-family: var(--mono);
+    font-size: 8.8px;
+    line-height: 1.2;
+  }
+  .impact-card-facts span {
+    white-space: nowrap;
+  }
+  .impact-card-facts b {
+    color: var(--ink);
+    font-weight: 700;
+  }
+  .impact-card-foot {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+    color: var(--ink-mid);
+    font-size: 10px;
+    line-height: 1.2;
+  }
+  .impact-card-foot > span:first-child {
+    color: var(--ink);
+    font-weight: 700;
+  }
+  .impact-gain {
+    color: var(--hot);
+    font-family: var(--mono);
+    font-size: 9px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .impact-gain.muted {
+    color: var(--muted);
   }
   .chart-source {
-    margin: 10px 0 0;
+    margin: 12px 0 0;
     max-width: 78ch;
     color: var(--muted);
     font-size: 11.5px;

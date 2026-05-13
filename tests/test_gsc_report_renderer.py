@@ -189,7 +189,7 @@ class RenderGscReportTests(unittest.TestCase):
         self.assertIn('<span class="site">example.com</span><span class="url">example.com/tournoi-padel-p1000/</span>', result)
         self.assertNotIn('<span class="site">example.com</span><span class="url">example.com</span>', result)
 
-    def test_scatter_chart_has_numbered_legend_and_source(self) -> None:
+    def test_scatter_chart_has_page_cards_and_source(self) -> None:
         result = render_gsc_report(
             _minimal_report(
                 priority_pages=[
@@ -212,7 +212,9 @@ class RenderGscReportTests(unittest.TestCase):
                 ]
             )
         )
-        self.assertIn("chart-point-list", result)
+        self.assertIn("chart-impact-grid", result)
+        self.assertIn("impact-card", result)
+        self.assertIn("CTR actuel", result)
         self.assertIn("AWR, Sistrix et Backlinko", result)
         self.assertIn(">25</text>", result)
 
