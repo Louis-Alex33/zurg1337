@@ -128,6 +128,29 @@ def _short_label(page: dict) -> str:
     return compact_url_for_display(str(page.get("url") or "")).strip("/") or "Page"
 
 
+def _human_snippet_topic(item: dict) -> str:
+    text = str(item.get("main_query") or _short_label(item)).replace("-", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    if not text:
+        return "Page actuelle"
+    text = text[:1].upper() + text[1:]
+    return re.sub(r"\bp(\d+)\b", lambda match: f"P{match.group(1)}", text, flags=re.I)
+
+
+def _fallback_current_serp(item: dict) -> tuple[str, str]:
+    topic = _human_snippet_topic(item)
+    item_domain = _domain(item.get("url"))
+    title = f"{topic} - {item_domain}" if item_domain else topic
+    intent = str(item.get("main_query") or "").strip()
+    metrics = str(item.get("metrics") or "").strip()
+    desc_parts = []
+    if intent:
+        desc_parts.append(f"Page actuelle positionnée sur « {intent} ».")
+    if metrics:
+        desc_parts.append(f"Signal GSC actuel : {metrics}.")
+    return title, " ".join(desc_parts) or "Page actuelle identifiée par l'export Google Search Console."
+
+
 def _gain_range(report: dict) -> tuple[str, str]:
     value = translate_estimated_gain_value(report.get("estimated_gain_value", ""), "fr")
     nums = [
@@ -649,13 +672,16 @@ def _render_snippets(report: dict, site_name: str) -> str:
         after_meta = str(item.get("meta_example") or "")
         before_title = str(item.get("current_title") or "")
         before_meta = str(item.get("current_meta") or "")
-        before_unavailable = not (before_title or before_meta)
+        before_stamp = "Avant"
+        if not (before_title or before_meta):
+            before_title, before_meta = _fallback_current_serp(item)
+            before_stamp = "Avant estimé"
         blocks.append(
             f"""
       <article class="snippet-block">
         <div class="snippet-title-row"><h4>{_e(_short_label(item))}</h4><span class="snippet-meta"><b>{_e(item.get("metrics") or "")}</b></span></div>
         <div class="serp-pair">
-          {_render_serp(domain, before_title, before_meta, "Avant", unavailable=before_unavailable)}
+          {_render_serp(domain, before_title, before_meta, before_stamp)}
           <div class="serp-arrow">→</div>
           {_render_serp(domain, after_title, after_meta, "Après", True)}
         </div>

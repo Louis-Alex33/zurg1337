@@ -273,6 +273,7 @@ def run_gsc_analysis(
     )
     apply_cannibalization_groups(results, cannibalization_groups)
     vary_repeated_recommendations(results)
+    current_snippet_metadata = load_latest_audit_snippet_metadata(site_name or infer_domain_from_results(results))
     write_csv(results, output_csv)
     if mode == "executive" or export_csv:
         write_executive_exports(
@@ -280,6 +281,7 @@ def run_gsc_analysis(
             queries=queries,
             output_dir=annexes_dir or str(Path(output_csv).parent or "."),
             cannibalization_groups=cannibalization_groups,
+            current_metadata=current_snippet_metadata,
         )
     if output_json:
         write_json(results, output_json)
@@ -1431,6 +1433,57 @@ def normalize_url_for_query_match(url: str) -> str:
     return value.rstrip("/")
 
 
+def load_latest_audit_snippet_metadata(site_name: str, audit_root: str | Path = "reports/audits") -> dict[str, dict[str, str]]:
+    domain = infer_domain_from_site_name(site_name)
+    if not domain:
+        return {}
+    folder = Path(audit_root) / domain
+    if not folder.exists():
+        return {}
+
+    metadata: dict[str, dict[str, str]] = {}
+    for path in sorted(folder.glob("*.json"), reverse=True):
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            continue
+        pages = payload.get("pages")
+        if not isinstance(pages, list):
+            continue
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            title = _clean_snippet_metadata_text(page.get("title"))
+            meta = _clean_snippet_metadata_text(page.get("meta_description"))
+            if not (title or meta):
+                continue
+            urls = [
+                page.get("url"),
+                page.get("final_url"),
+                page.get("requested_url"),
+                page.get("canonical"),
+            ]
+            urls.extend(page.get("all_requested_urls") or [])
+            for url in urls:
+                key = normalize_url_for_query_match(str(url or ""))
+                if key and key not in metadata:
+                    metadata[key] = {"title": title, "meta": meta}
+    return metadata
+
+
+def infer_domain_from_site_name(site_name: str) -> str:
+    value = str(site_name or "").strip()
+    if not value:
+        return ""
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    return (parsed.netloc or parsed.path).replace("www.", "").strip("/")
+
+
+def _clean_snippet_metadata_text(value: object) -> str:
+    return re.sub(r"\s+", " ", html.unescape(str(value or ""))).strip()
+
+
 def classify_page_type(url: str, main_query: str = "") -> str:
     text = strip_accents(f"{url} {main_query}").lower()
     if any(term in text for term in ("comparatif", "meilleur", "avis", "test-", "/test", "guide-achat")):
@@ -1787,6 +1840,7 @@ def write_executive_exports(
     queries: list[GSCQueryData],
     output_dir: str,
     cannibalization_groups: list[dict[str, Any]],
+    current_metadata: dict[str, dict[str, str]] | None = None,
 ) -> list[Path]:
     folder = Path(output_dir)
     folder.mkdir(parents=True, exist_ok=True)
@@ -1796,7 +1850,7 @@ def write_executive_exports(
         row
         for item in results
         if is_snippet_opportunity(item)
-        for row in [snippet_export_row(item)]
+        for row in [snippet_export_row(item, current_metadata=current_metadata)]
         if row
     ]
     cannibalization_rows = [cannibalization_export_row(group) for group in cannibalization_groups]
@@ -1860,7 +1914,10 @@ def queries_opportunity_export_row(query: GSCQueryData, results: list[GSCPageAna
     }
 
 
-def snippet_export_row(item: GSCPageAnalysis) -> dict[str, object]:
+def snippet_export_row(
+    item: GSCPageAnalysis,
+    current_metadata: dict[str, dict[str, str]] | None = None,
+) -> dict[str, object]:
     snippet = generate_snippet_recommendation(
         page=item.url,
         main_query=item.main_query or keyword_phrase_from_url(item.url),
@@ -1871,10 +1928,11 @@ def snippet_export_row(item: GSCPageAnalysis) -> dict[str, object]:
     )
     if not snippet.get("title"):
         return {}
+    current = (current_metadata or {}).get(normalize_url_for_query_match(item.url), {})
     return {
         "url": item.url,
         "main_query": item.main_query,
-        "current_title": "",
+        "current_title": current.get("title", ""),
         "suggested_title": snippet["title"],
         "suggested_meta": snippet["meta"],
         "reason": snippet["reason"],
@@ -1976,6 +2034,7 @@ def build_report(
     )
 
     domain = site_name or infer_domain_from_results(results)
+    current_snippet_metadata = load_latest_audit_snippet_metadata(domain)
     title = "Plan d’action SEO basé sur Google Search Console"
     total_clicks = sum(item.clicks for item in results)
     total_impressions = sum(item.impressions for item in results)
@@ -2009,7 +2068,11 @@ def build_report(
     merged_results = merge_url_variant_results(results, url_variant_pairs)
     priority_pages = build_priority_page_cards(merged_results)[:10]
     priority_page_urls = {normalize_url_for_query_match(str(page.get("url", ""))) for page in priority_pages}
-    snippet_pages = build_snippet_cards(merged_results, excluded_urls=priority_page_urls)[:10]
+    snippet_pages = build_snippet_cards(
+        merged_results,
+        excluded_urls=priority_page_urls,
+        current_metadata=current_snippet_metadata,
+    )[:10]
     snippet_count = len(snippet_pages)
     quick_decisions = build_quick_decisions(priority_pages, snippet_pages, query_opportunities_count, lang=active_lang)
 
@@ -2609,6 +2672,7 @@ def _inject_distinctive_token(title: str, existing_title: str, main_query: str) 
 def build_snippet_cards(
     results: list[GSCPageAnalysis],
     excluded_urls: set[str] | None = None,
+    current_metadata: dict[str, dict[str, str]] | None = None,
 ) -> list[dict[str, object]]:
     excluded = excluded_urls or set()
     cards: list[dict[str, object]] = []
@@ -2618,7 +2682,7 @@ def build_snippet_cards(
             or normalize_url_for_query_match(item.url) in excluded
         ):
             continue
-        card = snippet_to_report_dict(item)
+        card = snippet_to_report_dict(item, current_metadata=current_metadata)
         if card:
             card = _diversify_snippet_card(card, cards, item)
             cards.append(card)
@@ -3145,7 +3209,10 @@ def precise_actions_for_page(item: GSCPageAnalysis) -> list[str]:
     return (list(dict.fromkeys(actions)) or ["garder la page en suivi et réévaluer lors du prochain export GSC"])[:5]
 
 
-def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
+def snippet_to_report_dict(
+    item: GSCPageAnalysis,
+    current_metadata: dict[str, dict[str, str]] | None = None,
+) -> dict[str, object]:
     keyword = item.main_query or keyword_phrase_from_url(item.url)
     recommendation = generate_snippet_recommendation(
         page=item.url,
@@ -3157,10 +3224,13 @@ def snippet_to_report_dict(item: GSCPageAnalysis) -> dict[str, object]:
     )
     if not recommendation.get("title"):
         return {}
+    current = (current_metadata or {}).get(normalize_url_for_query_match(item.url), {})
     return {
         "url": item.url,
         "slug": display_page_label(item.url),
         "main_query": keyword,
+        "current_title": current.get("title", ""),
+        "current_meta": current.get("meta", ""),
         "priority": priority_css_class(item),
         "problem": snippet_problem_for_page(item),
         "intent": probable_intent_from_keyword(keyword),

@@ -153,6 +153,25 @@ class RenderGscReportTests(unittest.TestCase):
         self.assertIn("priorities-list", result)
         self.assertIn("Améliorer les résultats Google", result)
 
+    def test_snippet_before_fallback_is_readable(self) -> None:
+        result = render_gsc_report(
+            _minimal_report(
+                snippet_pages=[
+                    {
+                        "url": "https://example.com/tournoi-padel-p1000/",
+                        "slug": "Tournoi padel P1000",
+                        "main_query": "tournoi padel p1000",
+                        "title_example": "Tournoi P1000 padel : niveau et points",
+                        "meta_example": "Repères utiles pour comprendre le niveau P1000.",
+                        "metrics": "1 000 impressions · taux de clic 0,5 % · position 8.0",
+                    }
+                ]
+            )
+        )
+        self.assertIn("Avant estimé", result)
+        self.assertIn("Tournoi padel P1000 - example.com", result)
+        self.assertNotIn("Résultat actuel non exporté", result)
+
     def test_annex_links_rendered(self) -> None:
         result = render_gsc_report(_minimal_report())
         self.assertIn("pages_opportunities.csv", result)
