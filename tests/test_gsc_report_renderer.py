@@ -168,9 +168,53 @@ class RenderGscReportTests(unittest.TestCase):
                 ]
             )
         )
-        self.assertIn("Avant estimé", result)
+        self.assertIn("Avant", result)
+        self.assertNotIn("Avant estimé", result)
         self.assertIn("Tournoi padel P1000 - example.com", result)
         self.assertNotIn("Résultat actuel non exporté", result)
+
+    def test_serp_mockup_uses_domain_once_with_url_line(self) -> None:
+        result = render_gsc_report(
+            _minimal_report(
+                snippet_pages=[
+                    {
+                        "url": "https://example.com/tournoi-padel-p1000/",
+                        "slug": "Tournoi padel P1000",
+                        "title_example": "Tournoi P1000 padel : niveau et points",
+                        "meta_example": "Repères utiles pour comprendre le niveau P1000.",
+                    }
+                ]
+            )
+        )
+        self.assertIn('<span class="site">example.com</span><span class="url">example.com/tournoi-padel-p1000/</span>', result)
+        self.assertNotIn('<span class="site">example.com</span><span class="url">example.com</span>', result)
+
+    def test_scatter_chart_has_numbered_legend_and_source(self) -> None:
+        result = render_gsc_report(
+            _minimal_report(
+                priority_pages=[
+                    {
+                        "url": "https://example.com/test",
+                        "slug": "test",
+                        "priority": "p1",
+                        "priority_label": "P1",
+                        "diagnostic": "Test.",
+                        "recommendation": "",
+                        "metrics": {"Clics": "10", "Impressions": "1 000", "CTR": "0,5 %", "Position": "9.0", "Gain estimé": "+20"},
+                        "action_type_labels": [],
+                        "effort": "Faible",
+                        "impact": "Moyen",
+                        "business_value": "medium",
+                        "monetization_possible": "",
+                        "target_metric": "",
+                        "serp_anomaly": "",
+                    }
+                ]
+            )
+        )
+        self.assertIn("chart-point-list", result)
+        self.assertIn("AWR, Sistrix et Backlinko", result)
+        self.assertIn(">25</text>", result)
 
     def test_annex_links_rendered(self) -> None:
         result = render_gsc_report(_minimal_report())

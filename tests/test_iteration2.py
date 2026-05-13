@@ -31,6 +31,15 @@ def test_detect_url_variants_no_false_positive_on_short_slugs():
     assert detect_url_variants(urls) == []
 
 
+def test_detect_url_variants_no_false_positive_on_numeric_identifiers():
+    urls = [
+        "https://example.com/tournoi-padel-p100/",
+        "https://example.com/tournoi-padel-p1000/",
+        "https://example.com/tournoi-padel-p1500/",
+    ]
+    assert detect_url_variants(urls) == []
+
+
 def test_detect_url_variants_different_domain():
     urls = [
         "https://example.com/test-chassures-padel-kuikma/",

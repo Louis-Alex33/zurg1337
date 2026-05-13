@@ -823,7 +823,8 @@ GSC_REPORT_STYLE = """
     display: grid;
     gap: 28px;
     align-content: start;
-    overflow: hidden;
+    overflow: visible;
+    overflow-wrap: anywhere;
   }
 
   /* ───────────── running header / footer ───────────── */
@@ -990,6 +991,8 @@ GSC_REPORT_STYLE = """
     letter-spacing: 0.04em;
     color: var(--muted);
     line-height: 1.6;
+    max-width: 38ch;
+    overflow-wrap: normal;
   }
   .ref-block strong { color: var(--ink); font-weight: 600; }
 
@@ -1040,9 +1043,9 @@ GSC_REPORT_STYLE = """
     padding: 24px 0 0;
     border-top: 1px solid var(--rule);
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: minmax(84px, auto) minmax(0, 1fr) minmax(22ch, 28ch);
     align-items: center;
-    gap: 28px;
+    gap: 22px;
   }
   .pull-label {
     font-size: 10.5px;
@@ -1067,8 +1070,9 @@ GSC_REPORT_STYLE = """
     text-align: right;
     color: var(--muted);
     font-size: 12px;
-    max-width: 18ch;
+    max-width: 28ch;
     line-height: 1.4;
+    overflow-wrap: normal;
   }
 
   .cover-foot {
@@ -1076,7 +1080,7 @@ GSC_REPORT_STYLE = """
     background: var(--paper-warm);
     border-top: 1px solid var(--line);
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 16px;
   }
   .cover-foot div { display: grid; gap: 4px; }
@@ -1094,6 +1098,7 @@ GSC_REPORT_STYLE = """
     color: var(--ink);
     font-size: 15px;
     letter-spacing: -0.005em;
+    overflow-wrap: anywhere;
   }
 
   /* ───────────── SOMMAIRE ───────────── */
@@ -1347,10 +1352,10 @@ GSC_REPORT_STYLE = """
   }
   .chart-cap {
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 28px;
+    grid-template-columns: 1fr;
+    gap: 10px;
     margin-bottom: 18px;
-    align-items: end;
+    align-items: start;
   }
   .chart-cap h3 {
     margin: 0;
@@ -1363,7 +1368,8 @@ GSC_REPORT_STYLE = """
   }
   .chart-cap .leg {
     display: flex;
-    gap: 18px;
+    gap: 12px;
+    flex-wrap: wrap;
     font-size: 11px;
     color: var(--muted);
     letter-spacing: 0.04em;
@@ -1379,6 +1385,62 @@ GSC_REPORT_STYLE = """
   .chart-cap .leg .swatch.band { background: var(--accent-soft); border-radius: 2px; }
 
   .chart-svg { width: 100%; height: auto; display: block; }
+  .chart-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 178px;
+    gap: 18px;
+    align-items: start;
+  }
+  .chart-point-list {
+    margin: 30px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 7px;
+    border-left: 1px solid var(--line);
+    padding-left: 14px;
+  }
+  .chart-point-list li {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    gap: 7px;
+    align-items: baseline;
+    font-size: 10.8px;
+    line-height: 1.25;
+    color: var(--ink-mid);
+  }
+  .chart-point-list li span {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: inline-grid;
+    place-items: center;
+    background: var(--ink);
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .chart-point-list li b {
+    display: block;
+    color: var(--ink);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .chart-point-list li em {
+    display: block;
+    color: var(--muted);
+    font-style: normal;
+    font-family: var(--mono);
+    font-size: 9.5px;
+  }
+  .chart-source {
+    margin: 10px 0 0;
+    max-width: 78ch;
+    color: var(--muted);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
   .chart-foot {
     margin-top: 18px;
     display: grid;
@@ -1462,6 +1524,7 @@ GSC_REPORT_STYLE = """
     display: grid;
     gap: 4px;
     justify-items: end;
+    max-width: 22ch;
   }
   .tag {
     display: inline-block;
@@ -1475,6 +1538,10 @@ GSC_REPORT_STYLE = """
     border: 1px solid var(--line-strong);
     background: transparent;
     white-space: nowrap;
+  }
+  .effort {
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
   .tag.solid { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   .tag.hot { background: var(--hot); color: #fff; border-color: var(--hot); }
@@ -1662,9 +1729,10 @@ GSC_REPORT_STYLE = """
   .serp-favicon .domain {
     display: grid;
     line-height: 1.25;
+    min-width: 0;
   }
   .serp-favicon .domain .site { font-size: 12.5px; color: #202124; font-weight: 500; }
-  .serp-favicon .domain .url { font-size: 11px; color: #4d5156; font-family: var(--mono); }
+  .serp-favicon .domain .url { font-size: 11px; color: #4d5156; font-family: var(--mono); overflow-wrap: anywhere; }
   .serp-title {
     font-family: "Arial", sans-serif;
     color: #1a0dab;
@@ -2090,7 +2158,7 @@ GSC_REPORT_STYLE = """
       padding: 22mm 22mm 24mm;
       height: 297mm;
       min-height: 0;
-      overflow: hidden;
+      overflow: visible;
       page-break-after: auto;
       break-after: auto;
     }

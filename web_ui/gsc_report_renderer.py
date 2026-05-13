@@ -38,6 +38,7 @@ from .gsc_report_styles import GSC_REPORT_STYLE
 
 
 _INLINE_TAGS = ("em", "b", "strong", "mark", "br")
+_CTR_CARD_AXIS_MAX = 0.06
 
 
 def _e(value: object) -> str:
@@ -304,6 +305,13 @@ def _axis_percent(value: float) -> str:
     return f"{pct:.0f}%".replace(".", ",")
 
 
+def _serp_url_line(domain: str, url: object) -> str:
+    text = str(url or "").strip()
+    if text:
+        return compact_url_for_display(text, max_length=88)
+    return f"https://{domain}/"
+
+
 def _gain_label(value: object) -> str:
     text = str(value or "").strip()
     text = re.sub(r"^jusqu.?à\s*", "", text, flags=re.I)
@@ -524,32 +532,36 @@ def _render_scatter(report: dict, site_name: str, *, page_no: int = 5) -> str:
     pages = [_scatter_point(p) for p in list(report.get("priority_pages") or [])[:10]]
     if not pages:
         pages = [{"label": "Aucune page", "position": 20.0, "ctr": 0.0, "impressions": 1, "clicks": 0, "hot": False}]
-    axis_max = max(0.06, min(0.16, max(float(p["ctr"]) for p in pages) * 1.25))
+    axis_min_pos = 0.0
+    axis_max_pos = 25.0
+    axis_max = 0.04
 
     def xy(position: float, ctr: float) -> tuple[float, float]:
-        x = 80 + min(54, max(0, position - 1)) * (660 / 54)
+        pos = min(axis_max_pos, max(axis_min_pos, position))
+        x = 80 + (pos - axis_min_pos) * (500 / (axis_max_pos - axis_min_pos))
         y = 300 - min(axis_max, max(0.0, ctr)) / axis_max * 270
         return x, y
 
-    positions = [1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 55]
+    positions = [0, 5, 10, 15, 20, 25]
     low = [xy(pos, ctr_median(pos) * 0.65) for pos in positions]
     high = [xy(pos, ctr_p75(max(1, min(20, pos)))) for pos in positions]
     polygon = " ".join(f"{x:.1f},{y:.1f}" for x, y in high + list(reversed(low)))
     high_line = " ".join(f"{x:.1f},{y:.1f}" for x, y in high)
     low_line = " ".join(f"{x:.1f},{y:.1f}" for x, y in low)
     point_markup = []
-    label_candidates = sorted(pages, key=lambda p: int(p["impressions"]), reverse=True)[:6]
-    label_ids = {id(p) for p in label_candidates}
+    point_legend = []
     hottest = next((p for p in sorted(pages, key=lambda p: int(p["impressions"]), reverse=True) if p["hot"]), None)
-    for p in pages:
+    for index, p in enumerate(pages, start=1):
         x, y = xy(float(p["position"]), float(p["ctr"]))
         radius = max(3.5, min(8.0, 2.3 + math.log10(int(p["impressions"]) + 1)))
         color = "var(--hot)" if p["hot"] else "var(--ink)"
         if p is hottest:
             point_markup.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="14" fill="var(--hot)" opacity=".12"></circle>')
         point_markup.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}"></circle>')
-        if id(p) in label_ids:
-            point_markup.append(f'<text x="{x + 9:.1f}" y="{max(18, y - 8):.1f}" font-family="Fraunces, Georgia, serif" font-style="italic" font-size="12" fill="var(--ink)">{_e(p["label"])}</text>')
+        point_markup.append(f'<text x="{x:.1f}" y="{y + 3.4:.1f}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" font-weight="700" fill="#fff">{index}</text>')
+        point_legend.append(
+            f'<li><span>{index}</span><b>{_e(p["label"])}</b><em>{format_percent(float(p["ctr"]))} · pos. {float(p["position"]):.1f}</em></li>'
+        )
     hot_count = sum(1 for p in pages if p["hot"])
     return f"""
     <section class="page">
@@ -564,17 +576,21 @@ def _render_scatter(report: dict, site_name: str, *, page_no: int = 5) -> str:
           <h3>Distribution CTR / position — pages prioritaires</h3>
           <div class="leg"><span><i class="swatch hot"></i>sous-cliqué</span><span><i class="swatch"></i>dans la norme</span><span><i class="swatch band"></i>fourchette attendue</span></div>
         </div>
-        <svg class="chart-svg" viewBox="0 0 760 360" role="img" aria-label="Distribution CTR et position">
-          <rect x="80" y="30" width="660" height="270" fill="transparent" stroke="var(--line)"></rect>
+        <div class="chart-layout">
+        <svg class="chart-svg" viewBox="0 0 610 360" role="img" aria-label="Distribution CTR et position">
+          <rect x="80" y="30" width="500" height="270" fill="transparent" stroke="var(--line)"></rect>
           <polygon points="{polygon}" fill="var(--gain-soft)" opacity=".72"></polygon>
           <polyline points="{high_line}" fill="none" stroke="var(--gain)" stroke-dasharray="4 4"></polyline>
           <polyline points="{low_line}" fill="none" stroke="var(--gain)" stroke-dasharray="4 4" opacity=".7"></polyline>
-          {''.join(f'<line x1="{80 + tick * 660 / 54:.1f}" y1="300" x2="{80 + tick * 660 / 54:.1f}" y2="306" stroke="var(--muted-soft)"></line><text x="{80 + tick * 660 / 54:.1f}" y="328" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--muted)">{tick + 1}</text>' for tick in (0, 4, 9, 14, 19, 29, 39, 49, 54))}
+          {''.join(f'<line x1="{80 + tick * 500 / 25:.1f}" y1="300" x2="{80 + tick * 500 / 25:.1f}" y2="306" stroke="var(--muted-soft)"></line><text x="{80 + tick * 500 / 25:.1f}" y="328" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--muted)">{tick}</text>' for tick in (0, 5, 10, 15, 20, 25))}
           {''.join(f'<line x1="74" y1="{300 - i * 270 / 3:.1f}" x2="80" y2="{300 - i * 270 / 3:.1f}" stroke="var(--muted-soft)"></line><text x="66" y="{304 - i * 270 / 3:.1f}" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--muted)">{format_percent(axis_max * i / 3)}</text>' for i in range(4))}
           {''.join(point_markup)}
-          <text x="410" y="350" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="var(--muted)">Position moyenne Google</text>
+          <text x="330" y="350" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="var(--muted)">Position moyenne Google</text>
           <text x="18" y="170" transform="rotate(-90 18 170)" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="var(--muted)">CTR</text>
         </svg>
+        <ol class="chart-point-list">{''.join(point_legend)}</ol>
+        </div>
+        <p class="chart-source">Fourchette attendue : CTR médian à P75 par position, consolidé depuis benchmarks publics AWR, Sistrix et Backlinko. À lire comme repère indicatif, pas comme norme sectorielle absolue.</p>
         <div class="chart-foot">
           <div class="stat"><span class="v"><em>{hot_count}</em></span><span class="l">pages sous la fourchette</span><span class="d">Signal prioritaire pour les snippets et l'angle d'entrée.</span></div>
           <div class="stat"><span class="v">{format_number(sum(int(p["impressions"]) for p in pages))}</span><span class="l">impressions analysées</span><span class="d">Volume cumulé des pages affichées sur la matrice.</span></div>
@@ -598,7 +614,7 @@ def _render_priority_card(page: dict, index: int, *, compact: bool = False) -> s
     gain = _metric(page, "Gain estimé", "Potentiel")
     ctr_value = _pct(ctr)
     pos_value = _num(position, 20.0)
-    axis_max = max(0.05, ctr_p75(max(1, min(20, round(pos_value)))) * 1.15)
+    axis_max = _CTR_CARD_AXIS_MAX
     target_low = min(100.0, ctr_median(pos_value) * 0.65 / axis_max * 100)
     target_high = min(100.0, ctr_p75(pos_value) / axis_max * 100)
     now_width = min(100.0, ctr_value / axis_max * 100)
@@ -719,7 +735,7 @@ def _render_priority_pages(report: dict, site_name: str, *, start_page: int = 6)
     return "".join(output)
 
 
-def _render_serp(domain: str, title: str, desc: str, stamp: str, after: bool = False, unavailable: bool = False) -> str:
+def _render_serp(domain: str, url: object, title: str, desc: str, stamp: str, after: bool = False, unavailable: bool = False) -> str:
     cls = "serp after" if after else "serp"
     if unavailable:
         cls += " unavailable"
@@ -733,7 +749,7 @@ def _render_serp(domain: str, title: str, desc: str, stamp: str, after: bool = F
     return f"""
         <div class="{cls}">
           <span class="serp-stamp">{_e(stamp)}</span>
-          <div class="serp-favicon"><span class="dot"></span><span class="domain"><span class="site">{_e(domain)}</span><span class="url">{_e(domain)}</span></span></div>
+          <div class="serp-favicon"><span class="dot"></span><span class="domain"><span class="site">{_e(domain)}</span><span class="url">{_e(_serp_url_line(domain, url))}</span></span></div>
           {body}
         </div>
 """
@@ -751,15 +767,14 @@ def _render_snippets(report: dict, site_name: str, *, start_page: int = 8) -> st
         before_stamp = "Avant"
         if not (before_title or before_meta):
             before_title, before_meta = _fallback_current_serp(item)
-            before_stamp = "Avant estimé"
         rendered_blocks.append(
             f"""
       <article class="snippet-block">
         <div class="snippet-title-row"><h4>{_e(_short_label(item))}</h4><span class="snippet-meta"><b>{_e(item.get("metrics") or "")}</b></span></div>
         <div class="serp-pair">
-          {_render_serp(domain, before_title, before_meta, before_stamp)}
+          {_render_serp(domain, item.get("url"), before_title, before_meta, before_stamp)}
           <div class="serp-arrow">→</div>
-          {_render_serp(domain, after_title, after_meta, "Après", True)}
+          {_render_serp(domain, item.get("url"), after_title, after_meta, "Après", True)}
         </div>
         <div class="serp-notes"><div class="col"><h5>Intention</h5><p>{_e(item.get("intent") or item.get("main_query") or "")}</p></div><div class="col"><h5>Angle</h5><p>{_e(item.get("angle") or item.get("problem") or "")}</p></div></div>
       </article>

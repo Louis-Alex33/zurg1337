@@ -193,6 +193,12 @@ def expected_ctr_for_position(position: float) -> float:
     return EXPECTED_CTR_BY_POSITION.get(max(1, min(20, round(position))), 0.004)
 
 
+def ctr_norm_lower_bound_for_position(position: float) -> float:
+    from ctr_benchmarks import ctr_median
+
+    return ctr_median(position) * 0.65
+
+
 def is_snippet_opportunity(item: GSCPageAnalysis) -> bool:
     return (
         item.impressions >= 100
@@ -448,6 +454,21 @@ def diagnostic_for_page(item: GSCPageAnalysis) -> str:
         return "La page ne capte presque pas de trafic et doit être arbitrée plutôt qu'optimisée à l'aveugle."
 
     expected = expected_ctr_for_position(item.position)
+    norm_low = ctr_norm_lower_bound_for_position(item.position)
+
+    if 10 <= item.position <= 20 and item.ctr >= norm_low:
+        return (
+            "La page reste hors top 10, mais son CTR actuel se situe déjà dans la fourchette attendue "
+            "pour cette position. La marge de clic immédiate est limitée ; le levier prioritaire est "
+            "l'enrichissement du contenu et le maillage interne pour franchir le seuil."
+        )
+
+    if item.position < 10 and item.ctr >= norm_low:
+        return (
+            "Le CTR actuel se situe déjà dans la fourchette attendue pour cette position. "
+            "La marge de clic immédiate est limitée ; le gain prioritaire vient plutôt d'un enrichissement "
+            "du contenu, d'un maillage interne plus fort ou d'un suivi GSC après test."
+        )
 
     if item.position < 10:
         if item.ctr < expected * CTR_TOLERANCE:

@@ -6,6 +6,7 @@ Les anciennes données GSC persistent 3-6 mois. Ce module détecte ces paires sa
 from __future__ import annotations
 
 import difflib
+import re
 from urllib.parse import urlparse
 
 
@@ -47,6 +48,8 @@ def detect_url_variants(
             if len(differing) != 1:
                 continue
             seg_a, seg_b = differing[0]
+            if _has_discriminating_numeric_delta(seg_a, seg_b):
+                continue
             # Le segment commun doit être assez long
             min_len = min(len(seg_a), len(seg_b))
             if min_len < 8:
@@ -64,6 +67,38 @@ def _parse_url(url: str) -> tuple[str, list[str]]:
     domain = parsed.netloc.lower()
     segments = [s for s in parsed.path.strip("/").split("/") if s]
     return domain, segments
+
+
+def _split_slug_tokens(segment: str) -> list[str]:
+    return [token for token in re.split(r"[-_]+", segment.lower()) if token]
+
+
+def _token_numeric_signature(token: str) -> tuple[str, str] | None:
+    match = re.fullmatch(r"([a-z]+)?(\d+)([a-z]+)?", token)
+    if not match:
+        return None
+    prefix, number, suffix = match.groups()
+    return f"{prefix or ''}#{suffix or ''}", number
+
+
+def _has_discriminating_numeric_delta(seg_a: str, seg_b: str) -> bool:
+    """Reject variant matches where a numeric slug token is the identifier.
+
+    Example: tournoi-padel-p100, tournoi-padel-p1000 and tournoi-padel-p1500
+    are distinct tournament levels, not typo variants.
+    """
+    tokens_a = _split_slug_tokens(seg_a)
+    tokens_b = _split_slug_tokens(seg_b)
+    if len(tokens_a) != len(tokens_b):
+        return False
+    for token_a, token_b in zip(tokens_a, tokens_b):
+        if token_a == token_b:
+            continue
+        sig_a = _token_numeric_signature(token_a)
+        sig_b = _token_numeric_signature(token_b)
+        if sig_a and sig_b and sig_a[0] == sig_b[0] and sig_a[1] != sig_b[1]:
+            return True
+    return False
 
 
 def merge_variant_pair_metrics(

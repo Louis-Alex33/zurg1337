@@ -89,6 +89,17 @@ class TestDiagnosticForPage(unittest.TestCase):
         result = diagnostic_for_page(page)
         self.assertIn("enrichissement", result.lower())
 
+    def test_ctr_inside_expected_range_mentions_limited_margin(self) -> None:
+        page = _make_page(
+            url="https://example.com/test-chaussures-padel-kuikma-ps-pro/",
+            impressions=900,
+            ctr=0.033,
+            position=7.0,
+        )
+        result = diagnostic_for_page(page)
+        self.assertIn("fourchette attendue", result.lower())
+        self.assertIn("marge", result.lower())
+
     def test_returns_string(self) -> None:
         page = _make_page(opportunity_score=30, score=30.0, position=25.0)
         self.assertIsInstance(diagnostic_for_page(page), str)
