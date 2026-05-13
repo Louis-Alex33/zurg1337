@@ -619,14 +619,23 @@ def _render_priority_page(report: dict, site_name: str, start: int, end: int, pa
 """
 
 
-def _render_serp(domain: str, title: str, desc: str, stamp: str, after: bool = False) -> str:
+def _render_serp(domain: str, title: str, desc: str, stamp: str, after: bool = False, unavailable: bool = False) -> str:
     cls = "serp after" if after else "serp"
+    if unavailable:
+        cls += " unavailable"
+    body = (
+        '<div class="serp-unavailable"><strong>Résultat actuel non exporté</strong><span>À vérifier dans Google avant mise en ligne.</span></div>'
+        if unavailable
+        else f"""
+          {f'<h5 class="serp-title">{_inline(title)}</h5>' if title else ''}
+          {f'<p class="serp-desc">{_inline(desc)}</p>' if desc else ''}
+"""
+    )
     return f"""
         <div class="{cls}">
           <span class="serp-stamp">{_e(stamp)}</span>
           <div class="serp-favicon"><span class="dot"></span><span class="domain"><span class="site">{_e(domain)}</span><span class="url">{_e(domain)}</span></span></div>
-          <h5 class="serp-title">{_inline(title)}</h5>
-          <p class="serp-desc">{_inline(desc)}</p>
+          {body}
         </div>
 """
 
@@ -638,14 +647,15 @@ def _render_snippets(report: dict, site_name: str) -> str:
     for item in snippets:
         after_title = str(item.get("title_example") or item.get("title") or _short_label(item))
         after_meta = str(item.get("meta_example") or "")
-        before_title = str(item.get("current_title") or "(snippet actuel à insérer)")
-        before_meta = str(item.get("current_meta") or "Description actuelle non disponible dans l'export fourni.")
+        before_title = str(item.get("current_title") or "")
+        before_meta = str(item.get("current_meta") or "")
+        before_unavailable = not (before_title or before_meta)
         blocks.append(
             f"""
       <article class="snippet-block">
         <div class="snippet-title-row"><h4>{_e(_short_label(item))}</h4><span class="snippet-meta"><b>{_e(item.get("metrics") or "")}</b></span></div>
         <div class="serp-pair">
-          {_render_serp(domain, before_title, before_meta, "Avant")}
+          {_render_serp(domain, before_title, before_meta, "Avant", unavailable=before_unavailable)}
           <div class="serp-arrow">→</div>
           {_render_serp(domain, after_title, after_meta, "Après", True)}
         </div>

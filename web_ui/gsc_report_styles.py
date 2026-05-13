@@ -1610,6 +1610,10 @@ GSC_REPORT_STYLE = """
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent-soft);
   }
+  .serp.unavailable {
+    border-style: dashed;
+    background: rgba(244, 241, 233, 0.35);
+  }
   .serp-stamp {
     position: absolute;
     top: -10px;
@@ -1658,6 +1662,20 @@ GSC_REPORT_STYLE = """
     margin: 0;
   }
   .serp-desc mark { background: #fef3c7; color: inherit; padding: 0 1px; }
+  .serp-unavailable {
+    margin-top: 6px;
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .serp-unavailable strong {
+    color: var(--ink-mid);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .serp-unavailable span { max-width: 34ch; }
   .serp-arrow {
     display: grid;
     place-items: center;
