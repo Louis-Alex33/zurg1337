@@ -824,7 +824,7 @@ GSC_REPORT_STYLE = """
     gap: 28px;
     align-content: start;
     overflow: visible;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   /* ───────────── running header / footer ───────────── */
@@ -992,7 +992,8 @@ GSC_REPORT_STYLE = """
     color: var(--muted);
     line-height: 1.6;
     max-width: 38ch;
-    overflow-wrap: normal;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
   .ref-block strong { color: var(--ink); font-weight: 600; }
 
@@ -1018,13 +1019,15 @@ GSC_REPORT_STYLE = """
     margin: 0;
     font-family: var(--serif);
     font-weight: 300;
-    font-size: 102px;
-    line-height: 0.96;
+    font-size: clamp(64px, 8.8vw, 92px);
+    line-height: 0.98;
     letter-spacing: -0.035em;
     color: var(--ink);
-    max-width: 100%;
     text-align: center;
-    overflow-wrap: anywhere;
+    max-width: 15ch;
+    overflow-wrap: break-word;
+    word-break: normal;
+    hyphens: none;
   }
   .cover-title em { font-style: italic; font-weight: 300; }
   .cover-title .ul {
@@ -1090,7 +1093,7 @@ GSC_REPORT_STYLE = """
     background: var(--paper-warm);
     border-top: 1px solid var(--line);
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1.45fr) repeat(3, minmax(0, 1fr));
     gap: 16px;
     text-align: center;
   }
@@ -1109,7 +1112,9 @@ GSC_REPORT_STYLE = """
     color: var(--ink);
     font-size: 15px;
     letter-spacing: -0.005em;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
+    hyphens: none;
   }
 
   /* ───────────── SOMMAIRE ───────────── */
@@ -1354,7 +1359,7 @@ GSC_REPORT_STYLE = """
   .ladder-meta .effort { color: var(--muted); font-style: italic; font-family: var(--serif); font-size: 12.5px; }
   .diagnostic-decision .priority-ladder { margin-top: 4px; }
   .diagnostic-decision .ladder-row {
-    grid-template-columns: 28px 1fr auto;
+    grid-template-columns: 28px minmax(0, 1fr);
     gap: 14px;
     padding: 9px 0;
   }
@@ -1367,11 +1372,22 @@ GSC_REPORT_STYLE = """
     font-size: 11.6px;
     line-height: 1.38;
   }
-  .diagnostic-decision .ladder-meta { gap: 2px; }
+  .diagnostic-decision .ladder-meta {
+    grid-column: 2;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    justify-items: start;
+    gap: 5px 8px;
+    min-width: 0;
+    text-align: left;
+  }
   .diagnostic-decision .ladder-meta .effort { font-size: 11.5px; }
   .diagnostic-decision .tag {
     padding: 2px 8px;
     font-size: 9.8px;
+    max-width: 100%;
+    white-space: normal;
   }
 
   /* ───────────── CHART · The Gap ───────────── */
@@ -1471,7 +1487,8 @@ GSC_REPORT_STYLE = """
     font-weight: 600;
     font-size: 11.8px;
     line-height: 1.14;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
   .impact-card p {
     margin: 2px 0 0;
@@ -1479,7 +1496,8 @@ GSC_REPORT_STYLE = """
     font-family: var(--mono);
     font-size: 8.2px;
     line-height: 1.18;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
   .impact-card-facts {
     border-top: 1px solid var(--line);
@@ -1628,7 +1646,8 @@ GSC_REPORT_STYLE = """
     white-space: nowrap;
   }
   .effort {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
     white-space: normal;
   }
   .tag.solid { background: var(--ink); color: var(--paper); border-color: var(--ink); }
