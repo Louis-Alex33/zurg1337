@@ -1313,6 +1313,27 @@ GSC_REPORT_STYLE = """
     font-size: 11px;
   }
   .ladder-meta .effort { color: var(--muted); font-style: italic; font-family: var(--serif); font-size: 12.5px; }
+  .diagnostic-decision .priority-ladder { margin-top: 4px; }
+  .diagnostic-decision .ladder-row {
+    grid-template-columns: 28px 1fr auto;
+    gap: 14px;
+    padding: 9px 0;
+  }
+  .diagnostic-decision .ladder-num { font-size: 19px; }
+  .diagnostic-decision .ladder-body strong {
+    font-size: 15px;
+    margin-bottom: 2px;
+  }
+  .diagnostic-decision .ladder-body p {
+    font-size: 11.6px;
+    line-height: 1.38;
+  }
+  .diagnostic-decision .ladder-meta { gap: 2px; }
+  .diagnostic-decision .ladder-meta .effort { font-size: 11.5px; }
+  .diagnostic-decision .tag {
+    padding: 2px 8px;
+    font-size: 9.8px;
+  }
 
   /* ───────────── CHART · The Gap ───────────── */
   .chart-card {
@@ -2057,6 +2078,12 @@ GSC_REPORT_STYLE = """
     html, body { background: var(--paper); }
     .no-print { display: none !important; }
     .doc { padding: 0; gap: 0; max-width: none; }
+    .toc-row { padding: 12px 0; }
+    .colophon { display: none !important; }
+    .letter-body { gap: 10px; margin: 4px 0; }
+    .letter-body p { font-size: 15px; line-height: 1.55; }
+    .letter-body p .drop { font-size: 54px; }
+    .letter-sign { margin-top: 8px; }
     .page {
       box-shadow: none;
       border-radius: 0;

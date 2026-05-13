@@ -348,24 +348,48 @@ def _render_cover(report: dict, lang: str) -> str:
 """
 
 
-def _render_toc(site_name: str) -> str:
+def _page_range(start: int, count: int = 1) -> str:
+    if count <= 1:
+        return f"{start:02d}"
+    return f"{start:02d} — {start + count - 1:02d}"
+
+
+def _render_toc(
+    site_name: str,
+    *,
+    diagnostic_pages: int = 1,
+    priority_pages: int = 2,
+    snippet_pages: int = 1,
+    query_pages: int = 1,
+    cluster_pages: int = 1,
+    business_pages: int = 1,
+    plan_pages: int = 1,
+    total_pages: int = 12,
+) -> str:
+    scatter_page = 4 + diagnostic_pages
+    priority_start = scatter_page + 1
+    snippets_start = priority_start + priority_pages
+    queries_start = snippets_start + snippet_pages
+    clusters_start = queries_start + query_pages
+    business_start = clusters_start + cluster_pages
+    plan_start = business_start + business_pages
     rows = [
         ("II.", "Lettre d'analyse", "— pourquoi ce rapport, et ce qu'il propose", "03"),
-        ("III.", "État des lieux", "— les chiffres qui comptent", "04"),
-        ("IV.", "L'écart", "— position contre taux de clic, ce que dit le nuage", "05"),
-        ("V.", "Pages prioritaires", "— les dix premières actions", "06 — 08"),
-        ("VI.", "Réécriture des résultats Google", "— avant / après", "09"),
-        ("VII.", "Requêtes exploitables", "— par URL cible et action", "10"),
-        ("VIII.", "Pages en concurrence", "— clusters et variantes d'URL", "11"),
-        ("IX.", "Opportunités commerciales", "— pages à intention business", "12"),
-        ("X.", "Plan d'exécution", "— calendrier 30 jours et clôture", "13"),
+        ("III.", "État des lieux", "— les chiffres qui comptent", _page_range(4, diagnostic_pages)),
+        ("IV.", "L'écart", "— position contre taux de clic, ce que dit le nuage", f"{scatter_page:02d}"),
+        ("V.", "Pages prioritaires", "— les dix premières actions", _page_range(priority_start, priority_pages)),
+        ("VI.", "Réécriture des résultats Google", "— avant / après", _page_range(snippets_start, snippet_pages)),
+        ("VII.", "Requêtes exploitables", "— par URL cible et action", _page_range(queries_start, query_pages)),
+        ("VIII.", "Pages en concurrence", "— clusters et variantes d'URL", _page_range(clusters_start, cluster_pages)),
+        ("IX.", "Opportunités commerciales", "— pages à intention business", _page_range(business_start, business_pages)),
+        ("X.", "Plan d'exécution", "— calendrier 30 jours et clôture", _page_range(plan_start, plan_pages)),
     ]
     return f"""
     <section class="page no-running">
       <header class="toc-head">
         <p class="eyebrow"><span class="num">I.</span> Sommaire</p>
         <h2 class="section-title"><em>Comment lire</em><br>ce rapport.</h2>
-        <p class="lede">Douze pages organisées comme une décision : d'abord ce qu'il faut retenir, puis ce qu'il faut faire — et enfin, les preuves derrière chaque recommandation.</p>
+        <p class="lede">{_e(str(total_pages))} pages organisées comme une décision : d'abord ce qu'il faut retenir, puis ce qu'il faut faire — et enfin, les preuves derrière chaque recommandation.</p>
       </header>
       <div class="toc-grid">
         {''.join(f'<div class="toc-row"><span class="toc-num">{num}</span><span class="toc-title">{_e(title)} <em>{_e(desc)}</em></span><span class="toc-page">p. {page}</span></div>' for num, title, desc, page in rows)}
@@ -429,7 +453,7 @@ def _render_kpi_row(label: str, value: str, foot: str = "", tone: str = "") -> s
     )
 
 
-def _render_diagnostic(report: dict, site_name: str) -> str:
+def _render_diagnostic(report: dict, site_name: str, *, start_page: int = 4) -> str:
     priorities = list(report.get("monthly_priorities") or [])
     ladder = []
     for index, item in enumerate(priorities[:4], start=1):
@@ -445,7 +469,7 @@ def _render_diagnostic(report: dict, site_name: str) -> str:
         ladder.append('<div class="empty-state">Aucune priorité mensuelle exploitable dans l\'export.</div>')
     return f"""
     <section class="page">
-      {_runhead("III. État des lieux")}
+      {_runhead("III. État des lieux · 1 / 2")}
       <header>
         <p class="eyebrow"><span class="num">III.</span> État des lieux</p>
         <h2 class="section-title"><em>Les chiffres</em> qui comptent,<br>et la décision qu'ils dictent.</h2>
@@ -466,8 +490,16 @@ def _render_diagnostic(report: dict, site_name: str) -> str:
           {_render_kpi_row("Position moyenne", _kpi_metric(report, "Position moyenne"), "moyenne pondérée", "")}
         </div>
       </div>
+      {_pagenum(site_name, start_page)}
+    </section>
+    <section class="page diagnostic-decision">
+      {_runhead("III. État des lieux · 2 / 2")}
+      <header>
+        <p class="eyebrow"><span class="num">III.</span> État des lieux <span style="margin-left: 8px; color: var(--muted-soft);">— décision</span></p>
+        <h2 class="section-title-sm" style="margin-top: 8px;"><em>Décision rapide</em> — les leviers à activer d'abord.</h2>
+      </header>
       <div class="priority-ladder">{''.join(ladder)}</div>
-      {_pagenum(site_name, 4)}
+      {_pagenum(site_name, start_page + 1)}
     </section>
 """
 
@@ -488,7 +520,7 @@ def _scatter_point(page: dict) -> dict[str, object]:
     }
 
 
-def _render_scatter(report: dict, site_name: str) -> str:
+def _render_scatter(report: dict, site_name: str, *, page_no: int = 5) -> str:
     pages = [_scatter_point(p) for p in list(report.get("priority_pages") or [])[:10]]
     if not pages:
         pages = [{"label": "Aucune page", "position": 20.0, "ctr": 0.0, "impressions": 1, "clicks": 0, "hot": False}]
@@ -549,7 +581,7 @@ def _render_scatter(report: dict, site_name: str) -> str:
           <div class="stat"><span class="v">{format_number(len(pages))}</span><span class="l">pages prioritaires</span><span class="d">Sélection issue du pipeline GSC existant.</span></div>
         </div>
       </div>
-      {_pagenum(site_name, 5)}
+      {_pagenum(site_name, page_no)}
     </section>
 """
 
@@ -642,6 +674,51 @@ def _render_priority_page(report: dict, site_name: str, start: int, end: int, pa
 """
 
 
+def _render_priority_pages(report: dict, site_name: str, *, start_page: int = 6) -> str:
+    pages = list(report.get("priority_pages") or [])[:10]
+    if not pages:
+        pages = []
+    chunks: list[tuple[list[dict], bool, str]] = []
+    for index in range(0, min(4, len(pages))):
+        chunks.append(([pages[index]], False, f"rang {index + 1}"))
+    for index in range(4, len(pages), 2):
+        end = min(index + 2, len(pages))
+        chunks.append((pages[index:end], True, f"rangs {index + 1} à {end}"))
+    if not chunks:
+        chunks = [([], True, "aucune page")]
+
+    output = []
+    total = len(chunks)
+    for chunk_index, (chunk, compact, label) in enumerate(chunks):
+        first_page = chunk_index == 0
+        body = "".join(
+            _render_priority_card(page, pages.index(page) + 1 if page in pages else idx + 1, compact=compact)
+            for idx, page in enumerate(chunk)
+        )
+        if not body:
+            body = '<div class="empty-state">Aucune page prioritaire disponible dans cet export.</div>'
+        heading = (
+            '<h2 class="section-title"><em>Dix pages,</em><br>par ordre de récupération.</h2>'
+            '<p class="lede">Pour chaque page : position observée, CTR actuel comparé à la fourchette attendue, action recommandée et gain mensuel estimé.</p>'
+            if first_page
+            else '<h2 class="section-title-sm" style="margin-top: 8px;"><em>Pages visibles, sous-cliquées</em> — suite des priorités.</h2>'
+        )
+        output.append(
+            f"""
+    <section class="page">
+      {_runhead(f"V. Pages prioritaires · {chunk_index + 1} / {total}")}
+      <header>
+        <p class="eyebrow"><span class="num">V.</span> Pages prioritaires <span style="margin-left: 8px; color: var(--muted-soft);">— {label}</span></p>
+        {heading}
+      </header>
+      {body}
+      {_pagenum(site_name, start_page + chunk_index)}
+    </section>
+"""
+        )
+    return "".join(output)
+
+
 def _render_serp(domain: str, title: str, desc: str, stamp: str, after: bool = False, unavailable: bool = False) -> str:
     cls = "serp after" if after else "serp"
     if unavailable:
@@ -662,10 +739,10 @@ def _render_serp(domain: str, title: str, desc: str, stamp: str, after: bool = F
 """
 
 
-def _render_snippets(report: dict, site_name: str) -> str:
+def _render_snippets(report: dict, site_name: str, *, start_page: int = 8) -> str:
     domain = _domain(site_name)
     snippets = list(report.get("snippet_pages") or [])[:5]
-    blocks = []
+    rendered_blocks = []
     for item in snippets:
         after_title = str(item.get("title_example") or item.get("title") or _short_label(item))
         after_meta = str(item.get("meta_example") or "")
@@ -675,7 +752,7 @@ def _render_snippets(report: dict, site_name: str) -> str:
         if not (before_title or before_meta):
             before_title, before_meta = _fallback_current_serp(item)
             before_stamp = "Avant estimé"
-        blocks.append(
+        rendered_blocks.append(
             f"""
       <article class="snippet-block">
         <div class="snippet-title-row"><h4>{_e(_short_label(item))}</h4><span class="snippet-meta"><b>{_e(item.get("metrics") or "")}</b></span></div>
@@ -688,24 +765,41 @@ def _render_snippets(report: dict, site_name: str) -> str:
       </article>
 """
         )
-    body = "".join(blocks) if blocks else '<div class="empty-state">Aucun snippet hors top prioritaire dans cet export.</div>'
-    return f"""
-    <section class="page">
-      {_runhead("VI. Réécriture des résultats Google")}
-      <header>
+    if not rendered_blocks:
+        rendered_blocks = ['<div class="empty-state">Aucun snippet hors top prioritaire dans cet export.</div>']
+    pages = []
+    chunk_size = 2
+    for chunk_index, offset in enumerate(range(0, len(rendered_blocks), chunk_size)):
+        chunk = rendered_blocks[offset : offset + chunk_size]
+        if chunk_index == 0:
+            heading = """
         <p class="eyebrow"><span class="num">VI.</span> Réécriture des résultats Google</p>
         <h2 class="section-title"><em>Avant / après</em><br>— ce que Google montrera.</h2>
         <p class="lede">Les propositions conservent les pages sélectionnées par le pipeline et ciblent un meilleur taux de clic.</p>
+"""
+        else:
+            heading = """
+        <p class="eyebrow"><span class="num">VI.</span> Réécriture des résultats Google <span style="margin-left: 8px; color: var(--muted-soft);">— suite</span></p>
+        <h2 class="section-title-sm" style="margin-top: 8px;"><em>Avant / après</em> — suite des résultats à tester.</h2>
+"""
+        pages.append(
+            f"""
+    <section class="page">
+      {_runhead(f"VI. Réécriture des résultats Google · {chunk_index + 1} / {math.ceil(len(rendered_blocks) / chunk_size)}")}
+      <header>
+        {heading}
       </header>
-      {body}
-      {_pagenum(site_name, 8)}
+      {''.join(chunk)}
+      {_pagenum(site_name, start_page + chunk_index)}
     </section>
 """
+        )
+    return "".join(pages)
 
 
-def _render_queries(report: dict, site_name: str) -> str:
+def _render_query_rows(rows_data: list[dict]) -> str:
     rows = []
-    for row in list(report.get("top_query_opportunities") or [])[:15]:
+    for row in rows_data:
         target_url = str(row.get("target_url") or "")
         target_label = resolve_target_label(target_url) if is_resolvable_target(target_url) else _path_label(target_url)
         rows.append(
@@ -719,27 +813,54 @@ def _render_queries(report: dict, site_name: str) -> str:
             f'<td class="r">{_e(str(row.get("position") or "").replace(".", ","))}</td>'
             "</tr>"
         )
+    return "".join(rows)
+
+
+def _render_query_table(rows_data: list[dict]) -> str:
     body = (
         '<div class="table-card"><table><thead><tr><th>Action</th><th>URL cible</th><th>Requêtes principales</th><th class="r">Clics</th><th class="r">Impr.</th><th class="r">CTR</th><th class="r">Pos.</th></tr></thead><tbody>'
-        + "".join(rows)
+        + _render_query_rows(rows_data)
         + "</tbody></table></div>"
-        if rows
+        if rows_data
         else '<div class="empty-state">Export Requêtes non fourni ou aucune requête exploitable détectée.</div>'
     )
-    return f"""
-    <section class="page">
-      {_runhead("VII. Requêtes exploitables")}
-      <header>
+    return body
+
+
+def _render_queries(report: dict, site_name: str, *, start_page: int = 9) -> str:
+    query_rows = list(report.get("top_query_opportunities") or [])[:15]
+    if not query_rows:
+        chunks = [[]]
+    else:
+        chunks = [query_rows[index : index + 6] for index in range(0, len(query_rows), 6)]
+    pages = []
+    for chunk_index, chunk in enumerate(chunks):
+        if chunk_index == 0:
+            heading = """
         <p class="eyebrow"><span class="num">VII.</span> Requêtes exploitables</p>
         <h2 class="section-title"><em>Quinze requêtes</em><br>à traiter dès maintenant.</h2>
+"""
+        else:
+            heading = """
+        <p class="eyebrow"><span class="num">VII.</span> Requêtes exploitables <span style="margin-left: 8px; color: var(--muted-soft);">— suite</span></p>
+        <h2 class="section-title-sm" style="margin-top: 8px;"><em>Requêtes restantes</em> — même logique d'action.</h2>
+"""
+        pages.append(
+            f"""
+    <section class="page">
+      {_runhead(f"VII. Requêtes exploitables · {chunk_index + 1} / {len(chunks)}")}
+      <header>
+        {heading}
       </header>
-      {body}
-      {_pagenum(site_name, 9)}
+      {_render_query_table(chunk)}
+      {_pagenum(site_name, start_page + chunk_index)}
     </section>
 """
+        )
+    return "".join(pages)
 
 
-def _render_clusters(report: dict, site_name: str) -> str:
+def _render_clusters(report: dict, site_name: str, *, start_page: int = 10) -> str:
     cluster_cards = []
     for idx, group in enumerate(list(report.get("cannibalization_groups") or [])[:3], start=1):
         group_id = str(group.get("group_id") or group.get("id") or f"CAN-{idx:02d}")
@@ -754,7 +875,8 @@ def _render_clusters(report: dict, site_name: str) -> str:
       </article>
 """
         )
-    clusters = "".join(cluster_cards) if cluster_cards else '<div class="empty-state">Aucun cluster de cannibalisation significatif détecté.</div>'
+    if not cluster_cards:
+        cluster_cards = ['<div class="empty-state">Aucun cluster de cannibalisation significatif détecté.</div>']
     variants = []
     for pair in list(report.get("url_variant_pairs") or [])[:5]:
         canonical = str(pair.get("canonical_url") or pair.get("url_b") or "")
@@ -775,21 +897,41 @@ def _render_clusters(report: dict, site_name: str) -> str:
         if variants
         else ""
     )
-    return f"""
+    pages = []
+    total_pages = len(cluster_cards) + (1 if variant_block else 0)
+    for index, card in enumerate(cluster_cards):
+        pages.append(
+            f"""
     <section class="page">
-      {_runhead("VIII. Pages en concurrence")}
+      {_runhead(f"VIII. Pages en concurrence · {index + 1} / {total_pages}")}
       <header>
         <p class="eyebrow"><span class="num">VIII.</span> Pages en concurrence</p>
-        <h2 class="section-title"><em>Clusters et variantes</em><br>— ce qui se chevauche.</h2>
+        <h2 class="section-title{'-sm' if index else ''}"><em>Clusters et variantes</em><br>— ce qui se chevauche.</h2>
       </header>
-      <div class="cluster-section">{clusters}</div>
-      {variant_block}
-      {_pagenum(site_name, 10)}
+      <div class="cluster-section">{card}</div>
+      {_pagenum(site_name, start_page + index)}
     </section>
 """
+        )
+    if variant_block:
+        page_no = start_page + len(cluster_cards)
+        pages.append(
+            f"""
+    <section class="page">
+      {_runhead(f"VIII. Pages en concurrence · {len(cluster_cards) + 1} / {total_pages}")}
+      <header>
+        <p class="eyebrow"><span class="num">VIII.</span> Pages en concurrence <span style="margin-left: 8px; color: var(--muted-soft);">— variantes</span></p>
+        <h2 class="section-title-sm" style="margin-top: 8px;"><em>Variantes d'URL</em> — fusion ou redirection à confirmer.</h2>
+      </header>
+      {variant_block}
+      {_pagenum(site_name, page_no)}
+    </section>
+"""
+        )
+    return "".join(pages)
 
 
-def _render_business(report: dict, site_name: str) -> str:
+def _render_business(report: dict, site_name: str, *, start_page: int = 11) -> str:
     rows = []
     for page in list(report.get("business_opportunities") or [])[:10]:
         rows.append(
@@ -801,25 +943,38 @@ def _render_business(report: dict, site_name: str) -> str:
             f'<td>{_e(page.get("recommendation") or "")}</td>'
             "</tr>"
         )
-    body = (
-        '<div class="table-card"><table><thead><tr><th>Page</th><th>Valeur</th><th>Monétisation</th><th class="r">Score</th><th>Geste recommandé</th></tr></thead><tbody>'
-        + "".join(rows)
-        + "</tbody></table></div>"
-        if rows
-        else '<div class="empty-state">Toutes les pages business à fort potentiel sont déjà traitées dans le top prioritaire.</div>'
-    )
-    return f"""
+    chunks = [rows[index : index + 4] for index in range(0, len(rows), 4)] if rows else [[]]
+    pages = []
+    for index, chunk in enumerate(chunks):
+        section_suffix = "" if index == 0 else '<span style="margin-left: 8px; color: var(--muted-soft);">— suite</span>'
+        title_class = "section-title-sm" if index else "section-title"
+        lede = (
+            '<p class="lede">Hors top 10 prioritaire. À intégrer en relais des actions principales : chaque page demande un verdict d&#x27;expert, un tableau décisionnel et un prochain clic logique.</p>'
+            if index == 0
+            else ""
+        )
+        body = (
+            '<div class="table-card"><table><thead><tr><th>Page</th><th>Valeur</th><th>Monétisation</th><th class="r">Score</th><th>Geste recommandé</th></tr></thead><tbody>'
+            + "".join(chunk)
+            + "</tbody></table></div>"
+            if chunk
+            else '<div class="empty-state">Toutes les pages business à fort potentiel sont déjà traitées dans le top prioritaire.</div>'
+        )
+        pages.append(
+            f"""
     <section class="page">
-      {_runhead("IX. Opportunités commerciales")}
+      {_runhead(f"IX. Opportunités commerciales · {index + 1} / {len(chunks)}")}
       <header>
-        <p class="eyebrow"><span class="num">IX.</span> Opportunités commerciales</p>
-        <h2 class="section-title"><em>Pages à intention</em><br>business — affiliation et tests.</h2>
-        <p class="lede">Hors top 10 prioritaire. À intégrer en relais des actions principales : chaque page demande un verdict d'expert, un tableau décisionnel et un prochain clic logique.</p>
+        <p class="eyebrow"><span class="num">IX.</span> Opportunités commerciales {section_suffix}</p>
+        <h2 class="{title_class}"><em>Pages à intention</em><br>business — affiliation et tests.</h2>
+        {lede}
       </header>
       {body}
-      {_pagenum(site_name, 11)}
+      {_pagenum(site_name, start_page + index)}
     </section>
 """
+        )
+    return "".join(pages)
 
 
 def _deliverables_from_body(body: str) -> list[str]:
@@ -830,7 +985,22 @@ def _deliverables_from_body(body: str) -> list[str]:
     return urls[:5]
 
 
-def _render_plan(report: dict, site_name: str) -> str:
+def _compact_plan_body(body: str, limit: int = 260) -> str:
+    text = str(body or "").strip()
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"Pages concernées\s*:\s*.*?(?=\.\s*Délai|$)", "Pages concernées listées ci-dessous", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
+        return text
+    candidate = text[:limit]
+    for sep in (". ", "; ", " — ", ", "):
+        pos = candidate.rfind(sep)
+        if pos > 140:
+            return candidate[: pos + 1].rstrip()
+    return candidate.rstrip(" ,;") + "..."
+
+
+def _render_plan(report: dict, site_name: str, *, start_page: int = 12) -> str:
     weeks = list(report.get("action_plan_30_days") or [])
     if not weeks:
         weeks = [
@@ -843,28 +1013,49 @@ def _render_plan(report: dict, site_name: str) -> str:
     for index, week in enumerate(weeks[:4], start=1):
         body = str(week.get("body") or "")
         deliverables = _deliverables_from_body(body) or [str(week.get("focus") or "action")]
+        body_display = _compact_plan_body(body)
         week_html.append(
             f"""
       <div class="plan-week">
         <div class="plan-when"><span class="num">{index:02d}</span><span class="label">Semaine</span></div>
-        <div class="plan-body"><h3>{_e(week.get("focus") or week.get("title") or f"Semaine {index}")}</h3><p>{_e(body)}</p><div class="deliverables">{''.join(f'<span>{_e(item)}</span>' for item in deliverables)}</div></div>
+        <div class="plan-body"><h3>{_e(week.get("focus") or week.get("title") or f"Semaine {index}")}</h3><p>{_e(body_display)}</p><div class="deliverables">{''.join(f'<span>{_e(item)}</span>' for item in deliverables)}</div></div>
       </div>
 """
         )
-    return f"""
+    chunks = [week_html[index : index + 2] for index in range(0, len(week_html), 2)] or [[]]
+    pages = []
+    for index, chunk in enumerate(chunks):
+        section_suffix = "" if index == 0 else '<span style="margin-left: 8px; color: var(--muted-soft);">— suite</span>'
+        title_class = "section-title-sm" if index else "section-title"
+        pages.append(
+            f"""
     <section class="page">
-      {_runhead("X. Plan d'exécution")}
+      {_runhead(f"X. Plan d'exécution · {index + 1} / {len(chunks)}")}
       <header>
-        <p class="eyebrow"><span class="num">X.</span> Plan d'exécution</p>
-        <h2 class="section-title"><em>Quatre semaines</em><br>pour activer la marge.</h2>
+        <p class="eyebrow"><span class="num">X.</span> Plan d'exécution {section_suffix}</p>
+        <h2 class="{title_class}"><em>Quatre semaines</em><br>pour activer la marge.</h2>
       </header>
-      <div class="plan-grid">{''.join(week_html)}</div>
-      <header style="margin-top:14px"><p class="eyebrow smallcaps">Lectures à conserver à l'esprit</p></header>
-      <div class="lectures"><div class="col"><h4>Ce que ce rapport dit</h4><ul><li>Le <b>potentiel théorique</b> est un ordre de grandeur, pas une promesse.</li><li>Les <b>positions</b> sont des moyennes GSC.</li><li>Les actions doivent être validées après mise en ligne.</li></ul></div><div class="col"><h4>Ce qu'il ne dit pas</h4><ul><li>Il ne remplace pas un audit technique complet.</li><li>Les signaux de cannibalisation nécessitent une validation manuelle.</li><li>Sans export précédent, il ne diagnostique pas une baisse.</li></ul></div></div>
-      <div class="closing"><div><h3>Prochain rapport — dans 4 semaines.</h3><p>Relancer GSC avec un export de comparaison pour vérifier les effets page par page.</p></div><div class="closing-mark"><strong>Prospect Machine</strong>contact@prospect-machine.fr</div></div>
-      {_pagenum(site_name, 12)}
+      <div class="plan-grid">{''.join(chunk)}</div>
+      {_pagenum(site_name, start_page + index)}
     </section>
 """
+        )
+    closing_page = start_page + len(chunks)
+    pages.append(
+        f"""
+    <section class="page">
+      {_runhead(f"X. Plan d'exécution · {len(chunks) + 1} / {len(chunks) + 1}")}
+      <header>
+        <p class="eyebrow"><span class="num">X.</span> Plan d'exécution <span style="margin-left: 8px; color: var(--muted-soft);">— cadrage</span></p>
+        <h2 class="section-title-sm" style="margin-top: 8px;"><em>Lectures à conserver</em> avant mise en œuvre.</h2>
+      </header>
+      <div class="lectures"><div class="col"><h4>Ce que ce rapport dit</h4><ul><li>Le <b>potentiel théorique</b> est un ordre de grandeur, pas une promesse.</li><li>Les <b>positions</b> sont des moyennes GSC.</li><li>Les actions doivent être validées après mise en ligne.</li></ul></div><div class="col"><h4>Ce qu'il ne dit pas</h4><ul><li>Il ne remplace pas un audit technique complet.</li><li>Les signaux de cannibalisation nécessitent une validation manuelle.</li><li>Sans export précédent, il ne diagnostique pas une baisse.</li></ul></div></div>
+      <div class="closing"><div><h3>Prochain rapport — dans 4 semaines.</h3><p>Relancer GSC avec un export de comparaison pour vérifier les effets page par page.</p></div><div class="closing-mark"><strong>Prospect Machine</strong>contact@prospect-machine.fr</div></div>
+      {_pagenum(site_name, closing_page)}
+    </section>
+"""
+    )
+    return "".join(pages)
 
 
 def render_gsc_report(report: dict, *, lang: str = "fr") -> str:
@@ -873,19 +1064,51 @@ def render_gsc_report(report: dict, *, lang: str = "fr") -> str:
     _ = gsc_gettext(active_lang)
     site_name = _domain(report.get("site_name"))
     title = f"Rapport d'opportunités SEO — {site_name} · Prospect Machine"
+    diagnostic_pages = 2
+    scatter_page = 4 + diagnostic_pages
+    priority_count = len(list(report.get("priority_pages") or [])[:10])
+    priority_pages = min(4, priority_count) + math.ceil(max(0, priority_count - 4) / 2)
+    priority_pages = max(1, priority_pages)
+    snippet_count = len(list(report.get("snippet_pages") or [])[:5])
+    snippet_pages = max(1, math.ceil(max(1, snippet_count) / 2))
+    query_count = len(list(report.get("top_query_opportunities") or [])[:15])
+    query_pages = max(1, math.ceil(max(1, query_count) / 6))
+    cluster_count = len(list(report.get("cannibalization_groups") or [])[:3])
+    variant_count = len(list(report.get("url_variant_pairs") or [])[:5])
+    cluster_pages = max(1, cluster_count) + (1 if variant_count else 0)
+    business_count = len(list(report.get("business_opportunities") or [])[:10])
+    business_pages = max(1, math.ceil(max(1, business_count) / 4))
+    week_count = len(list(report.get("action_plan_30_days") or [])[:4]) or 4
+    plan_pages = max(1, math.ceil(week_count / 2)) + 1
+    priority_start = scatter_page + 1
+    snippets_start = priority_start + priority_pages
+    queries_start = snippets_start + snippet_pages
+    clusters_start = queries_start + query_pages
+    business_start = clusters_start + cluster_pages
+    plan_start = business_start + business_pages
+    total_pages = plan_start + plan_pages - 1
     sections = [
         _render_cover(report, active_lang),
-        _render_toc(site_name),
+        _render_toc(
+            site_name,
+            diagnostic_pages=diagnostic_pages,
+            priority_pages=priority_pages,
+            snippet_pages=snippet_pages,
+            query_pages=query_pages,
+            cluster_pages=cluster_pages,
+            business_pages=business_pages,
+            plan_pages=plan_pages,
+            total_pages=total_pages,
+        ),
         _render_letter(report, site_name),
-        _render_diagnostic(report, site_name),
-        _render_scatter(report, site_name),
-        _render_priority_page(report, site_name, 0, 4, 6, "rangs 1 à 4"),
-        _render_priority_page(report, site_name, 4, 10, 7, "rangs 5 à 10", compact=True),
-        _render_snippets(report, site_name),
-        _render_queries(report, site_name),
-        _render_clusters(report, site_name),
-        _render_business(report, site_name),
-        _render_plan(report, site_name),
+        _render_diagnostic(report, site_name, start_page=4),
+        _render_scatter(report, site_name, page_no=scatter_page),
+        _render_priority_pages(report, site_name, start_page=priority_start),
+        _render_snippets(report, site_name, start_page=snippets_start),
+        _render_queries(report, site_name, start_page=queries_start),
+        _render_clusters(report, site_name, start_page=clusters_start),
+        _render_business(report, site_name, start_page=business_start),
+        _render_plan(report, site_name, start_page=plan_start),
     ]
     return f"""<!DOCTYPE html>
 <html lang="{_e(active_lang)}">
