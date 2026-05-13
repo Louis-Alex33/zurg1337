@@ -651,7 +651,6 @@ def _render_serp(domain: str, title: str, desc: str, stamp: str, after: bool = F
         if unavailable
         else f"""
           {f'<h5 class="serp-title">{_inline(title)}</h5>' if title else ''}
-          {f'<p class="serp-desc">{_inline(desc)}</p>' if desc else ''}
 """
     )
     return f"""

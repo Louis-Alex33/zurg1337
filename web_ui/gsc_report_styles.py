@@ -1654,14 +1654,6 @@ GSC_REPORT_STYLE = """
     margin: 4px 0 2px;
   }
   .serp.after .serp-title { color: #1a0dab; font-weight: 500; }
-  .serp-desc {
-    font-family: "Arial", sans-serif;
-    color: #4d5156;
-    font-size: 12.5px;
-    line-height: 1.45;
-    margin: 0;
-  }
-  .serp-desc mark { background: #fef3c7; color: inherit; padding: 0 1px; }
   .serp-unavailable {
     margin-top: 6px;
     display: grid;
