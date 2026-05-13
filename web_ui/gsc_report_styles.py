@@ -1002,6 +1002,8 @@ GSC_REPORT_STYLE = """
     grid-template-columns: 1fr;
     gap: 36px;
     align-content: end;
+    justify-items: center;
+    text-align: center;
   }
   .cover-cat {
     margin: 0;
@@ -1020,7 +1022,9 @@ GSC_REPORT_STYLE = """
     line-height: 0.96;
     letter-spacing: -0.035em;
     color: var(--ink);
-    max-width: 13ch;
+    max-width: 100%;
+    text-align: center;
+    overflow-wrap: anywhere;
   }
   .cover-title em { font-style: italic; font-weight: 300; }
   .cover-title .ul {
@@ -1036,6 +1040,7 @@ GSC_REPORT_STYLE = """
     color: var(--ink-mid);
     max-width: 36ch;
     letter-spacing: -0.01em;
+    text-align: center;
   }
 
   .cover-pull {
@@ -1043,9 +1048,13 @@ GSC_REPORT_STYLE = """
     padding: 24px 0 0;
     border-top: 1px solid var(--rule);
     display: grid;
-    grid-template-columns: minmax(84px, auto) minmax(0, 1fr) minmax(22ch, 28ch);
+    grid-template-columns: 1fr;
     align-items: center;
-    gap: 22px;
+    justify-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 792px;
+    text-align: center;
   }
   .pull-label {
     font-size: 10.5px;
@@ -1055,6 +1064,7 @@ GSC_REPORT_STYLE = """
     font-weight: 700;
     max-width: 12ch;
     line-height: 1.4;
+    text-align: center;
   }
   .pull-number {
     font-family: var(--serif);
@@ -1067,7 +1077,7 @@ GSC_REPORT_STYLE = """
   }
   .pull-number .dash { color: var(--hot); margin: 0 6px; font-style: italic; }
   .pull-unit {
-    text-align: right;
+    text-align: center;
     color: var(--muted);
     font-size: 12px;
     max-width: 28ch;
@@ -1082,8 +1092,9 @@ GSC_REPORT_STYLE = """
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 16px;
+    text-align: center;
   }
-  .cover-foot div { display: grid; gap: 4px; }
+  .cover-foot div { display: grid; gap: 4px; justify-items: center; }
   .cover-foot .lbl {
     text-transform: uppercase;
     letter-spacing: 0.16em;
