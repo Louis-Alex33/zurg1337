@@ -2212,12 +2212,13 @@ GSC_REPORT_STYLE = """
   .lectures .col ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
   .lectures .col li {
     display: grid;
-    grid-template-columns: 14px 1fr;
+    grid-template-columns: 14px minmax(0, 1fr);
     gap: 10px;
     font-size: 12.5px;
     line-height: 1.55;
     color: var(--ink-mid);
   }
+  .lectures .col li > span { min-width: 0; }
   .lectures .col li::before {
     content: "·";
     font-family: var(--serif);
