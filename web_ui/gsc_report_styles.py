@@ -1602,6 +1602,7 @@ GSC_REPORT_STYLE = """
     border-radius: 8px;
     padding: 16px 18px 18px;
     display: grid;
+    align-content: start;
     gap: 4px;
     position: relative;
   }
