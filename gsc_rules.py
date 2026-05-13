@@ -570,13 +570,18 @@ def generate_page_recommendation(
     return "Garder en suivi GSC et prioriser seulement si les impressions ou la position progressent."
 
 
-def build_target_metric(item: GSCPageAnalysis) -> str:
+def _monthly_gain(value: int, period_months: float = 1.0) -> int:
+    months = max(1.0, float(period_months or 1.0))
+    return max(1, round(value / months)) if value > 0 else 0
+
+
+def build_target_metric(item: GSCPageAnalysis, period_months: float = 1.0) -> str:
     """Formate la cible chiffrée CTR + gain estimé pour une page prioritaire."""
     if item.impressions < 10:
         return ""
     result = compute_target_metric(item.position, item.ctr, item.impressions)
-    gain_low = int(result["gain_low"])
-    gain_high = int(result["gain_high"])
+    gain_low = _monthly_gain(int(result["gain_low"]), period_months)
+    gain_high = _monthly_gain(int(result["gain_high"]), period_months)
     ctr_low_target = float(result["ctr_low_target"])
     ctr_high_target = float(result["ctr_high_target"])
     pos_rounded = int(result["pos_rounded"])

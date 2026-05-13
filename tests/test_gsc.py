@@ -27,6 +27,7 @@ from gsc import (
     load_pays,
     match_gsc_page_to_crawl,
     normalize_url_for_matching,
+    period_months_from_label,
     parse_ctr,
     parse_number,
     parse_pages_csv,
@@ -64,6 +65,28 @@ class GSCAnalysisTests(unittest.TestCase):
         self.assertIsNotNone(gain)
         self.assertIn("période analysée", label)
         self.assertNotIn("mois", label.lower())
+
+    def test_period_months_from_last_12_months_label(self) -> None:
+        self.assertEqual(period_months_from_label("Les 12\u00a0derniers mois"), 12.0)
+
+    def test_build_report_normalizes_displayed_monthly_gain_for_12_month_export(self) -> None:
+        page = GSCPageAnalysis(
+            url="https://example.com/tournoi-padel-p500/",
+            clicks=20,
+            impressions=120000,
+            ctr=0.001,
+            position=8.0,
+            score=80,
+            opportunity_score=80,
+            priority="HIGH",
+            estimated_recoverable_clicks=1200,
+        )
+
+        report = build_report([page], filters_data={"date": "Les 12\u00a0derniers mois"})
+
+        self.assertEqual(report["period_months"], 12.0)
+        self.assertEqual(report["priority_pages"][0]["metrics"]["Potentiel"], "jusqu’à 100")
+        self.assertNotIn("1200", report["priority_pages"][0]["target_metric"])
 
     def test_build_report_deduplicates_urls_across_sections(self) -> None:
         shared = GSCPageAnalysis(

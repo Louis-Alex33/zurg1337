@@ -172,6 +172,51 @@ def translate_estimated_gain_value(value: object, lang: str) -> str:
     return translated if translated else text
 
 
+def period_months_from_label(value: object) -> float:
+    """Retourne la durée approximative de l'export GSC en mois.
+
+    La Search Console fournit souvent une période textuelle ("Les 12 derniers mois").
+    Les gains calculés utilisent toute cette période; cette durée sert uniquement à
+    convertir les affichages libellés "par mois".
+    """
+    text = strip_accents(str(value or "").replace("\xa0", " ")).lower()
+    if not text:
+        return 1.0
+
+    month_match = re.search(r"(\d+)\s+derniers?\s+mois", text)
+    if month_match:
+        return max(1.0, float(month_match.group(1)))
+
+    day_match = re.search(r"(\d+)\s+derniers?\s+jours?", text)
+    if day_match:
+        return max(1.0, float(day_match.group(1)) / 30.4375)
+
+    date_tokens = re.findall(r"\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4}", text)
+    parsed_dates: list[datetime] = []
+    for token in date_tokens[:2]:
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+            try:
+                parsed_dates.append(datetime.strptime(token, fmt))
+                break
+            except ValueError:
+                continue
+    if len(parsed_dates) >= 2:
+        days = abs((parsed_dates[1] - parsed_dates[0]).days) + 1
+        return max(1.0, days / 30.4375)
+
+    return 1.0
+
+
+def period_months_from_filters(filters: dict[str, str]) -> float:
+    return period_months_from_label(filters.get("date"))
+
+
+def monthly_click_gain(value: int | float | None, period_months: float = 1.0) -> int:
+    raw = int(round(float(value or 0)))
+    months = max(1.0, float(period_months or 1.0))
+    return max(1, round(raw / months)) if raw > 0 else 0
+
+
 def client_display_value(value: object, lang: str = "fr") -> str:
     text = str(value or "")
     if sanitize_gsc_language(lang) != "fr":
@@ -2032,6 +2077,7 @@ def build_report(
         if pages_csv and not isinstance(pages_csv, list)
         else {}
     )
+    period_months = period_months_from_filters(filters)
 
     domain = site_name or infer_domain_from_results(results)
     current_snippet_metadata = load_latest_audit_snippet_metadata(domain)
@@ -2062,11 +2108,11 @@ def build_report(
     priority_count = sum(1 for item in results if item.priority in {"HIGH", "MEDIUM"} and not is_dead_gsc_page(item))
     query_opportunities = select_query_opportunities(queries)
     query_opportunities_count = len(query_opportunities)
-    sections = assign_report_sections(results)
+    sections = assign_report_sections(results, period_months=period_months)
     has_query_export = has_queries if has_queries is not None else bool(queries)
     url_variant_pairs = detect_url_variants([item.url for item in results if item.url])
     merged_results = merge_url_variant_results(results, url_variant_pairs)
-    priority_pages = build_priority_page_cards(merged_results)[:10]
+    priority_pages = build_priority_page_cards(merged_results, period_months=period_months)[:10]
     priority_page_urls = {normalize_url_for_query_match(str(page.get("url", ""))) for page in priority_pages}
     snippet_pages = build_snippet_cards(
         merged_results,
@@ -2085,13 +2131,15 @@ def build_report(
             gain_low_total += lo
             gain_high_total += hi
     gain_high_total = max(gain_low_total, gain_high_total)
+    gain_low_monthly = monthly_click_gain(gain_low_total, period_months)
+    gain_high_monthly = monthly_click_gain(gain_high_total, period_months)
 
     if gain_low_total > 0:
         estimated_gain_value = (
-            f"{format_number(gain_low_total)} à {format_number(gain_high_total)} clics/mois supplémentaires"
+            f"{format_number(gain_low_monthly)} à {format_number(gain_high_monthly)} clics/mois supplémentaires"
         )
         estimated_gain_cover = (
-            f"Potentiel détecté : {format_number(gain_low_total)} à {format_number(gain_high_total)} "
+            f"Potentiel détecté : {format_number(gain_low_monthly)} à {format_number(gain_high_monthly)} "
             f"clics/mois supplémentaires sur 6-8 semaines, sous réserve d’exécution complète des actions prioritaires."
         )
     else:
@@ -2104,6 +2152,7 @@ def build_report(
         "site_name": domain,
         "generated_at": datetime.now().strftime("%d/%m/%Y"),
         "period_label": build_period_label(filters),
+        "period_months": period_months,
         "lang": active_lang,
         "html_output_path": html_output_path,
         "language_paths": language_paths or {},
@@ -2156,11 +2205,11 @@ def build_report(
             "Les résultats Google des pages prioritaires sont détaillés dans la section ci-dessus. "
             "Cette section liste uniquement les pages hors Top 10 prioritaire."
         ),
-        "breakthrough_pages": build_breakthrough_cards(results)[:10],
+        "breakthrough_pages": build_breakthrough_cards(results, period_months=period_months)[:10],
         "query_sections": build_query_sections(queries, results),
         "top_query_opportunities": build_top_query_opportunities(query_opportunities, results, limit=20),
         "business_opportunities": filter_business_opportunities(
-            build_business_opportunities(merged_results), priority_page_urls
+            build_business_opportunities(merged_results, period_months=period_months), priority_page_urls
         )[:10],
         # bug 2B-6 : plan d'action dérivé du même priority_pages (top 10 post-garde-fou + post-cap cluster)
         "action_plan_30_days": build_action_plan_30_days(priority_pages, snippet_pages, cannibalization_groups or []),
@@ -2556,7 +2605,7 @@ def filter_top10_candidates(pages: list[GSCPageAnalysis]) -> list[GSCPageAnalysi
     return filtered
 
 
-def build_priority_page_cards(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
+def build_priority_page_cards(results: list[GSCPageAnalysis], period_months: float = 1.0) -> list[dict[str, object]]:
     ordered = sorted(
         [item for item in results if not is_weak_page(item)],
         key=lambda item: (item.opportunity_score, business_sort_weight(item.business_value), item.estimated_recoverable_clicks or 0, item.impressions),
@@ -2578,7 +2627,7 @@ def build_priority_page_cards(results: list[GSCPageAnalysis]) -> list[dict[str, 
         if slug_key in seen_slugs:
             continue
         seen_slugs.add(slug_key)
-        cards.append(page_to_report_dict(item))
+        cards.append(page_to_report_dict(item, period_months=period_months))
     return cards
 
 
@@ -2689,13 +2738,13 @@ def build_snippet_cards(
     return cards
 
 
-def build_breakthrough_cards(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
+def build_breakthrough_cards(results: list[GSCPageAnalysis], period_months: float = 1.0) -> list[dict[str, object]]:
     candidates = [
         item
         for item in results
         if 4 <= item.position <= 20 and item.impressions >= 50 and item.priority != "DEAD"
     ]
-    return [page_to_breakthrough_dict(item) for item in sorted(candidates, key=lambda row: (row.position, -row.impressions))]
+    return [page_to_breakthrough_dict(item, period_months=period_months) for item in sorted(candidates, key=lambda row: (row.position, -row.impressions))]
 
 
 def build_query_sections(queries: list[GSCQueryData], results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
@@ -2826,7 +2875,7 @@ def _slug_dedup_key(url: str) -> str:
     return " ".join(tokens[:6])
 
 
-def build_business_opportunities(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
+def build_business_opportunities(results: list[GSCPageAnalysis], period_months: float = 1.0) -> list[dict[str, object]]:
     def _generic(item: GSCPageAnalysis) -> bool:
         q = (item.main_query or "").strip().lower()
         if not q:
@@ -2845,7 +2894,7 @@ def build_business_opportunities(results: list[GSCPageAnalysis]) -> list[dict[st
         key=lambda item: (item.opportunity_score, item.impressions, item.estimated_recoverable_clicks or 0),
         reverse=True,
     )
-    return [page_to_report_dict(item) for item in deduped]
+    return [page_to_report_dict(item, period_months=period_months) for item in deduped]
 
 
 def filter_business_opportunities(
@@ -2983,7 +3032,7 @@ def classify_query_recommendation(query: GSCQueryData, results: list[GSCPageAnal
     return "section à ajouter"
 
 
-def assign_report_sections(results: list[GSCPageAnalysis]) -> list[dict[str, object]]:
+def assign_report_sections(results: list[GSCPageAnalysis], period_months: float = 1.0) -> list[dict[str, object]]:
     section_defs = [
         ("opportunites", translate_label("Pages à traiter en premier")),
         ("surveiller", translate_label("Pages qui perdent du terrain")),
@@ -3012,7 +3061,7 @@ def assign_report_sections(results: list[GSCPageAnalysis]) -> list[dict[str, obj
         for item in ordered:
             if item.url in seen_urls or not predicate(item):
                 continue
-            buckets[section_id].append(page_to_report_dict(item))
+            buckets[section_id].append(page_to_report_dict(item, period_months=period_months))
             seen_urls.add(item.url)
 
     return [
@@ -3068,11 +3117,12 @@ def detect_serp_anomaly(position: float, ctr: float) -> str | None:
     return None
 
 
-def page_to_report_dict(item: GSCPageAnalysis, lang: str = "fr") -> dict[str, object]:
+def page_to_report_dict(item: GSCPageAnalysis, lang: str = "fr", period_months: float = 1.0) -> dict[str, object]:
     actions = precise_actions_for_page(item)
     action_types = [action_label_from_type(item.action_type)] if item.action_type else action_types_for_page(actions)
     serp_flag = detect_serp_anomaly(item.position, item.ctr)
-    target_metric = build_target_metric(item)
+    target_metric = build_target_metric(item, period_months=period_months)
+    monthly_potential = monthly_click_gain(item.estimated_recoverable_clicks, period_months)
     # Si SERP features suspectées, enrichir la recommandation
     recommendation = item.recommendation
     if serp_flag and "featured snippet" not in recommendation.lower():
@@ -3092,7 +3142,7 @@ def page_to_report_dict(item: GSCPageAnalysis, lang: str = "fr") -> dict[str, ob
             "Impressions": format_number(item.impressions),
             translate_label("CTR"): format_percent(item.ctr),
             "Position": f"{item.position:.1f}",
-            "Potentiel": f"jusqu’à {format_number(item.estimated_recoverable_clicks)}" if item.estimated_recoverable_clicks else "à confirmer",
+            "Potentiel": f"jusqu’à {format_number(monthly_potential)}" if monthly_potential else "à confirmer",
         },
         "business_value": item.business_value,
         "business_reason": item.business_reason,
@@ -3106,7 +3156,7 @@ def page_to_report_dict(item: GSCPageAnalysis, lang: str = "fr") -> dict[str, ob
         "action_types": ",".join(css_action_type(value) for value in action_types),
         "action_type_labels": action_types,
         "effort": effort_for_page(item, lang=lang),
-        "impact": impact_for_page(item, lang=lang),
+        "impact": impact_for_page(item, lang=lang, period_months=period_months),
         "why": explain_reason(item, lang=lang),
         "overlap_queries": item.possible_overlap_queries[:4],
         "cannibalization": {
@@ -3183,11 +3233,13 @@ def effort_for_page(item: GSCPageAnalysis, lang: str = "fr") -> str:
     return _("Moyen")
 
 
-def impact_for_page(item: GSCPageAnalysis, lang: str = "fr") -> str:
+def impact_for_page(item: GSCPageAnalysis, lang: str = "fr", period_months: float = 1.0) -> str:
     _ = gsc_gettext(lang)
-    if item.estimated_recoverable_clicks:
+    monthly_potential = monthly_click_gain(item.estimated_recoverable_clicks, period_months)
+    if monthly_potential:
         _uncaptured = _("clics non captés")
-        return f"jusqu’à {format_number(item.estimated_recoverable_clicks)} {_uncaptured}"
+        unit = "/ month" if sanitize_gsc_language(lang) == "en" else "/ mois"
+        return f"jusqu’à {format_number(monthly_potential)} {_uncaptured} {unit}"
     if is_snippet_opportunity(item):
         return _("Hausse potentielle du taux de clic")
     if item.position <= 20:
@@ -3258,7 +3310,7 @@ def probable_intent_from_keyword(keyword: str) -> str:
     return "Recherche d’information sur le sujet"
 
 
-def page_to_breakthrough_dict(item: GSCPageAnalysis, lang: str = "fr") -> dict[str, object]:
+def page_to_breakthrough_dict(item: GSCPageAnalysis, lang: str = "fr", period_months: float = 1.0) -> dict[str, object]:
     return {
         "url": item.url,
         "slug": display_page_label(item.url),
@@ -3267,7 +3319,7 @@ def page_to_breakthrough_dict(item: GSCPageAnalysis, lang: str = "fr") -> dict[s
         "clicks": format_number(item.clicks),
         "action": main_action_for_page(item),
         "effort": effort_for_page(item, lang=lang),
-        "impact": impact_for_page(item, lang=lang),
+        "impact": impact_for_page(item, lang=lang, period_months=period_months),
     }
 
 
