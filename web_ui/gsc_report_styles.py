@@ -1432,7 +1432,11 @@ GSC_REPORT_STYLE = """
   }
   .chart-cap .leg .swatch.hot { background: var(--hot); }
   .chart-cap .leg .swatch.bg { background: transparent; border: 1px solid var(--muted-soft); }
-  .chart-cap .leg .swatch.band { background: var(--accent-soft); border-radius: 2px; }
+  .chart-cap .leg .swatch.band {
+    background: var(--gain-soft);
+    border: 1px solid var(--gain);
+    border-radius: 2px;
+  }
 
   .chart-svg {
     width: 100%;
