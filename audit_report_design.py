@@ -3004,26 +3004,27 @@ def render_score_gauge(score: int, score_class: str) -> str:
     gauge = score_gauge_values(score)
     gauge_class = f"gauge-{score_class}"
     return f"""
-        <svg class="score-gauge {gauge_class}" viewBox="0 0 140 140" role="img" aria-label="Score global {score} sur 100">
+        <svg class="score-gauge {gauge_class}" viewBox="0 0 160 160" role="img" aria-label="Score global {score} sur 100">
           <defs>
             <filter id="gauge-shadow" x="-18%" y="-18%" width="136%" height="136%">
-              <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#1A1917" flood-opacity="0.12"></feDropShadow>
+              <feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#1A1917" flood-opacity="0.10"></feDropShadow>
             </filter>
           </defs>
-          <circle class="gauge-plate" cx="70" cy="70" r="58"></circle>
-          <circle class="gauge-track" cx="70" cy="70" r="54"></circle>
-          <circle class="gauge-meter" cx="70" cy="70" r="54"
+          <circle class="gauge-plate" cx="80" cy="80" r="64"></circle>
+          <circle class="gauge-ticks" cx="80" cy="80" r="59"></circle>
+          <circle class="gauge-track" cx="80" cy="80" r="50"></circle>
+          <circle class="gauge-meter" cx="80" cy="80" r="50"
             stroke-dasharray="{gauge['circumference']}"
             stroke-dashoffset="{gauge['offset']}"
-            transform="rotate(-90 70 70)"></circle>
-          <circle class="gauge-center" cx="70" cy="70" r="41"></circle>
-          <text class="gauge-value" x="70" y="67" text-anchor="middle">{score}</text>
-          <text class="gauge-total" x="70" y="88" text-anchor="middle">/100</text>
+            transform="rotate(-90 80 80)"></circle>
+          <circle class="gauge-center" cx="80" cy="80" r="36"></circle>
+          <text class="gauge-value" x="80" y="78" text-anchor="middle">{score}</text>
+          <text class="gauge-total" x="80" y="98" text-anchor="middle">/100</text>
         </svg>"""
 
 
 def score_gauge_values(score: int) -> dict[str, str]:
-    radius = 54
+    radius = 50
     circumference = 2 * math.pi * radius
     offset = circumference - (clamp_score(score) / 100) * circumference
     return {"circumference": f"{circumference:.2f}", "offset": f"{offset:.2f}"}
@@ -5087,50 +5088,58 @@ def render_report_styles() -> str:
     }
     .premium-report .cover-score {
       display: grid;
-      gap: var(--space-lg);
+      gap: 18px;
       justify-items: center;
-      padding: 24px 30px 22px;
-      border: 1px solid rgba(232,228,220,0.88);
-      border-radius: 16px;
+      padding: 10px 0 0;
+      border: 0;
+      border-radius: 0;
       background:
-        radial-gradient(circle at 50% 42%, rgba(255,255,255,0.96) 0 46%, rgba(249,248,246,0.78) 70%, rgba(255,255,255,0.9) 100%);
-      box-shadow: 0 18px 44px rgba(26,25,23,0.08);
+        linear-gradient(90deg, transparent, rgba(232,228,220,0.74), transparent) center bottom / 220px 1px no-repeat;
+      box-shadow: none;
     }
     .premium-report .score-gauge {
       display: block;
-      width: 204px;
-      height: 204px;
+      width: 218px;
+      height: 218px;
       overflow: visible;
       background: transparent;
       color: inherit;
     }
     .premium-report .gauge-plate {
-      fill: rgba(255,255,255,0.72);
+      fill: #FFFFFF;
+      stroke: rgba(232,228,220,0.92);
+      stroke-width: 1;
       filter: url(#gauge-shadow);
     }
+    .premium-report .gauge-ticks {
+      fill: none;
+      stroke: rgba(160,154,148,0.42);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-dasharray: 0.1 7.3;
+    }
     .premium-report .gauge-center {
-      fill: rgba(249,248,246,0.98);
-      stroke: rgba(232,228,220,0.75);
+      fill: #F9F8F6;
+      stroke: rgba(232,228,220,0.88);
       stroke-width: 1;
     }
     .premium-report .gauge-track,
     .premium-report .gauge-meter {
       fill: none;
-      stroke-width: 9;
+      stroke-width: 5;
     }
-    .premium-report .gauge-track { stroke: #E8E1D6; }
+    .premium-report .gauge-track { stroke: rgba(232,228,220,0.88); }
     .premium-report .gauge-meter {
       stroke-linecap: round;
-      filter: url(#gauge-shadow);
       transition: stroke-dashoffset 240ms ease;
     }
     .premium-report .score-gauge.gauge-score-high .gauge-meter { stroke: var(--color-score-high); }
-    .premium-report .score-gauge.gauge-score-mid .gauge-meter { stroke: #C86D05; }
+    .premium-report .score-gauge.gauge-score-mid .gauge-meter { stroke: var(--color-accent); }
     .premium-report .score-gauge.gauge-score-low .gauge-meter { stroke: var(--color-score-low); }
     .premium-report .score-gauge .gauge-value {
       fill: var(--color-text-primary);
       font-family: var(--font-display);
-      font-size: 38px;
+      font-size: 36px;
       font-weight: 800;
       letter-spacing: 0;
     }
