@@ -3002,15 +3002,23 @@ def render_text_list(items: list[str]) -> str:
 
 def render_score_gauge(score: int, score_class: str) -> str:
     gauge = score_gauge_values(score)
+    gauge_class = f"gauge-{score_class}"
     return f"""
-        <svg class="score-gauge {score_class}" viewBox="0 0 140 140" role="img" aria-label="Score global {score} sur 100">
+        <svg class="score-gauge {gauge_class}" viewBox="0 0 140 140" role="img" aria-label="Score global {score} sur 100">
+          <defs>
+            <filter id="gauge-shadow" x="-18%" y="-18%" width="136%" height="136%">
+              <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#1A1917" flood-opacity="0.12"></feDropShadow>
+            </filter>
+          </defs>
+          <circle class="gauge-plate" cx="70" cy="70" r="58"></circle>
           <circle class="gauge-track" cx="70" cy="70" r="54"></circle>
           <circle class="gauge-meter" cx="70" cy="70" r="54"
             stroke-dasharray="{gauge['circumference']}"
             stroke-dashoffset="{gauge['offset']}"
             transform="rotate(-90 70 70)"></circle>
-          <text x="70" y="66" text-anchor="middle">{score}</text>
-          <text x="70" y="88" text-anchor="middle">/100</text>
+          <circle class="gauge-center" cx="70" cy="70" r="41"></circle>
+          <text class="gauge-value" x="70" y="67" text-anchor="middle">{score}</text>
+          <text class="gauge-total" x="70" y="88" text-anchor="middle">/100</text>
         </svg>"""
 
 
@@ -5079,35 +5087,57 @@ def render_report_styles() -> str:
     }
     .premium-report .cover-score {
       display: grid;
-      gap: var(--space-md);
+      gap: var(--space-lg);
       justify-items: center;
+      padding: 24px 30px 22px;
+      border: 1px solid rgba(232,228,220,0.88);
+      border-radius: 16px;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(255,255,255,0.96) 0 46%, rgba(249,248,246,0.78) 70%, rgba(255,255,255,0.9) 100%);
+      box-shadow: 0 18px 44px rgba(26,25,23,0.08);
     }
     .premium-report .score-gauge {
-      width: 184px;
-      height: 184px;
+      display: block;
+      width: 204px;
+      height: 204px;
+      overflow: visible;
+      background: transparent;
+      color: inherit;
+    }
+    .premium-report .gauge-plate {
+      fill: rgba(255,255,255,0.72);
+      filter: url(#gauge-shadow);
+    }
+    .premium-report .gauge-center {
+      fill: rgba(249,248,246,0.98);
+      stroke: rgba(232,228,220,0.75);
+      stroke-width: 1;
     }
     .premium-report .gauge-track,
     .premium-report .gauge-meter {
       fill: none;
-      stroke-width: 12;
+      stroke-width: 9;
     }
-    .premium-report .gauge-track { stroke: var(--color-border); }
+    .premium-report .gauge-track { stroke: #E8E1D6; }
     .premium-report .gauge-meter {
       stroke-linecap: round;
+      filter: url(#gauge-shadow);
       transition: stroke-dashoffset 240ms ease;
     }
-    .premium-report .score-gauge.score-high .gauge-meter { stroke: var(--color-score-high); }
-    .premium-report .score-gauge.score-mid .gauge-meter { stroke: var(--color-score-mid); }
-    .premium-report .score-gauge.score-low .gauge-meter { stroke: var(--color-score-low); }
-    .premium-report .score-gauge text:first-of-type {
+    .premium-report .score-gauge.gauge-score-high .gauge-meter { stroke: var(--color-score-high); }
+    .premium-report .score-gauge.gauge-score-mid .gauge-meter { stroke: #C86D05; }
+    .premium-report .score-gauge.gauge-score-low .gauge-meter { stroke: var(--color-score-low); }
+    .premium-report .score-gauge .gauge-value {
       fill: var(--color-text-primary);
       font-family: var(--font-display);
-      font-size: 34px;
-      font-weight: 700;
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: 0;
     }
-    .premium-report .score-gauge text:last-of-type {
+    .premium-report .score-gauge .gauge-total {
       fill: var(--color-text-secondary);
-      font-size: 14px;
+      font-family: var(--font-body);
+      font-size: 13px;
       font-weight: 700;
     }
     .premium-report .score-badge,
