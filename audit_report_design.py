@@ -24,7 +24,7 @@ REPORT_TEXT = {
     "fr": {
         "seo_report": "RAPPORT SEO",
         "audit_done_on": "Audit réalisé le",
-        "seo_audit": "Pré-audit SEO public",
+        "seo_audit": "Audit SEO URL-only",
         "url_only_disclaimer": "Analyse basée sur un crawl public URL-only, sans accès Google Search Console, Analytics ni backlinks.",
         "urgency_level": "Niveau d'urgence",
         "pages_analyzed": "pages analysées",
@@ -1120,7 +1120,7 @@ def prepare_audit_report_context(
 def render_report_body(context: dict[str, Any]) -> str:
     priority_pages = render_priority_pages(context)
     signals = render_secondary_signals(context)
-    final_section = "" if context.get("report_type") in {"standard", "crawl"} else render_final_section(context)
+    final_section = render_final_section(context)
     recovery_sections = ""
     if str(context.get("report_type") or "") == "recovery":
         recovery_sections = (
@@ -1135,7 +1135,7 @@ def render_report_body(context: dict[str, Any]) -> str:
             + render_internal_linking_recovery_section(context)
         )
     return f"""
-<main class="premium-report">
+<main class="premium-report audit-gsc-report">
   {render_cover(context)}
   {render_dirigeant_summary(context)}
   {render_executive_summary(context)}
@@ -1204,6 +1204,9 @@ def render_cover(context: dict[str, Any]) -> str:
     urgency_class = urgency_color_class(context["urgency_level"])
     score_class = score_color_class(int(context["score_global"]))
     t = lambda key: text_for(context, key)
+    audit_ref = format_audit_reference(context)
+    report_scope = "URL-only crawl" if context_lang(context) == "en" else "Crawl URL-only"
+    prepared_for = "Prepared for" if context_lang(context) == "en" else "Préparé pour"
     logo = (
         f'<img src="{escape(context["logo_url"])}" alt="" class="header-logo cover-logo">'
         if context.get("logo_url")
@@ -1212,13 +1215,19 @@ def render_cover(context: dict[str, Any]) -> str:
     return f"""
   <section class="report-page report-page-cover cover-page">
     <header class="rapport-header cover-brand">
-      <div class="header-left cover-branding">{logo}</div>
-      <div class="header-right">
-        <span class="header-label">{escape(t("seo_report"))}</span>
+      <div class="header-left cover-branding">
+        {logo}
+        <div class="cover-wordmark"><span class="cover-glyph"></span><span>Prospect <em>Machine</em></span></div>
+      </div>
+      <div class="header-right cover-ref-block">
+        <strong>{escape(t("seo_report"))} {escape(audit_ref)}</strong>
+        <span>{escape(report_scope)}</span>
+        <span>{escape(prepared_for)} {escape(context["domain"])}</span>
       </div>
     </header>
     <div class="cover-center">
       <div>
+        <p class="cover-cat"><span>{escape(t("seo_audit"))}</span><span class="dot">·</span><span>{escape(report_scope)}</span><span class="dot">·</span><span>{escape(str(context["pages_analysees"]))} {escape(t("pages_analyzed"))}</span></p>
         <p class="label">{escape(t("audit_done_on"))} {escape(context["audit_date"])}</p>
         <h1 class="cover-title">{escape("SEO Crawl & Recovery Opportunity Audit" if context.get("report_type") == "recovery" else t("seo_audit"))}</h1>
         <p class="cover-domain">{escape(context["domain"])}</p>
@@ -1241,6 +1250,15 @@ def render_cover(context: dict[str, Any]) -> str:
     </div>
     {render_page_footer(context)}
   </section>"""
+
+
+def format_audit_reference(context: dict[str, Any]) -> str:
+    raw = str(context.get("audit_date") or "").strip()
+    digits = re.sub(r"\D+", "", raw)
+    if len(digits) >= 8:
+        return f"N° {digits[:8]}"
+    domain = re.sub(r"[^A-Za-z0-9]+", "", str(context.get("domain") or ""))[:8].upper()
+    return f"N° {domain or 'URL'}"
 
 
 def render_url_only_disclaimer(context: dict[str, Any]) -> str:
@@ -3432,6 +3450,8 @@ def _smart_truncate(text: str, max_len: int) -> str | None:
         strong_match = m
     if strong_match:
         candidate = window[: strong_match.start() + 1].strip()
+        while candidate and candidate[-1] in _ORPHAN_PUNCT:
+            candidate = candidate[:-1].strip()
         candidate = candidate.strip(" -|")
         if candidate and len(candidate) >= TITLE_MIN_LEN:
             # Vérifier que le fragment ne finit pas sur un mauvais mot après la ponctuation
@@ -6496,6 +6516,242 @@ def render_report_styles() -> str:
     .premium-report .signature {
       color: var(--color-text-secondary);
       font-size: 13px;
+    }
+    .premium-report.audit-gsc-report {
+      --color-bg: #F3EEE6;
+      --color-surface: #FFFDF8;
+      --color-border: #D9CFBF;
+      --color-text-primary: #17130F;
+      --color-text-secondary: #5E554C;
+      --color-text-muted: #8C8174;
+      --color-accent: #14110E;
+      --color-accent-light: #F1E7D8;
+      --color-success: #236948;
+      --color-warning: #9A5A15;
+      --color-danger: #9F2F22;
+      max-width: 980px;
+      padding: 28px 18px 48px;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(180, 121, 52, 0.12), transparent 28%),
+        linear-gradient(180deg, #F8F3EA 0%, #EFE6D9 100%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .premium-report.audit-gsc-report .report-page {
+      position: relative;
+      min-height: 1120px;
+      padding: 54px;
+      background: var(--color-surface);
+      border: 1px solid rgba(23, 19, 15, 0.14);
+      box-shadow: 0 24px 70px rgba(49, 35, 20, 0.14);
+      overflow: hidden;
+    }
+    .premium-report.audit-gsc-report .report-page::before {
+      content: "";
+      position: absolute;
+      inset: 18px;
+      border: 1px solid rgba(23, 19, 15, 0.08);
+      pointer-events: none;
+    }
+    .premium-report.audit-gsc-report .report-page > * {
+      position: relative;
+      z-index: 1;
+    }
+    .premium-report.audit-gsc-report .cover-page {
+      min-height: 1120px;
+      background:
+        linear-gradient(160deg, rgba(26, 17, 10, 0.08), transparent 34%),
+        linear-gradient(0deg, rgba(174, 120, 63, 0.14), transparent 46%),
+        var(--color-surface);
+      border-radius: 0;
+    }
+    .premium-report.audit-gsc-report .rapport-header {
+      align-items: flex-start;
+      min-height: 76px;
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: 20px;
+    }
+    .premium-report.audit-gsc-report .cover-wordmark {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--color-text-primary);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .premium-report.audit-gsc-report .cover-wordmark em {
+      color: #B56F32;
+      font-style: italic;
+      text-transform: none;
+    }
+    .premium-report.audit-gsc-report .cover-glyph {
+      width: 18px;
+      height: 18px;
+      border: 2px solid currentColor;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 5px #B56F32;
+    }
+    .premium-report.audit-gsc-report .cover-ref-block {
+      display: grid;
+      gap: 4px;
+      max-width: 300px;
+      color: var(--color-text-secondary);
+      font-size: 11px;
+      line-height: 1.35;
+      text-align: right;
+      text-transform: uppercase;
+    }
+    .premium-report.audit-gsc-report .cover-ref-block strong {
+      color: var(--color-text-primary);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+    }
+    .premium-report.audit-gsc-report .cover-center {
+      min-height: 760px;
+      align-content: center;
+      gap: 34px;
+    }
+    .premium-report.audit-gsc-report .cover-cat {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin: 0 auto 18px;
+      color: #8B5A2B;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .premium-report.audit-gsc-report .cover-cat .dot {
+      color: var(--color-border);
+    }
+    .premium-report.audit-gsc-report .cover-title {
+      max-width: 760px;
+      margin: 0 auto;
+      color: var(--color-text-primary);
+      font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+      font-size: 78px;
+      font-weight: 500;
+      letter-spacing: 0;
+      line-height: 0.96;
+    }
+    .premium-report.audit-gsc-report .cover-domain {
+      color: #8B5A2B;
+      font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+      font-size: 28px;
+      font-weight: 600;
+    }
+    .premium-report.audit-gsc-report .cover-disclaimer,
+    .premium-report.audit-gsc-report .score-context {
+      max-width: 620px;
+      margin-left: auto;
+      margin-right: auto;
+      color: var(--color-text-secondary);
+    }
+    .premium-report.audit-gsc-report .score-gauge {
+      filter: drop-shadow(0 12px 22px rgba(43, 31, 18, 0.12));
+    }
+    .premium-report.audit-gsc-report .cover-meta {
+      justify-content: center;
+      padding-top: 8px;
+    }
+    .premium-report.audit-gsc-report .section-label,
+    .premium-report.audit-gsc-report .label {
+      color: #8B5A2B;
+      letter-spacing: 0.12em;
+    }
+    .premium-report.audit-gsc-report .section-head {
+      max-width: 760px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .premium-report.audit-gsc-report h2 {
+      font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+      font-size: 42px;
+      font-weight: 500;
+      letter-spacing: 0;
+    }
+    .premium-report.audit-gsc-report h3 {
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+    .premium-report.audit-gsc-report .card,
+    .premium-report.audit-gsc-report .fiche-page,
+    .premium-report.audit-gsc-report .suggestion-card,
+    .premium-report.audit-gsc-report .perf-metric,
+    .premium-report.audit-gsc-report .perf-action-card,
+    .premium-report.audit-gsc-report .timeline-step,
+    .premium-report.audit-gsc-report .matrix-action,
+    .premium-report.audit-gsc-report .signal-url-group {
+      background: #FFF9F0;
+      border-color: rgba(23, 19, 15, 0.13);
+      border-radius: 6px;
+      box-shadow: none;
+    }
+    .premium-report.audit-gsc-report .dirigeant-card {
+      background: #FFF9F0;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      box-shadow: none;
+    }
+    .premium-report.audit-gsc-report .dirigeant-score-bloc,
+    .premium-report.audit-gsc-report .timeline-step,
+    .premium-report.audit-gsc-report .matrix-action,
+    .premium-report.audit-gsc-report .page-tags span,
+    .premium-report.audit-gsc-report .impact-effort-row span,
+    .premium-report.audit-gsc-report .rewrite-angle {
+      background: #F4EBDD;
+    }
+    .premium-report.audit-gsc-report .main-signal,
+    .premium-report.audit-gsc-report .recommended-action,
+    .premium-report.audit-gsc-report .opportunity-panel {
+      background: #F3E4CF;
+      border-color: #C58446;
+    }
+    .premium-report.audit-gsc-report .page-reason,
+    .premium-report.audit-gsc-report .perf-intro {
+      background: #F8EEDB;
+      border-color: #C58446;
+    }
+    .premium-report.audit-gsc-report .score-badge,
+    .premium-report.audit-gsc-report .score-pill,
+    .premium-report.audit-gsc-report .urgency-badge,
+    .premium-report.audit-gsc-report .priority-badge,
+    .premium-report.audit-gsc-report .type-badge,
+    .premium-report.audit-gsc-report .badge,
+    .premium-report.audit-gsc-report .page-tags span,
+    .premium-report.audit-gsc-report .impact-effort-row span {
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .premium-report.audit-gsc-report table th,
+    .premium-report.audit-gsc-report .perf-table th,
+    .premium-report.audit-gsc-report .dates-table th,
+    .premium-report.audit-gsc-report .benchmark-table th {
+      background: #EEE2D1;
+      color: var(--color-text-primary);
+    }
+    .premium-report.audit-gsc-report table td,
+    .premium-report.audit-gsc-report .perf-table td,
+    .premium-report.audit-gsc-report .dates-table td,
+    .premium-report.audit-gsc-report .benchmark-table td {
+      border-bottom-color: rgba(23, 19, 15, 0.12);
+    }
+    .premium-report.audit-gsc-report .page-footer {
+      color: var(--color-text-muted);
+      border-top-color: var(--color-border);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .premium-report.audit-gsc-report .annexe-toggle,
+    .premium-report.audit-gsc-report .annexe-print {
+      border-radius: 4px;
+      background: var(--color-text-primary);
+      color: #FFF9F0;
     }
     @page {
       size: A4;
