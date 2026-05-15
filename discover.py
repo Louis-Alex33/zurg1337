@@ -96,6 +96,9 @@ HIGH_INTENT_QUERY_HINTS = {
     "magazine",
 }
 
+BING_PAGE_SIZE = 10
+DISCOVER_MAX_SEARCH_PAGES = 5
+
 
 class SearchProvider(ABC):
     name: str
@@ -133,32 +136,41 @@ class BingRssProvider(SearchProvider):
 
     def search(self, query: str, limit: int, session: requests.Session) -> list[DomainDiscovery]:
         last_error: requests.RequestException | None = None
-        for attempt in range(DISCOVER_RETRY_ATTEMPTS):
-            try:
-                response = session.get(
-                    self.search_url,
-                    params={"q": query, "format": "rss"},
-                    timeout=DISCOVER_HTTP_TIMEOUT,
-                )
-                response.raise_for_status()
-                results = extract_bing_rss_results(
-                    xml_payload=response.text,
-                    query=query,
-                    provider_name=self.name,
-                    limit=limit,
-                )
-                if results:
-                    return results
-                break
-            except requests.RequestException as exc:
-                last_error = exc
-                time.sleep(DISCOVER_RETRY_BACKOFF * (attempt + 1))
+        results_by_domain: dict[str, DomainDiscovery] = {}
+        for page_start in search_page_starts(limit):
+            page_results: list[DomainDiscovery] = []
+            for attempt in range(DISCOVER_RETRY_ATTEMPTS):
+                try:
+                    response = session.get(
+                        self.search_url,
+                        params={"q": query, "format": "rss", "count": BING_PAGE_SIZE, "first": page_start},
+                        timeout=DISCOVER_HTTP_TIMEOUT,
+                    )
+                    response.raise_for_status()
+                    page_results = extract_bing_rss_results(
+                        xml_payload=response.text,
+                        query=query,
+                        provider_name=self.name,
+                        limit=BING_PAGE_SIZE,
+                    )
+                    break
+                except requests.RequestException as exc:
+                    last_error = exc
+                    time.sleep(DISCOVER_RETRY_BACKOFF * (attempt + 1))
 
-        if last_error is not None:
+            if not page_results:
+                break
+            for item in page_results:
+                if item.domain not in results_by_domain:
+                    results_by_domain[item.domain] = item
+                    if len(results_by_domain) >= limit:
+                        return list(results_by_domain.values())
+
+        if last_error is not None and not results_by_domain:
             raise CLIError(
                 f"Le provider '{self.name}' a echoue pour la requete '{query}'."
             ) from last_error
-        return []
+        return list(results_by_domain.values())
 
 
 class BingHtmlProvider(SearchProvider):
@@ -167,32 +179,41 @@ class BingHtmlProvider(SearchProvider):
 
     def search(self, query: str, limit: int, session: requests.Session) -> list[DomainDiscovery]:
         last_error: requests.RequestException | None = None
-        for attempt in range(DISCOVER_RETRY_ATTEMPTS):
-            try:
-                response = session.get(
-                    self.search_url,
-                    params={"q": query},
-                    timeout=DISCOVER_HTTP_TIMEOUT,
-                )
-                response.raise_for_status()
-                results = extract_bing_html_results(
-                    html=response.text,
-                    query=query,
-                    provider_name=self.name,
-                    limit=limit,
-                )
-                if results:
-                    return results
-                break
-            except requests.RequestException as exc:
-                last_error = exc
-                time.sleep(DISCOVER_RETRY_BACKOFF * (attempt + 1))
+        results_by_domain: dict[str, DomainDiscovery] = {}
+        for page_start in search_page_starts(limit):
+            page_results: list[DomainDiscovery] = []
+            for attempt in range(DISCOVER_RETRY_ATTEMPTS):
+                try:
+                    response = session.get(
+                        self.search_url,
+                        params={"q": query, "count": BING_PAGE_SIZE, "first": page_start},
+                        timeout=DISCOVER_HTTP_TIMEOUT,
+                    )
+                    response.raise_for_status()
+                    page_results = extract_bing_html_results(
+                        html=response.text,
+                        query=query,
+                        provider_name=self.name,
+                        limit=BING_PAGE_SIZE,
+                    )
+                    break
+                except requests.RequestException as exc:
+                    last_error = exc
+                    time.sleep(DISCOVER_RETRY_BACKOFF * (attempt + 1))
 
-        if last_error is not None:
+            if not page_results:
+                break
+            for item in page_results:
+                if item.domain not in results_by_domain:
+                    results_by_domain[item.domain] = item
+                    if len(results_by_domain) >= limit:
+                        return list(results_by_domain.values())
+
+        if last_error is not None and not results_by_domain:
             raise CLIError(
                 f"Le provider '{self.name}' a echoue pour la requete '{query}'."
             ) from last_error
-        return []
+        return list(results_by_domain.values())
 
 
 class DuckDuckGoHtmlProvider(SearchProvider):
@@ -257,6 +278,11 @@ class StaticSearchProvider(SearchProvider):
 
     def search(self, query: str, limit: int, session: requests.Session) -> list[DomainDiscovery]:
         return self.fixtures.get(query, [])[:limit]
+
+
+def search_page_starts(limit: int) -> list[int]:
+    page_count = max(1, min(DISCOVER_MAX_SEARCH_PAGES, ceil(max(1, limit) / BING_PAGE_SIZE)))
+    return [1 + (index * BING_PAGE_SIZE) for index in range(page_count)]
 
 
 def build_queries(niches: list[str], query_mode: str = "auto") -> list[str]:
@@ -328,7 +354,7 @@ def discover_domains(
     client = session or make_session()
     fieldnames = DISCOVERY_FIELDNAMES
     init_csv_file(output, fieldnames)
-    per_query_limit = max(5, ceil(limit / max(1, len(queries))) * 2)
+    per_query_limit = min(50, max(20, ceil(limit / max(1, len(queries))) * 3))
     failures: list[str] = []
     query_queue: deque[str] = deque(queries)
     seen_queries: set[str] = set()
@@ -563,6 +589,8 @@ def maybe_enqueue_topic_fallbacks(
     if query_mode != "auto":
         return
     if contains_search_operators(query):
+        return
+    if contains_year_reference(query):
         return
     if not niche_contains_modifier(query):
         return

@@ -34,13 +34,20 @@ SEARCH_QUERY_TEMPLATES = [
     "blog {niche}",
     "guide {niche}",
     "comparatif {niche}",
+    "avis {niche}",
+    "magazine {niche}",
+    "ressources {niche}",
+    "actualites {niche}",
     "meilleur {niche}",
     "{niche} conseils",
+    "{niche} guide 2024",
+    "{niche} comparatif 2024",
 ]
 
 QUERY_MODIFIER_HINTS = {
     "actualites",
     "actualités",
+    "avis",
     "blog",
     "comparatif",
     "comparatifs",
@@ -50,6 +57,8 @@ QUERY_MODIFIER_HINTS = {
     "magazine",
     "meilleur",
     "meilleurs",
+    "ressource",
+    "ressources",
 }
 
 DISCOVERY_QUERY_STOPWORDS = {

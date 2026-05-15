@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from discover import (
+    BingHtmlProvider,
     SearchProvider,
     StaticSearchProvider,
     build_queries,
@@ -20,6 +21,7 @@ from discover import (
     niche_contains_modifier,
     normalize_query,
     sanitize_discovery_niche,
+    search_page_starts,
     score_discovery_item,
     should_use_exact_query,
 )
@@ -195,13 +197,39 @@ class DiscoverTests(unittest.TestCase):
         self.assertEqual(build_queries(["yoga"], query_mode="exact"), ["yoga"])
         self.assertEqual(
             build_queries(["yoga"], query_mode="expand"),
-            ["yoga", "blog yoga", "guide yoga", "comparatif yoga", "meilleur yoga", "yoga conseils"],
+            [
+                "yoga",
+                "blog yoga",
+                "guide yoga",
+                "comparatif yoga",
+                "avis yoga",
+                "magazine yoga",
+                "ressources yoga",
+                "actualites yoga",
+                "meilleur yoga",
+                "yoga conseils",
+                "yoga guide 2024",
+                "yoga comparatif 2024",
+            ],
         )
 
     def test_topic_fallback_queries_expand_short_modifier_query(self) -> None:
         self.assertEqual(
             build_topic_fallback_queries("blog cpf"),
-            ["cpf", "blog cpf", "guide cpf", "comparatif cpf", "meilleur cpf", "cpf conseils"],
+            [
+                "cpf",
+                "blog cpf",
+                "guide cpf",
+                "comparatif cpf",
+                "avis cpf",
+                "magazine cpf",
+                "ressources cpf",
+                "actualites cpf",
+                "meilleur cpf",
+                "cpf conseils",
+                "cpf guide 2024",
+                "cpf comparatif 2024",
+            ],
         )
 
     def test_extract_bing_rss_results_parses_items(self) -> None:
@@ -250,6 +278,39 @@ class DiscoverTests(unittest.TestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].domain, "small-yoga-blog.fr")
+
+    def test_bing_html_provider_paginates_past_first_result_page(self) -> None:
+        class FakeResponse:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def get(self, url: str, params: dict[str, object], timeout: int) -> FakeResponse:
+                self.calls.append(params)
+                first = params.get("first")
+                domain = "first-yoga-blog.fr" if first == 1 else "second-yoga-guide.fr"
+                title = "Blog yoga" if first == 1 else "Guide yoga 2024"
+                html = f"""
+                <ol>
+                  <li class="b_algo">
+                    <h2><a href="https://{domain}/article">{title}</a></h2>
+                    <div class="b_caption"><p>Conseils yoga pour debutants</p></div>
+                  </li>
+                </ol>
+                """
+                return FakeResponse(html)
+
+        session = FakeSession()
+        results = BingHtmlProvider().search(query="yoga", limit=50, session=session)  # type: ignore[arg-type]
+
+        self.assertEqual([item.domain for item in results], ["first-yoga-blog.fr", "second-yoga-guide.fr"])
+        self.assertEqual([call["first"] for call in session.calls], [1, 11, 21, 31, 41])
 
     def test_extract_bing_rss_results_filters_platform_domains(self) -> None:
         xml_payload = """
@@ -403,6 +464,7 @@ class DiscoverTests(unittest.TestCase):
         self.assertGreaterEqual(score, 80)
         self.assertIn("contenu date", reasons)
         self.assertEqual(infer_query_family("comparatif padel 2024"), "editorial_refresh")
+        self.assertEqual(search_page_starts(30), [1, 11, 21])
 
     def test_discover_auto_falls_back_to_topic_queries_when_modifier_query_is_empty(self) -> None:
         class TopicFallbackProvider(SearchProvider):
