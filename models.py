@@ -10,6 +10,9 @@ class DomainDiscovery:
     source_query: str
     source_provider: str
     first_seen: str
+    discovery_score: int = 0
+    lead_reason: str = ""
+    query_family: str = ""
     title: str = ""
     snippet: str = ""
 

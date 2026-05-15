@@ -16,11 +16,14 @@ from discover import (
     extract_bing_rss_results,
     extract_duckduckgo_results,
     import_domains_from_file,
+    infer_query_family,
     niche_contains_modifier,
     normalize_query,
     sanitize_discovery_niche,
+    score_discovery_item,
     should_use_exact_query,
 )
+from io_helpers import read_discovery_csv
 from models import DomainDiscovery
 from utils import CLIError
 
@@ -60,7 +63,7 @@ class DiscoverTests(unittest.TestCase):
                 header = handle.readline().strip()
             self.assertEqual(
                 header,
-                "domain,source_query,source_provider,first_seen,title,snippet",
+                "domain,discovery_score,lead_reason,query_family,source_query,source_provider,first_seen,title,snippet",
             )
 
     def test_discover_continues_when_one_query_fails(self) -> None:
@@ -127,6 +130,7 @@ class DiscoverTests(unittest.TestCase):
 
             self.assertEqual(len(results), 2)
             self.assertEqual(results[0].source_provider, "manual")
+            self.assertEqual(results[0].query_family, "manual")
 
     def test_extract_duckduckgo_results_supports_structured_markup(self) -> None:
         html = """
@@ -342,6 +346,63 @@ class DiscoverTests(unittest.TestCase):
                 results = discover_domains(["blog renovation energetique"], limit=10, output=output, delay=0)
 
             self.assertEqual([item.domain for item in results], ["renovation-ecologique.fr"])
+
+    def test_discover_ranks_candidates_by_lead_score(self) -> None:
+        fixtures = {
+            "padel": [
+                DomainDiscovery(
+                    domain="padel-login-app.fr",
+                    source_query="padel",
+                    source_provider="static",
+                    first_seen="2026-04-14T21:37:09+00:00",
+                    title="Padel app login dashboard",
+                    snippet="Connexion support pricing pour clubs de padel",
+                ),
+                DomainDiscovery(
+                    domain="guide-padel-club.fr",
+                    source_query="padel",
+                    source_provider="static",
+                    first_seen="2026-04-14T21:37:09+00:00",
+                    title="Guide padel club 2024",
+                    snippet="Blog conseils padel et comparatif materiel",
+                ),
+            ],
+        }
+        provider = StaticSearchProvider(fixtures)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = f"{tmp_dir}/domains_raw.csv"
+            with patch("discover.get_provider", return_value=provider):
+                results = discover_domains(["padel"], limit=1, output=output, delay=0, query_mode="exact")
+
+            self.assertEqual([item.domain for item in results], ["guide-padel-club.fr"])
+            self.assertGreater(results[0].discovery_score, 70)
+            self.assertIn("contenu date", results[0].lead_reason)
+
+    def test_discovery_csv_reader_accepts_legacy_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = f"{tmp_dir}/legacy_domains_raw.csv"
+            with open(output, "w", encoding="utf-8") as handle:
+                handle.write("domain,source_query,source_provider,first_seen,title,snippet\n")
+                handle.write("example.com,padel,manual,2026-05-15T10:00:00+00:00,Title,Snippet\n")
+
+            rows = read_discovery_csv(output)
+
+            self.assertEqual(rows[0].domain, "example.com")
+            self.assertEqual(rows[0].discovery_score, 0)
+            self.assertEqual(rows[0].lead_reason, "")
+
+    def test_score_discovery_item_rewards_refreshable_editorial_results(self) -> None:
+        score, reasons = score_discovery_item(
+            domain="guide-padel-club.fr",
+            title="Guide padel 2024",
+            snippet="Blog conseils et comparatif padel",
+            query="guide padel",
+        )
+
+        self.assertGreaterEqual(score, 80)
+        self.assertIn("contenu date", reasons)
+        self.assertEqual(infer_query_family("comparatif padel 2024"), "editorial_refresh")
 
     def test_discover_auto_falls_back_to_topic_queries_when_modifier_query_is_empty(self) -> None:
         class TopicFallbackProvider(SearchProvider):

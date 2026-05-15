@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
@@ -29,12 +30,71 @@ from models import DomainDiscovery
 from utils import (
     CLIError,
     clean_domain,
+    contains_year_reference,
     decode_duckduckgo_target,
     is_big_site,
     is_hard_blocked_domain,
     make_session,
     utc_timestamp,
 )
+
+DISCOVERY_FIELDNAMES = [
+    "domain",
+    "discovery_score",
+    "lead_reason",
+    "query_family",
+    "source_query",
+    "source_provider",
+    "first_seen",
+    "title",
+    "snippet",
+]
+
+EDITORIAL_RESULT_HINTS = {
+    "actualite": "signal actualite",
+    "actualites": "signal actualites",
+    "article": "signal article",
+    "avis": "signal avis",
+    "blog": "signal blog",
+    "comparatif": "signal comparatif",
+    "comparatifs": "signal comparatifs",
+    "conseil": "signal conseil",
+    "conseils": "signal conseils",
+    "guide": "signal guide",
+    "guides": "signal guides",
+    "magazine": "signal magazine",
+    "ressource": "signal ressource",
+    "ressources": "signal ressources",
+}
+
+NEGATIVE_RESULT_HINTS = {
+    "api": "signal api/docs",
+    "checkout": "signal checkout",
+    "connexion": "signal login/app",
+    "dashboard": "signal dashboard/app",
+    "documentation": "signal documentation",
+    "docs": "signal docs",
+    "forum": "signal forum",
+    "help": "signal support",
+    "login": "signal login/app",
+    "marketplace": "signal marketplace",
+    "pricing": "signal pricing/app",
+    "shop": "signal boutique",
+    "support": "signal support",
+}
+
+HIGH_INTENT_QUERY_HINTS = {
+    "avis",
+    "blog",
+    "comparatif",
+    "comparatifs",
+    "conseils",
+    "guide",
+    "guides",
+    "inurl:blog",
+    "intitle:guide",
+    "magazine",
+}
 
 
 class SearchProvider(ABC):
@@ -266,7 +326,7 @@ def discover_domains(
     provider = get_provider(provider_name)
     queries = build_queries(niches, query_mode=query_mode)
     client = session or make_session()
-    fieldnames = ["domain", "source_query", "source_provider", "first_seen", "title", "snippet"]
+    fieldnames = DISCOVERY_FIELDNAMES
     init_csv_file(output, fieldnames)
     per_query_limit = max(5, ceil(limit / max(1, len(queries))) * 2)
     failures: list[str] = []
@@ -288,8 +348,8 @@ def discover_domains(
         seen_queries.add(query)
         query_index += 1
         print(
-            f"[{query_index}/{len(queries)}] Requete en cours: '{query}' | "
-            f"deja trouves={len(discovered_by_domain)}/{limit}"
+            f"[{query_index}] Requete en cours: '{query}' | "
+            f"candidats={len(discovered_by_domain)} | sortie max={limit}"
         )
         try:
             batch = provider.search(query=query, limit=per_query_limit, session=client)
@@ -312,25 +372,29 @@ def discover_domains(
         for item in batch:
             if not should_keep_discovery_item(item):
                 continue
+            item = enrich_discovery_item(item)
             if item.domain in discovered_by_domain:
+                discovered_by_domain[item.domain] = choose_better_discovery_item(
+                    discovered_by_domain[item.domain],
+                    item,
+                )
                 continue
             discovered_by_domain[item.domain] = item
             append_csv_rows(output, discovery_rows([item]), fieldnames=fieldnames)
             added_count += 1
-            if len(discovered_by_domain) >= limit:
-                break
         print(
             f"  -> {added_count} nouveaux domaines gardes | "
-            f"total={len(discovered_by_domain)}/{limit}"
+            f"candidats={len(discovered_by_domain)} | sortie max={limit}"
         )
-        if len(discovered_by_domain) >= limit:
-            break
         if query_queue:
             if cancel_callback is not None:
                 cancel_callback()
             time.sleep(delay)
 
-    discovered = list(discovered_by_domain.values())[:limit]
+    discovered = sorted(
+        discovered_by_domain.values(),
+        key=lambda item: (-item.discovery_score, item.domain),
+    )[:limit]
     if cancel_callback is not None:
         cancel_callback()
     if not discovered:
@@ -361,7 +425,7 @@ def import_domains_from_file(
 
     first_seen = utc_timestamp()
     imported_by_domain: dict[str, DomainDiscovery] = {}
-    fieldnames = ["domain", "source_query", "source_provider", "first_seen", "title", "snippet"]
+    fieldnames = DISCOVERY_FIELDNAMES
     init_csv_file(output, fieldnames)
     with file_path.open("r", encoding="utf-8") as handle:
         for raw_line in handle:
@@ -378,6 +442,9 @@ def import_domains_from_file(
                 source_query=source_query,
                 source_provider=source_provider,
                 first_seen=first_seen,
+                discovery_score=0,
+                lead_reason="import manuel",
+                query_family="manual",
                 title="",
                 snippet="",
             )
@@ -402,7 +469,7 @@ def discovery_to_console_rows(items: list[DomainDiscovery]) -> list[str]:
     rows: list[str] = []
     for item in items[:10]:
         rows.append(
-            f"- {item.domain} | query='{item.source_query}' | provider={item.source_provider} | "
+            f"- {item.discovery_score:>3} | {item.domain} | query='{item.source_query}' | provider={item.source_provider} | "
             f"title='{item.title[:60]}'"
         )
     return rows
@@ -652,6 +719,95 @@ def should_keep_discovery_item(item: DomainDiscovery) -> bool:
     if not domain or is_big_site(domain) or is_hard_blocked_domain(domain) or is_excluded_discovery_domain(domain):
         return False
     return looks_relevant_for_query(domain=domain, title=item.title, snippet=item.snippet, query=item.source_query)
+
+
+def enrich_discovery_item(item: DomainDiscovery) -> DomainDiscovery:
+    score, reasons = score_discovery_item(
+        domain=item.domain,
+        title=item.title,
+        snippet=item.snippet,
+        query=item.source_query,
+    )
+    return DomainDiscovery(
+        domain=item.domain,
+        source_query=item.source_query,
+        source_provider=item.source_provider,
+        first_seen=item.first_seen,
+        discovery_score=score,
+        lead_reason="; ".join(reasons),
+        query_family=infer_query_family(item.source_query),
+        title=item.title,
+        snippet=item.snippet,
+    )
+
+
+def choose_better_discovery_item(current: DomainDiscovery, candidate: DomainDiscovery) -> DomainDiscovery:
+    if candidate.discovery_score > current.discovery_score:
+        return candidate
+    if candidate.discovery_score == current.discovery_score and len(candidate.lead_reason) > len(current.lead_reason):
+        return candidate
+    return current
+
+
+def score_discovery_item(domain: str, title: str, snippet: str, query: str) -> tuple[int, list[str]]:
+    score = 40
+    reasons: list[str] = []
+    normalized_domain = normalize_match_text(domain)
+    normalized_query = normalize_match_text(query)
+    haystack = normalize_match_text(" ".join([domain, title, snippet]))
+
+    core_terms = extract_query_core_terms(query)
+    matched_terms = [term for term in core_terms if term in haystack]
+    if matched_terms:
+        score += min(20, len(matched_terms) * 8)
+        reasons.append("niche presente")
+
+    editorial_hits = [label for hint, label in EDITORIAL_RESULT_HINTS.items() if whole_term_in_text(hint, haystack)]
+    if editorial_hits:
+        score += min(24, len(editorial_hits) * 8)
+        reasons.extend(editorial_hits[:3])
+
+    if contains_year_reference(" ".join([title, snippet, query])):
+        score += 12
+        reasons.append("contenu date")
+
+    if any(hint in normalized_query for hint in HIGH_INTENT_QUERY_HINTS):
+        score += 8
+        reasons.append("requete forte intention")
+
+    if "-" in domain and not normalized_domain.startswith(("www ", "web ")):
+        score += 4
+        reasons.append("domaine de niche probable")
+
+    negative_hits = [label for hint, label in NEGATIVE_RESULT_HINTS.items() if whole_term_in_text(hint, haystack)]
+    if negative_hits:
+        score -= min(30, len(negative_hits) * 10)
+        reasons.extend(negative_hits[:2])
+
+    if not reasons:
+        reasons.append("pertinence SERP simple")
+
+    return max(0, min(100, score)), reasons
+
+
+def infer_query_family(query: str) -> str:
+    normalized_query = normalize_match_text(query)
+    if contains_search_operators(query):
+        if "inurl:blog" in query.lower() or "intitle:guide" in query.lower():
+            return "seo_operator"
+        return "exact_operator"
+    if contains_year_reference(query):
+        return "editorial_refresh"
+    if any(hint in normalized_query for hint in ("comparatif", "avis", "meilleur")):
+        return "commercial_editorial"
+    if any(hint in normalized_query for hint in ("blog", "guide", "conseil", "magazine")):
+        return "editorial"
+    return "topic"
+
+
+def whole_term_in_text(term: str, text: str) -> bool:
+    normalized_term = normalize_match_text(term)
+    return re.search(rf"(^|[^a-z0-9]){re.escape(normalized_term)}([^a-z0-9]|$)", text) is not None
 
 
 def is_excluded_discovery_domain(domain: str) -> bool:

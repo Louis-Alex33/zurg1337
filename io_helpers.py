@@ -86,6 +86,9 @@ def read_discovery_csv(path: str | Path) -> list[DomainDiscovery]:
                 source_query=(row.get("source_query") or "").strip(),
                 source_provider=(row.get("source_provider") or "").strip(),
                 first_seen=(row.get("first_seen") or "").strip(),
+                discovery_score=_bool_or_int(row.get("discovery_score") or "0"),
+                lead_reason=(row.get("lead_reason") or "").strip(),
+                query_family=(row.get("query_family") or "").strip(),
                 title=(row.get("title") or "").strip(),
                 snippet=(row.get("snippet") or "").strip(),
             )
@@ -150,6 +153,9 @@ def discovery_rows(items: list[DomainDiscovery]) -> list[dict[str, Any]]:
     return [
         {
             "domain": item.domain,
+            "discovery_score": item.discovery_score,
+            "lead_reason": item.lead_reason,
+            "query_family": item.query_family,
             "source_query": item.source_query,
             "source_provider": item.source_provider,
             "first_seen": item.first_seen,
