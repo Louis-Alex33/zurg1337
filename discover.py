@@ -386,6 +386,13 @@ def discover_domains(
             f"  -> {added_count} nouveaux domaines gardes | "
             f"candidats={len(discovered_by_domain)} | sortie max={limit}"
         )
+        if len(discovered_by_domain) < limit and should_expand_underfilled_query(
+            query=query,
+            query_mode=query_mode,
+            added_count=added_count,
+            result_count=len(batch),
+        ):
+            maybe_enqueue_topic_fallbacks(query, query_mode, query_queue, seen_queries)
         if query_queue:
             if cancel_callback is not None:
                 cancel_callback()
@@ -566,6 +573,21 @@ def maybe_enqueue_topic_fallbacks(
         return
     print(f"Info: fallback requetes pour '{query}': {', '.join(new_queries)}")
     query_queue.extend(new_queries)
+
+
+def should_expand_underfilled_query(
+    query: str,
+    query_mode: str,
+    added_count: int,
+    result_count: int,
+) -> bool:
+    if query_mode != "auto":
+        return False
+    if contains_search_operators(query):
+        return False
+    if not niche_contains_modifier(query):
+        return False
+    return result_count <= 12 or added_count <= 3
 
 
 def build_topic_fallback_queries(query: str) -> list[str]:

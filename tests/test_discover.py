@@ -432,6 +432,45 @@ class DiscoverTests(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0].domain, "cpf-info.fr")
 
+    def test_discover_auto_expands_modifier_query_when_limit_is_underfilled(self) -> None:
+        class UnderfilledProvider(SearchProvider):
+            name = "underfilled"
+
+            def search(self, query: str, limit: int, session) -> list[DomainDiscovery]:
+                if query == "blog yoga":
+                    return [
+                        DomainDiscovery(
+                            domain="small-yoga-blog.fr",
+                            source_query=query,
+                            source_provider=self.name,
+                            first_seen="2026-04-15T16:19:13+00:00",
+                            title="Blog yoga",
+                            snippet="Conseils yoga",
+                        )
+                    ]
+                if query == "guide yoga":
+                    return [
+                        DomainDiscovery(
+                            domain="guide-yoga-debutant.fr",
+                            source_query=query,
+                            source_provider=self.name,
+                            first_seen="2026-04-15T16:19:13+00:00",
+                            title="Guide yoga debutant",
+                            snippet="Guide conseils yoga 2024",
+                        )
+                    ]
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = f"{tmp_dir}/domains_raw.csv"
+            with patch("discover.get_provider", return_value=UnderfilledProvider()):
+                results = discover_domains(["blog yoga"], limit=10, output=output, delay=0, query_mode="auto")
+
+            self.assertEqual(
+                [item.domain for item in results],
+                ["guide-yoga-debutant.fr", "small-yoga-blog.fr"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
