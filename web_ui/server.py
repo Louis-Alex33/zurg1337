@@ -12,7 +12,13 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from utils import CLIError
 
-from .fs_ops import delete_managed_file, reset_pipeline_outputs, resolve_local_file, save_uploaded_gsc_file
+from .fs_ops import (
+    delete_managed_file,
+    reset_pipeline_outputs,
+    resolve_local_file,
+    save_uploaded_gsc_file,
+    save_uploaded_pipeline_file,
+)
 from . import _root_dir
 from .jobs import (
     clear_finished_jobs,
@@ -215,6 +221,8 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
             message = BytesParser(policy=default).parsebytes(raw_message)
             form: dict[str, str] = {}
             upload_fields = {
+                "qualify_input_upload",
+                "audit_input_upload",
                 "current_upload",
                 "previous_upload",
                 "queries_upload",
@@ -223,6 +231,8 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
                 "appareils_upload",
             }
             upload_targets = {
+                "qualify_input_upload": "input_csv",
+                "audit_input_upload": "input_csv",
                 "current_upload": "current_csv",
                 "previous_upload": "previous_csv",
                 "queries_upload": "queries_csv",
@@ -236,7 +246,11 @@ class ProspectMachineUIHandler(BaseHTTPRequestHandler):
                     continue
                 filename = part.get_filename()
                 if name in upload_fields and filename:
-                    saved_path = save_uploaded_gsc_file(filename, part.get_payload(decode=True) or b"")
+                    payload_bytes = part.get_payload(decode=True) or b""
+                    if name in {"qualify_input_upload", "audit_input_upload"}:
+                        saved_path = save_uploaded_pipeline_file(filename, payload_bytes)
+                    else:
+                        saved_path = save_uploaded_gsc_file(filename, payload_bytes)
                     form[upload_targets[name]] = saved_path
                 elif not filename:
                     charset = part.get_content_charset() or "utf-8"

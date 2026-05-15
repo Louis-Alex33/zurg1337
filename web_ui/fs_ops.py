@@ -10,7 +10,8 @@ from utils import CLIError
 from . import _root_dir
 
 ROOT_DIR = _root_dir()
-UPLOAD_DIR = "uploads/gsc"
+GSC_UPLOAD_DIR = "uploads/gsc"
+PIPELINE_UPLOAD_DIR = "uploads/pipeline"
 ALLOWED_UPLOAD_SUFFIXES = {".csv", ".tsv", ".txt", ".zip"}
 
 
@@ -25,32 +26,40 @@ def resolve_local_file(requested_path: str) -> Path:
 
 
 def save_uploaded_gsc_file(filename: str, payload: bytes) -> str:
+    return save_uploaded_file(filename, payload, upload_dir=GSC_UPLOAD_DIR, fallback_name="gsc_export.csv")
+
+
+def save_uploaded_pipeline_file(filename: str, payload: bytes) -> str:
+    return save_uploaded_file(filename, payload, upload_dir=PIPELINE_UPLOAD_DIR, fallback_name="domains.csv")
+
+
+def save_uploaded_file(filename: str, payload: bytes, upload_dir: str, fallback_name: str) -> str:
     if not filename:
         raise CLIError("Nom de fichier upload manquant.")
     if not payload:
         raise CLIError(f"Fichier upload vide: {filename}")
 
-    safe_name = sanitize_upload_filename(filename)
+    safe_name = sanitize_upload_filename(filename, fallback_name=fallback_name)
     suffix = Path(safe_name).suffix.lower()
     if suffix not in ALLOWED_UPLOAD_SUFFIXES:
         allowed = ", ".join(sorted(ALLOWED_UPLOAD_SUFFIXES))
         raise CLIError(f"Extension non supportee pour {filename}. Extensions autorisees: {allowed}")
 
     root_dir = _root_dir()
-    upload_dir = (root_dir / UPLOAD_DIR).resolve()
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    target = (upload_dir / f"{uuid.uuid4().hex[:8]}_{safe_name}").resolve()
-    if upload_dir not in target.parents:
+    upload_path = (root_dir / upload_dir).resolve()
+    upload_path.mkdir(parents=True, exist_ok=True)
+    target = (upload_path / f"{uuid.uuid4().hex[:8]}_{safe_name}").resolve()
+    if upload_path not in target.parents:
         raise CLIError("Chemin d'upload non autorise.")
     target.write_bytes(payload)
     return str(target.relative_to(root_dir))
 
 
-def sanitize_upload_filename(filename: str) -> str:
+def sanitize_upload_filename(filename: str, fallback_name: str = "gsc_export.csv") -> str:
     name = Path(filename).name.strip()
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
     name = name.strip("._")
-    return name or "gsc_export.csv"
+    return name or fallback_name
 
 
 def delete_managed_file(requested_path: str, cascade: bool = False) -> list[str]:

@@ -203,10 +203,7 @@ def render_job_page(job_id: str) -> str:
     elapsed = format_duration(job_elapsed_seconds(job))
     runtime_hint = estimate_job_duration(job)
     display_outputs = prioritize_job_outputs(job)
-    outputs = "".join(
-        f'<li><a href="/files?path={quote(path)}">{html.escape(path)}</a></li>'
-        for path in display_outputs
-    ) or "<li>Aucune sortie declaree</li>"
+    outputs = "".join(render_job_output_link(path) for path in display_outputs) or "<li>Aucune sortie declaree</li>"
     previews = render_job_output_previews(job, display_outputs)
     summary = "".join(f"<li>{html.escape(line)}</li>" for line in job.summary_lines) or "<li>Pas de resume.</li>"
     log_block = html.escape(job.log.strip() or "Aucun log capture.")
@@ -292,6 +289,15 @@ def prioritize_job_outputs(job: JobRecord) -> list[str]:
             ordered.append(path)
     ordered.extend(path for path in job.outputs if path not in ordered)
     return ordered
+
+
+def render_job_output_link(path: str) -> str:
+    file_link = f"/files?path={quote(path)}"
+    download_link = f"/download?path={quote(path)}"
+    return (
+        f'<li><a href="{file_link}">{html.escape(path)}</a> '
+        f'<a class="subtle-link" href="{download_link}">Télécharger</a></li>'
+    )
 
 
 def render_job_output_previews(job: JobRecord, display_outputs: list[str]) -> str:
@@ -472,11 +478,14 @@ def render_qualify_card() -> str:
       <div class="panel-head"><h2>Qualify</h2><span class="badge">scoring rapide</span></div>
       <p class="card-lede">Cette card trie les domaines et aide a separer les bons candidats editoriaux des profils app, docs ou marketplace.</p>
       <div class="card-tip">Dans la plupart des cas, tu peux garder les valeurs par defaut et lancer le job.</div>
-      <form method="post" action="/run/qualify" class="stack">
+      <form method="post" action="/run/qualify" class="stack" enctype="multipart/form-data">
         <label>Input CSV
           <input type="text" name="input_csv" value="data/domains_raw.csv">
         </label>
-        <p class="field-help">Mets ici le fichier cree par <strong>Discover</strong>, en general `data/domains_raw.csv`.</p>
+        <label>Uploader un CSV Discover
+          <input type="file" name="qualify_input_upload" accept=".csv,.tsv,.txt,text/csv">
+        </label>
+        <p class="field-help">Mets ici le fichier cree par <strong>Discover</strong>, en general `data/domains_raw.csv`, ou uploade directement son CSV.</p>
         <div class="inline-fields">
           <label>Output CSV
             <input type="text" name="output" value="data/domains_scored.csv">
@@ -511,11 +520,14 @@ def render_audit_card() -> str:
       <div class="panel-head"><h2>Audit</h2><span class="badge">triage ou deep dive</span></div>
       <p class="card-lede">La card la plus utile si tu veux comprendre un site vite. Tu peux l'utiliser directement sur un seul domaine, sans passer par le CSV.</p>
       <div class="card-tip">Pour un test simple, remplis seulement <strong>Site</strong>, garde `audit_light`, laisse `Max pages` a `{DEFAULT_UI_AUDIT_MAX_PAGES}`, puis lance l'audit.</div>
-      <form method="post" action="/run/audit" class="stack">
+      <form method="post" action="/run/audit" class="stack" enctype="multipart/form-data">
         <label>Input CSV
           <input type="text" name="input_csv" value="data/domains_scored.csv">
         </label>
-        <p class="field-help">Utilise ce champ si tu veux auditer plusieurs domaines deja qualifies.</p>
+        <label>Uploader un CSV Qualify
+          <input type="file" name="audit_input_upload" accept=".csv,.tsv,.txt,text/csv">
+        </label>
+        <p class="field-help">Utilise ce champ si tu veux auditer plusieurs domaines deja qualifies, ou uploade directement le CSV produit par <strong>Qualify</strong>.</p>
         <label>Site
           <input type="text" name="site" value="" placeholder="example.com ou https://example.com">
         </label>

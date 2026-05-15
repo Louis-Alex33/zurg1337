@@ -798,6 +798,39 @@ class WebUITests(unittest.TestCase):
             self.assertTrue(uploaded_path.exists())
             self.assertEqual(uploaded_path.read_bytes(), csv_body)
 
+    def test_multipart_pipeline_upload_maps_to_input_csv(self) -> None:
+        boundary = "----prospect-machine-test"
+        csv_body = b"domain,source_query,source_provider,first_seen,title\nexample.com,padel,manual,2026-05-15,\n"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="input_csv"\r\n\r\n'
+            "data/domains_raw.csv\r\n"
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="qualify_input_upload"; filename="discover.csv"\r\n'
+            "Content-Type: text/csv\r\n\r\n"
+        ).encode("utf-8") + csv_body + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        import web_ui
+
+        original_root = web_ui.ROOT_DIR
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                web_ui.ROOT_DIR = Path(tmp_dir).resolve()
+                handler = ProspectMachineUIHandler.__new__(ProspectMachineUIHandler)
+                handler.headers = {
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    "Content-Length": str(len(body)),
+                }
+
+                form = handler._parse_post_form(body, len(body))
+            finally:
+                web_ui.ROOT_DIR = original_root
+
+            uploaded_path = Path(tmp_dir) / form["input_csv"]
+            self.assertTrue(form["input_csv"].startswith("uploads/pipeline/"))
+            self.assertTrue(uploaded_path.exists())
+            self.assertEqual(uploaded_path.read_bytes(), csv_body)
+
     def test_post_accepts_localhost_when_server_is_bound_to_loopback(self) -> None:
         handler, errors = self._make_post_handler(
             "/unknown",
