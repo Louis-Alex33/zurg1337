@@ -791,6 +791,7 @@ def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str
     root_dir = _root_dir()
     relative_path = path.relative_to(root_dir)
     file_size = human_file_size(path.stat().st_size)
+    download_action = render_download_button(relative_path)
     delete_action = ""
     if str(relative_path) in {"data/domains_raw.csv", "data/domains_scored.csv"}:
         cascade_input = '<input type="hidden" name="cascade" value="on">' if str(relative_path) == "data/domains_scored.csv" else ""
@@ -815,6 +816,7 @@ def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str
               <p class="lede">Vue tabulaire complete, plus agreable pour relire rapidement les exports de prospection.</p>
             </div>
             <div class="panel-actions">
+              {download_action}
               {delete_action}
               <a class="button secondary" href="/">Retour home</a>
             </div>
@@ -846,6 +848,7 @@ def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str
               <p class="lede">Lecture rapide du JSON genere par le pipeline.</p>
             </div>
             <div class="panel-actions">
+              {download_action}
               {delete_action}
               <a class="button secondary" href="/">Retour home</a>
             </div>
@@ -869,6 +872,7 @@ def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str
               <p class="lede">Base locale d'historique des audits. Elle est prévue pour les scripts, exports et comparaisons futures.</p>
             </div>
             <div class="panel-actions">
+              {download_action}
               <a class="button secondary" href="/">Retour home</a>
             </div>
           </div>
@@ -890,6 +894,7 @@ def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str
           <p class="lede">Apercu texte du fichier.</p>
         </div>
         <div class="panel-actions">
+          {download_action}
           {delete_action}
           <a class="button secondary" href="/">Retour home</a>
         </div>
@@ -901,6 +906,11 @@ def render_file_page(path: Path, variant: str = "full", lang: str = "fr") -> str
     </section>
     """
     return page_shell(f"File - {relative_path}", content)
+
+
+def render_download_button(relative_path: Path) -> str:
+    download_link = f"/download?path={quote(str(relative_path))}"
+    return f'<a class="button" href="{download_link}">Télécharger</a>'
 
 
 def render_audit_html_as_toggleable_report(path: Path, variant: str = "full", lang: str = "fr") -> str | None:

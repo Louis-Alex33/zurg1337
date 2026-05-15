@@ -664,6 +664,26 @@ class WebUITests(unittest.TestCase):
         self.assertIn(("Content-Disposition", 'attachment; filename="example.com.json"'), headers)
         self.assertTrue(body)
 
+    def test_csv_file_page_exposes_download_button(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            data_dir = root / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            domains_csv = data_dir / "domains_raw.csv"
+            domains_csv.write_text("domain\nexample.com\n", encoding="utf-8")
+
+            import web_ui
+
+            original_root = web_ui.ROOT_DIR
+            try:
+                web_ui.ROOT_DIR = root.resolve()
+                page = render_file_page(domains_csv.resolve())
+            finally:
+                web_ui.ROOT_DIR = original_root
+
+        self.assertIn('/download?path=data/domains_raw.csv', page)
+        self.assertIn("Télécharger", page)
+
     def test_delete_managed_file_removes_scored_and_json_when_cascade_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             data_dir = Path(tmp_dir) / "data"
