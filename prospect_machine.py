@@ -234,6 +234,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to copy the final CSV outside the run directory",
     )
     pipeline_parser.add_argument(
+        "--skip-enrichment",
+        action="store_true",
+        help="Skip the EnrichmentStep (no Hunter.io lookup)",
+    )
+    pipeline_parser.add_argument(
+        "--skip-intent",
+        action="store_true",
+        help="Skip the IntentScoringStep",
+    )
+    pipeline_parser.add_argument(
+        "--hunter-cache-db",
+        default="data/hunter_cache.db",
+        help="Path to the Hunter.io SQLite cache",
+    )
+    pipeline_parser.add_argument(
+        "--intent-config",
+        default="config/intent_scoring.yaml",
+        help="Path to the intent scoring YAML config",
+    )
+    pipeline_parser.add_argument(
+        "--intent-concurrency",
+        type=int,
+        default=5,
+        help="Thread concurrency for IntentScoringStep",
+    )
+    pipeline_parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -429,7 +455,9 @@ def _run_pipeline(args: argparse.Namespace) -> int:
 
     from pipeline.base import Pipeline
     from pipeline.steps.discovery import DiscoveryStep
+    from pipeline.steps.enrichment import EnrichmentStep
     from pipeline.steps.export import ExportStep
+    from pipeline.steps.intent_scoring import IntentScoringStep
     from pipeline.steps.qualification import QualificationStep
 
     logging.basicConfig(
@@ -442,6 +470,10 @@ def _run_pipeline(args: argparse.Namespace) -> int:
 
     run_id = args.run_id or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     skip_steps: set[str] = set(args.skip_steps or [])
+    if args.skip_enrichment:
+        skip_steps.add("EnrichmentStep")
+    if args.skip_intent:
+        skip_steps.add("IntentScoringStep")
 
     steps = [
         DiscoveryStep(
@@ -455,6 +487,11 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         QualificationStep(
             delay=args.delay,
             mode=args.qualify_mode,
+        ),
+        EnrichmentStep(hunter_cache_db=args.hunter_cache_db),
+        IntentScoringStep(
+            config_path=Path(args.intent_config),
+            concurrency=args.intent_concurrency,
         ),
         ExportStep(final_output=args.final_output),
     ]
