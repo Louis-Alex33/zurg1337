@@ -1,27 +1,29 @@
 from __future__ import annotations
 
 PAGE_STYLE = """
+    @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400;1,600&family=Inter:wght@400;600;700;800&display=swap');
+
     :root {
-      --bg: #f1f5f9;
-      --card: #ffffff;
-      --ink: #1e293b;
-      --muted: #64748b;
-      --line: #e2e8f0;
-      --line-strong: #cbd5e1;
-      --navy: #0f172a;
-      --accent: #2563eb;
-      --accent-soft: #dbeafe;
-      --cyan: #0891b2;
-      --emerald: #10b981;
-      --high-bg: #fee2e2;
-      --high-text: #991b1b;
-      --medium-bg: #fef3c7;
-      --medium-text: #92400e;
-      --healthy-bg: #d1fae5;
-      --healthy-text: #065f46;
-      --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-      --shadow-soft: 0 18px 45px rgba(15, 23, 42, 0.08);
-      --radius: 12px;
+      --bg: #f5f0e8;
+      --card: #faf8f3;
+      --ink: #1a1a1a;
+      --muted: #6b6560;
+      --line: #ddd8cc;
+      --line-strong: #c8c2b4;
+      --navy: #0c0f14;
+      --accent: #c4622d;
+      --accent-soft: #f5e8e0;
+      --cyan: #4a7c8a;
+      --emerald: #3a6b4a;
+      --high-bg: #faeae4;
+      --high-text: #8b3018;
+      --medium-bg: #f5eedc;
+      --medium-text: #7a5c1a;
+      --healthy-bg: #e4ede8;
+      --healthy-text: #2e5e3a;
+      --shadow-card: none;
+      --shadow-soft: none;
+      --radius: 4px;
     }
 
     * {
@@ -37,9 +39,9 @@ PAGE_STYLE = """
       min-height: 100vh;
       color: var(--ink);
       background: var(--bg);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 16px;
-      line-height: 1.5;
+      font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
     }
 
     a {
@@ -71,7 +73,10 @@ PAGE_STYLE = """
     .file-shell h1 {
       margin: 0 0 10px;
       color: var(--navy);
-      font-size: clamp(2rem, 4vw, 4rem);
+      font-family: 'EB Garamond', Georgia, serif;
+      font-size: clamp(2.4rem, 4.5vw, 4.5rem);
+      font-weight: 400;
+      font-style: italic;
       line-height: 1;
       letter-spacing: 0;
     }
@@ -124,9 +129,9 @@ PAGE_STYLE = """
     .copy-block,
     .audit-highlight-card {
       background: var(--card);
-      border: 0;
+      border: 1px solid var(--line);
       border-radius: var(--radius);
-      box-shadow: var(--shadow-card);
+      box-shadow: none;
     }
 
     .panel,
@@ -143,8 +148,9 @@ PAGE_STYLE = """
 
     .hero-stat {
       padding: 14px;
-      border-radius: 10px;
-      background: #f8fafc;
+      border-radius: var(--radius);
+      background: var(--bg);
+      border: 1px solid var(--line);
     }
 
     .hero-stat strong {
@@ -185,8 +191,10 @@ PAGE_STYLE = """
     .report-chart-card h2 {
       margin: 0 0 12px;
       color: var(--navy);
-      font-size: 1.22rem;
-      line-height: 1.25;
+      font-family: 'EB Garamond', Georgia, serif;
+      font-size: 1.55rem;
+      font-weight: 400;
+      line-height: 1.2;
       letter-spacing: 0;
     }
 
@@ -203,13 +211,16 @@ PAGE_STYLE = """
     .quick-start-card {
       padding: 16px;
       box-shadow: none;
-      background: #f8fafc;
+      background: var(--bg);
+      border: 1px solid var(--line);
     }
 
     .quick-start-card h3 {
       margin: 8px 0 10px;
       color: var(--navy);
-      font-size: 1rem;
+      font-family: 'EB Garamond', Georgia, serif;
+      font-size: 1.2rem;
+      font-weight: 400;
       line-height: 1.3;
     }
 
@@ -238,12 +249,15 @@ PAGE_STYLE = """
       display: inline-flex;
       align-items: center;
       width: fit-content;
-      border-radius: 6px;
-      padding: 6px 9px;
-      background: #e2e8f0;
+      border-radius: 2px;
+      padding: 4px 8px;
+      background: var(--bg);
+      border: 1px solid var(--line);
       color: var(--ink);
-      font-size: 0.78rem;
+      font-size: 0.72rem;
       font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
       line-height: 1.2;
       white-space: nowrap;
     }
@@ -275,8 +289,9 @@ PAGE_STYLE = """
     .copy-block {
       margin: 0 0 16px;
       padding: 14px 16px;
-      border-radius: 10px;
-      background: #f8fafc;
+      border-radius: var(--radius);
+      background: var(--bg);
+      border-left: 3px solid var(--accent);
       color: var(--ink);
       line-height: 1.55;
     }
@@ -296,8 +311,8 @@ PAGE_STYLE = """
     input,
     select {
       width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
       padding: 11px 12px;
       background: var(--card);
       color: var(--ink);
@@ -306,7 +321,7 @@ PAGE_STYLE = """
 
     input:focus,
     select:focus {
-      outline: 3px solid rgba(37, 99, 235, 0.16);
+      outline: 2px solid rgba(196, 98, 45, 0.2);
       border-color: var(--accent);
     }
 
@@ -343,39 +358,55 @@ PAGE_STYLE = """
       align-items: center;
       justify-content: center;
       gap: 8px;
-      border: 0;
-      border-radius: 8px;
-      padding: 11px 15px;
+      border: 1px solid var(--navy);
+      border-radius: var(--radius);
+      padding: 10px 16px;
       background: var(--navy);
-      color: #ffffff;
+      color: #faf8f3;
+      font-size: 0.82rem;
       font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
       cursor: pointer;
       box-shadow: none;
-      transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease;
+      transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
     }
 
     .button:hover,
     .ghost-button:hover {
-      transform: translateY(-1px);
-      box-shadow: var(--shadow-card);
+      background: #2a2f3a;
+      border-color: #2a2f3a;
     }
 
     .button.secondary,
     .ghost-button {
-      background: #ffffff;
+      background: transparent;
       color: var(--ink);
-      box-shadow: inset 0 0 0 1px var(--line);
+      border-color: var(--line-strong);
+    }
+
+    .button.secondary:hover,
+    .ghost-button:hover {
+      background: var(--bg);
+      border-color: var(--navy);
+      color: var(--navy);
     }
 
     .ghost-button.danger {
       color: var(--high-text);
       background: var(--high-bg);
-      box-shadow: none;
+      border-color: transparent;
     }
 
     .print-button {
       background: var(--accent);
-      color: #ffffff;
+      border-color: var(--accent);
+      color: #faf8f3;
+    }
+
+    .print-button:hover {
+      background: #a8511f;
+      border-color: #a8511f;
     }
 
     .hero-actions {
@@ -469,7 +500,7 @@ PAGE_STYLE = """
 
     .priority-chip {
       background: var(--accent-soft);
-      color: #1d4ed8;
+      color: var(--accent);
     }
 
     .priority-badge {
@@ -508,7 +539,8 @@ PAGE_STYLE = """
     .provider-pill,
     .score-low,
     .status-running {
-      background: #e2e8f0;
+      background: var(--bg);
+      border-color: var(--line-strong);
       color: var(--ink);
     }
 
@@ -528,17 +560,17 @@ PAGE_STYLE = """
     }
 
     .audit-report-shell {
-      --report-ink: #1e293b;
-      --report-muted: #64748b;
-      --report-line: #e2e8f0;
-      --report-surface: #ffffff;
-      --report-bg: #f1f5f9;
-      --report-blue: #2563eb;
-      --report-navy: #0f172a;
-      --report-orange: #f59e0b;
-      --report-teal: #0891b2;
-      --report-green: #10b981;
-      --report-red: #ef4444;
+      --report-ink: #1a1a1a;
+      --report-muted: #6b6560;
+      --report-line: #ddd8cc;
+      --report-surface: #faf8f3;
+      --report-bg: #f5f0e8;
+      --report-blue: #c4622d;
+      --report-navy: #0c0f14;
+      --report-orange: #c4622d;
+      --report-teal: #4a7c8a;
+      --report-green: #3a6b4a;
+      --report-red: #8b3018;
       padding: 0;
       color: var(--report-ink);
     }
@@ -577,9 +609,9 @@ PAGE_STYLE = """
       margin: 0 0 18px;
       padding: 10px;
       border-radius: var(--radius);
-      background: rgba(255, 255, 255, 0.86);
-      box-shadow: var(--shadow-card);
-      backdrop-filter: blur(12px);
+      background: rgba(245, 240, 232, 0.94);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(8px);
     }
 
     .cover-layout-grid,
@@ -601,7 +633,7 @@ PAGE_STYLE = """
     }
 
     .audit-hero-primary {
-      box-shadow: var(--shadow-soft);
+      border: 1px solid var(--line-strong);
     }
 
     .audit-cover-main {
@@ -619,8 +651,10 @@ PAGE_STYLE = """
     .audit-hero-card h2 {
       margin: 0 0 12px;
       color: var(--navy);
-      font-size: clamp(1.55rem, 2vw, 2.2rem);
-      line-height: 1.12;
+      font-family: 'EB Garamond', Georgia, serif;
+      font-size: clamp(1.7rem, 2.2vw, 2.6rem);
+      font-weight: 400;
+      line-height: 1.1;
       letter-spacing: 0;
     }
 
@@ -654,7 +688,7 @@ PAGE_STYLE = """
       justify-items: center;
       gap: 12px;
       padding: 16px;
-      background: #f8fafc;
+      background: var(--bg);
     }
 
     .score-donut-widget.score-donut-high {
@@ -675,7 +709,7 @@ PAGE_STYLE = """
       display: grid;
       place-items: center;
       border-radius: 50%;
-      background: conic-gradient(var(--score-color) var(--score-pct), #e2e8f0 0);
+      background: conic-gradient(var(--score-color) var(--score-pct), var(--line) 0);
     }
 
     .score-donut-inner {
@@ -685,7 +719,7 @@ PAGE_STYLE = """
       place-items: center;
       align-content: center;
       border-radius: 50%;
-      background: #ffffff;
+      background: var(--card);
       box-shadow: inset 0 0 0 1px var(--line);
     }
 
@@ -839,7 +873,7 @@ PAGE_STYLE = """
       width: 92px;
       aspect-ratio: 1;
       border-radius: 50%;
-      background: #ffffff;
+      background: var(--card);
       box-shadow: inset 0 0 0 1px var(--line);
     }
 
@@ -939,7 +973,7 @@ PAGE_STYLE = """
     }
 
     .impact-quick-wins {
-      box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.32), var(--shadow-card);
+      border-color: rgba(58, 107, 74, 0.4);
     }
 
     .impact-quadrant-head {
@@ -954,7 +988,9 @@ PAGE_STYLE = """
     .impact-quadrant-head h3 {
       margin: 0;
       color: var(--navy);
-      font-size: 1.05rem;
+      font-family: 'EB Garamond', Georgia, serif;
+      font-size: 1.25rem;
+      font-weight: 400;
       line-height: 1.2;
     }
 
@@ -975,7 +1011,8 @@ PAGE_STYLE = """
       gap: 8px;
       padding: 12px;
       box-shadow: none;
-      background: #f8fafc;
+      background: var(--bg);
+      border: 1px solid var(--line);
     }
 
     .impact-action-card strong {
@@ -999,7 +1036,8 @@ PAGE_STYLE = """
 
     .appendix-inner-panel {
       box-shadow: none;
-      background: #f8fafc;
+      background: var(--bg);
+      border: 1px solid var(--line);
     }
 
     .technical-fact-list dd,
@@ -1101,15 +1139,15 @@ PAGE_STYLE = """
     }
 
     .priority-card-high {
-      box-shadow: 0 0 0 1px rgba(153, 27, 27, 0.12), var(--shadow-card);
+      border-left: 3px solid var(--high-text);
     }
 
     .priority-card-moderate {
-      box-shadow: 0 0 0 1px rgba(146, 64, 14, 0.14), var(--shadow-card);
+      border-left: 3px solid var(--medium-text);
     }
 
     .priority-card-healthy {
-      box-shadow: 0 0 0 1px rgba(6, 95, 70, 0.12), var(--shadow-card);
+      border-left: 3px solid var(--healthy-text);
     }
 
     .page-priority-meta {
@@ -1122,8 +1160,9 @@ PAGE_STYLE = """
       display: grid;
       gap: 6px;
       padding: 12px;
-      border-radius: 10px;
-      background: #f8fafc;
+      border-radius: var(--radius);
+      background: var(--bg);
+      border: 1px solid var(--line);
     }
 
     .page-context-note strong {
@@ -1148,8 +1187,9 @@ PAGE_STYLE = """
       display: grid;
       gap: 7px;
       padding: 13px;
-      border-radius: 10px;
-      background: #f8fafc;
+      border-radius: var(--radius);
+      background: var(--bg);
+      border: 1px solid var(--line);
     }
 
     .page-brief-block strong {
@@ -1159,15 +1199,18 @@ PAGE_STYLE = """
     }
 
     .page-brief-block.is-impact {
-      background: #eff6ff;
+      background: #f7ece5;
+      border-color: #e0c8be;
     }
 
     .page-brief-block.is-action {
-      background: #ecfeff;
+      background: #eaf1ec;
+      border-color: #c4d8c9;
     }
 
     .page-brief-block.is-angle {
-      background: #f0fdf4;
+      background: #f5f1e6;
+      border-color: #ddd4bc;
     }
 
     .page-url {
@@ -1195,7 +1238,8 @@ PAGE_STYLE = """
       margin-top: 12px;
       padding: 16px;
       box-shadow: none;
-      background: #f8fafc;
+      background: var(--bg);
+      border: 1px solid var(--line);
     }
 
     .status-pill {
@@ -1237,7 +1281,7 @@ PAGE_STYLE = """
       overflow: auto;
       border-radius: var(--radius);
       background: var(--card);
-      box-shadow: var(--shadow-card);
+      border: 1px solid var(--line);
     }
 
     .table-filter-row {
@@ -1270,12 +1314,12 @@ PAGE_STYLE = """
       position: sticky;
       top: 0;
       z-index: 1;
-      background: #f8fafc;
+      background: var(--bg);
       color: var(--muted);
       text-transform: uppercase;
-      font-size: 0.72rem;
-      font-weight: 800;
-      letter-spacing: 0.05em;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
     }
 
     .file-meta {
@@ -1293,7 +1337,7 @@ PAGE_STYLE = """
     }
 
     .cell-empty {
-      background: #f8fafc;
+      background: var(--bg);
     }
 
     .cell-text {
@@ -1325,8 +1369,9 @@ PAGE_STYLE = """
       display: grid;
       gap: 4px;
       padding: 12px 14px;
-      border-radius: 10px;
-      background: #f8fafc;
+      border-radius: var(--radius);
+      background: var(--bg);
+      border: 1px solid var(--line);
     }
 
     .meta-grid span {
@@ -1356,7 +1401,7 @@ PAGE_STYLE = """
     .accent-sage,
     .accent-ink,
     .accent-gold {
-      box-shadow: inset 4px 0 0 var(--accent), var(--shadow-card);
+      border-left: 4px solid var(--accent);
     }
 
     @page {
@@ -1437,7 +1482,8 @@ PAGE_STYLE = """
       .roadmap-card,
       .page-context-note,
       .page-brief-block {
-        box-shadow: var(--shadow-card) !important;
+        box-shadow: none !important;
+        border: 1px solid var(--line) !important;
       }
 
       .report-page {
