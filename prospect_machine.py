@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
+from pathlib import Path
 
 from audit import audit_domains
 from compare_audits import compare_audit_reports
@@ -193,6 +195,50 @@ def build_parser() -> argparse.ArgumentParser:
     ui_parser.add_argument("--host", default="127.0.0.1", help="Host to bind the local web UI")
     ui_parser.add_argument("--port", type=int, default=8787, help="Port for the local web UI")
 
+    pipeline_parser = subparsers.add_parser(
+        "pipeline",
+        help="Run the modular prospecting pipeline (discover → qualify → export)",
+    )
+    pipeline_parser.add_argument("--niches", help="Comma-separated niches, e.g. 'padel,yoga'")
+    pipeline_parser.add_argument("--domains-file", help="Text file with one domain per line (skips discovery)")
+    pipeline_parser.add_argument("--limit", type=int, default=100, help="Max domains to discover")
+    pipeline_parser.add_argument("--provider", default=DEFAULT_DISCOVER_PROVIDER, help="Search provider")
+    pipeline_parser.add_argument("--query-mode", default="auto", choices=["auto", "exact", "expand"])
+    pipeline_parser.add_argument("--delay", type=float, default=DEFAULT_DELAY, help="Delay between requests")
+    pipeline_parser.add_argument(
+        "--qualify-mode",
+        default=DEFAULT_QUALIFY_MODE,
+        choices=sorted(QUALIFY_MODE_CONFIGS),
+    )
+    pipeline_parser.add_argument("--run-id", default=None, help="Run identifier (auto-generated if omitted)")
+    pipeline_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip steps already marked done for this run-id",
+    )
+    pipeline_parser.add_argument(
+        "--skip-step",
+        action="append",
+        dest="skip_steps",
+        metavar="STEP_NAME",
+        help="Skip a named step (repeatable). E.g. --skip-step ExportStep",
+    )
+    pipeline_parser.add_argument(
+        "--runs-root",
+        default="data/runs",
+        help="Root directory for run artefacts",
+    )
+    pipeline_parser.add_argument(
+        "--final-output",
+        default=None,
+        help="Optional path to copy the final CSV outside the run directory",
+    )
+    pipeline_parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+    )
+
     return parser
 
 
@@ -365,6 +411,9 @@ def main(argv: list[str] | None = None) -> int:
             launch_ui(host=args.host, port=args.port)
             return 0
 
+        if args.command == "pipeline":
+            return _run_pipeline(args)
+
         parser.print_help()
         return 1
     except CLIError as exc:
@@ -373,6 +422,58 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interruption utilisateur.", file=sys.stderr)
         return 130
+
+
+def _run_pipeline(args: argparse.Namespace) -> int:
+    import datetime
+
+    from pipeline.base import Pipeline
+    from pipeline.steps.discovery import DiscoveryStep
+    from pipeline.steps.export import ExportStep
+    from pipeline.steps.qualification import QualificationStep
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
+    if not args.niches and not args.domains_file:
+        raise CLIError("Le pipeline attend soit --niches, soit --domains-file.")
+
+    run_id = args.run_id or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    skip_steps: set[str] = set(args.skip_steps or [])
+
+    steps = [
+        DiscoveryStep(
+            niches=parse_csv_list(args.niches) if args.niches else None,
+            domains_file=args.domains_file,
+            limit=args.limit,
+            provider_name=args.provider,
+            delay=args.delay,
+            query_mode=args.query_mode,
+        ),
+        QualificationStep(
+            delay=args.delay,
+            mode=args.qualify_mode,
+        ),
+        ExportStep(final_output=args.final_output),
+    ]
+
+    pipeline = Pipeline(
+        steps=steps,
+        run_id=run_id,
+        runs_root=Path(args.runs_root),
+        skip_steps=skip_steps,
+        resume=args.resume,
+    )
+
+    # DiscoveryStep ignores its input_path (it uses its own params),
+    # but Pipeline.run() requires an initial path — pass a sentinel.
+    sentinel = Path(args.runs_root) / run_id / "_input_sentinel"
+    final_path = pipeline.run(input_path=sentinel)
+
+    print(f"Pipeline termine | run_id={run_id} | output={final_path}")
+    return 0
 
 
 if __name__ == "__main__":
