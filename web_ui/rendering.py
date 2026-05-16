@@ -66,11 +66,6 @@ from .styles import PAGE_STYLE
 
 
 def render_dashboard(flash: str = "") -> str:
-    recent_jobs = recent_job_cards()
-    raw_preview = render_data_preview("data/domains_raw.csv", title="Dernier domains_raw.csv")
-    scored_preview = render_data_preview("data/domains_scored.csv", title="Dernier domains_scored.csv")
-    audit_preview = render_data_preview("reports/audits/audit_summary.csv", title="Dernier audit_summary.csv")
-    gsc_preview = render_data_preview("reports/gsc_report.csv", title="Dernier gsc_report.csv")
     flash_block = f'<div class="flash-banner">{html.escape(unquote(flash))}</div>' if flash else ""
 
     content = f"""
@@ -80,7 +75,7 @@ def render_dashboard(flash: str = "") -> str:
         <p class="eyebrow">Prospect Machine</p>
         <h1>ZURG 1337</h1>
         <p class="lede">
-          Outil local pour trouver des sites, les trier, puis sortir un angle d'audit exploitable.
+          Trouver des sites, les trier, sortir un angle d'audit exploitable.
         </p>
         <div class="panel-actions hero-actions">
           <form method="post" action="/reset-pipeline" class="inline-form">
@@ -89,62 +84,16 @@ def render_dashboard(flash: str = "") -> str:
           <span class="muted">Nettoie raw, scored, audits et rapports GSC generes localement.</span>
         </div>
       </div>
-      <div class="hero-panel">
-        <div class="hero-stat"><strong>4 modules</strong><span>discover, qualify, audit, gsc</span></div>
-        <div class="hero-stat"><strong>Guidage integre</strong><span>les cards indiquent quoi remplir et quoi lire ensuite</span></div>
-        <div class="hero-stat"><strong>Jobs locaux</strong><span>aucun service externe requis</span></div>
-        <div class="hero-stat"><strong>Fichiers simples</strong><span>CSV et JSON reutilisables partout</span></div>
-      </div>
-    </div>
-
-    <div class="grid onboarding-grid">
-      <section class="panel onboarding-panel">
-        <div class="panel-head">
-          <h2>Commencer Ici</h2>
-          <span class="badge">workflow rapide</span>
-        </div>
-        <div class="quick-start-grid">
-          <article class="quick-start-card">
-            <p class="eyebrow">Cas 1</p>
-            <h3>Je veux analyser un seul site</h3>
-            <ol class="flow compact-flow">
-              <li>Va dans la card <strong>Audit</strong>.</li>
-              <li>Remplis seulement le champ <strong>Site</strong> avec `example.com`.</li>
-              <li>Laisse `Max pages` sur `{DEFAULT_UI_AUDIT_MAX_PAGES}` pour couvrir les petits sites.</li>
-              <li>Ouvre ensuite `reports/audits/audit_summary.csv` puis le JSON du domaine.</li>
-            </ol>
-          </article>
-          <article class="quick-start-card">
-            <p class="eyebrow">Cas 2</p>
-            <h3>Je veux faire de la prospection en lot</h3>
-            <ol class="flow compact-flow">
-              <li><strong>Discover</strong> pour produire une liste brute.</li>
-              <li><strong>Qualify</strong> pour garder les bons candidats.</li>
-              <li><strong>Audit</strong> sur les meilleurs scores.</li>
-              <li><strong>GSC</strong> seulement si tu as des exports client.</li>
-            </ol>
-          </article>
-          <article class="quick-start-card">
-            <p class="eyebrow">A savoir</p>
-            <h3>Ce que tu dois lire dans un rapport</h3>
-            <ul class="clean-list compact-list">
-              <li><strong>Points à corriger d'abord</strong>: les sujets à regarder en priorité.</li>
-              <li><strong>Opportunités détectées</strong>: ce qui est le plus simple à valoriser commercialement.</li>
-              <li><strong>Pages à revoir en premier</strong>: les exemples concrets à citer dans un message ou une courte vidéo.</li>
-            </ul>
-          </article>
-        </div>
-      </section>
-    </div>
-
-    <div class="grid two">
-      {render_discover_card()}
-      {render_qualify_card()}
     </div>
 
     <div class="grid two">
       {render_audit_card()}
       {render_gsc_card()}
+    </div>
+
+    <div class="grid two">
+      {render_discover_card()}
+      {render_qualify_card()}
     </div>
 
     <div class="grid two">
@@ -160,27 +109,6 @@ def render_dashboard(flash: str = "") -> str:
         </div>
         {recent_job_cards()}
       </section>
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Pipeline conseille</h2>
-        </div>
-        <ol class="flow">
-          <li>Discover: genere une liste de domaines.</li>
-          <li>Qualify: garde les sites qui ressemblent a de bons candidats editoriaux.</li>
-          <li>Audit: creuse les meilleurs pour sortir des arguments concrets.</li>
-          <li>GSC: ajoute cette brique seulement si tu as des exports client.</li>
-        </ol>
-      </section>
-    </div>
-
-    <div class="grid two">
-      {raw_preview}
-      {scored_preview}
-    </div>
-
-    <div class="grid two">
-      {audit_preview}
-      {gsc_preview}
     </div>
     """
     return page_shell("Prospect Machine UI", content)
