@@ -3006,11 +3006,32 @@ def render_score_gauge(score: int, score_class: str) -> str:
     return f"""
         <svg class="score-gauge {gauge_class}" viewBox="0 0 160 160" role="img" aria-label="Score global {score} sur 100">
           <defs>
+            <linearGradient id="gauge-gradient-high" x1="28" y1="132" x2="132" y2="28" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#0F766E"></stop>
+              <stop offset="52%" stop-color="#10B981"></stop>
+              <stop offset="100%" stop-color="#D6B25E"></stop>
+            </linearGradient>
+            <linearGradient id="gauge-gradient-mid" x1="28" y1="132" x2="132" y2="28" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#1D4ED8"></stop>
+              <stop offset="58%" stop-color="#2D5BFF"></stop>
+              <stop offset="100%" stop-color="#D6B25E"></stop>
+            </linearGradient>
+            <linearGradient id="gauge-gradient-low" x1="28" y1="132" x2="132" y2="28" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#7F1D1D"></stop>
+              <stop offset="54%" stop-color="#DC2626"></stop>
+              <stop offset="100%" stop-color="#C9973A"></stop>
+            </linearGradient>
+            <radialGradient id="gauge-center-glow" cx="50%" cy="42%" r="62%">
+              <stop offset="0%" stop-color="#FFFFFF"></stop>
+              <stop offset="64%" stop-color="#F9F8F6"></stop>
+              <stop offset="100%" stop-color="#EFE9DD"></stop>
+            </radialGradient>
             <filter id="gauge-shadow" x="-18%" y="-18%" width="136%" height="136%">
               <feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#1A1917" flood-opacity="0.10"></feDropShadow>
             </filter>
           </defs>
           <circle class="gauge-plate" cx="80" cy="80" r="64"></circle>
+          <circle class="gauge-aura" cx="80" cy="80" r="57"></circle>
           <circle class="gauge-ticks" cx="80" cy="80" r="59"></circle>
           <circle class="gauge-track" cx="80" cy="80" r="50"></circle>
           <circle class="gauge-meter" cx="80" cy="80" r="50"
@@ -5111,15 +5132,20 @@ def render_report_styles() -> str:
       stroke-width: 1;
       filter: url(#gauge-shadow);
     }
+    .premium-report .gauge-aura {
+      fill: none;
+      stroke-width: 12;
+      opacity: 0.12;
+    }
     .premium-report .gauge-ticks {
       fill: none;
-      stroke: rgba(160,154,148,0.42);
       stroke-width: 2;
       stroke-linecap: round;
       stroke-dasharray: 0.1 7.3;
+      opacity: 0.68;
     }
     .premium-report .gauge-center {
-      fill: #F9F8F6;
+      fill: url(#gauge-center-glow);
       stroke: rgba(232,228,220,0.88);
       stroke-width: 1;
     }
@@ -5133,9 +5159,15 @@ def render_report_styles() -> str:
       stroke-linecap: round;
       transition: stroke-dashoffset 240ms ease;
     }
-    .premium-report .score-gauge.gauge-score-high .gauge-meter { stroke: var(--color-score-high); }
-    .premium-report .score-gauge.gauge-score-mid .gauge-meter { stroke: var(--color-accent); }
-    .premium-report .score-gauge.gauge-score-low .gauge-meter { stroke: var(--color-score-low); }
+    .premium-report .score-gauge.gauge-score-high .gauge-meter { stroke: url(#gauge-gradient-high); }
+    .premium-report .score-gauge.gauge-score-mid .gauge-meter { stroke: url(#gauge-gradient-mid); }
+    .premium-report .score-gauge.gauge-score-low .gauge-meter { stroke: url(#gauge-gradient-low); }
+    .premium-report .score-gauge.gauge-score-high .gauge-aura { stroke: #10B981; }
+    .premium-report .score-gauge.gauge-score-mid .gauge-aura { stroke: #2D5BFF; }
+    .premium-report .score-gauge.gauge-score-low .gauge-aura { stroke: #DC2626; }
+    .premium-report .score-gauge.gauge-score-high .gauge-ticks { stroke: rgba(15,118,110,0.46); }
+    .premium-report .score-gauge.gauge-score-mid .gauge-ticks { stroke: rgba(45,91,255,0.42); }
+    .premium-report .score-gauge.gauge-score-low .gauge-ticks { stroke: rgba(127,29,29,0.42); }
     .premium-report .score-gauge .gauge-value {
       fill: var(--color-text-primary);
       font-family: var(--font-display);
