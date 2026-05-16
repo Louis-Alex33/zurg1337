@@ -1,0 +1,15 @@
+# Intent scoring weights — must sum to 1.0
+# Each signal is normalised to [0, 1] before weighting.
+# Higher score = more stagnant/neglected site = stronger opportunity signal.
+
+weights:
+  post_age:    0.35   # last_post_age_days  (>180j = inactif)
+  wayback:     0.30   # déclin des snapshots Wayback sur 8 trimestres
+  whois:       0.20   # ratio âge domaine / activité récente
+  ga_obsolete: 0.15   # UA tag sans GA4
+
+# Thresholds
+post_age_inactive_days: 180      # au-delà → signal maximal
+wayback_quarters: 8              # nombre de trimestres analysés
+wayback_min_snapshots: 1         # min snapshots/trimestre pour compter comme actif
+whois_stagnation_ratio: 0.5      # age_domain_years / (last_post_age_days/365) au-dessus duquel c'est de la stagnation
